@@ -29,7 +29,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Callable, Mapping, TypeGuard, cast
+from typing import Any, Callable, Mapping, TypedDict, TypeGuard, cast
 from collections.abc import Generator
 from time import sleep
 from io import BytesIO
@@ -152,15 +152,20 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+class _CachedMapUrl(TypedDict):
+    url: str
+    expires_time: int
+
+
 class DreameMapMowerMapManager:
     def __init__(self, _protocol: DreameMowerProtocol) -> None:
-        self._map_list_object_name: str = None
-        self._map_list_md5: str = None
-        self._recovery_map_list_object_name: str = None
-        self._update_callback = None
-        self._change_callback = None
-        self._error_callback = None
-        self._update_timer: Timer = None
+        self._map_list_object_name: str | None = None
+        self._map_list_md5: str | None = None
+        self._recovery_map_list_object_name: str | None = None
+        self._update_callback: Callable[[], None] | None = None
+        self._change_callback: Callable[[], None] | None = None
+        self._error_callback: Callable[[Exception], None] | None = None
+        self._update_timer: Timer | None = None
         self._update_running: bool = False
         self._update_interval: float = 10
         self._device_running: bool = False
@@ -178,6 +183,8 @@ class DreameMapMowerMapManager:
         # map-data resets. Keep both the lock and entries for their lifetime.
         self._request_queue_lock = Lock()
         self._request_queue: dict[str, bool] = {}
+        self._aes_iv: str | None = None
+        self._capability: DreameMowerDeviceCapability | None = None
 
         self._init_data()
 
@@ -186,32 +193,30 @@ class DreameMapMowerMapManager:
         self.optimizer = DreameMowerMapOptimizer()
 
     def _init_data(self) -> None:
-        self._map_data: MapData = None
-        self._current_frame_id: int = None
-        self._current_map_id: int = None
-        self._current_timestamp_ms: int = None
-        self._file_urls: dict[str, str] = {}
+        self._map_data: MapData | None = None
+        self._current_frame_id: int | None = None
+        self._current_map_id: int | None = None
+        self._current_timestamp_ms: int | None = None
+        self._file_urls: dict[str, _CachedMapUrl] = {}
         self._saved_map_data: dict[int, MapData] = {}
         self._map_list: list[int] = []
         self._need_map_request: bool = False
-        self._need_map_list_request: bool = None
-        self._need_recovery_map_list_request: bool = None
-        self._map_data_queue: dict[int, MapData] = {}
-        self._updated_frame_id: int = None
-        self._selected_map_id: int = None
-        self._latest_map_data_time: int = None
-        self._latest_object_name_time: int = None
-        self._latest_map_timestamp_ms: int = None
-        self._latest_map_id: int = None
-        self._last_p_request_map_id: int = None
-        self._last_p_request_frame_id: int = None
-        self._last_p_request_time: int = None
-        self._last_robot_time: int = None
-        self._map_request_time: int = None
+        self._need_map_list_request: bool | None = None
+        self._need_recovery_map_list_request: bool | None = None
+        self._map_data_queue: dict[int, dict[int, MapDataPartial]] = {}
+        self._updated_frame_id: int | None = None
+        self._selected_map_id: int | None = None
+        self._latest_map_data_time: int | None = None
+        self._latest_object_name_time: int | None = None
+        self._latest_map_timestamp_ms: int | None = None
+        self._latest_map_id: int | None = None
+        self._last_p_request_map_id: int | None = None
+        self._last_p_request_frame_id: int | None = None
+        self._last_p_request_time: float | None = None
+        self._last_robot_time: int | None = None
+        self._map_request_time: int | None = None
         self._map_request_count: int = 0
-        self._new_map_request_time: int = None
-        self._aes_iv: str = None
-        self._capability: DreameMowerDeviceCapability = None
+        self._new_map_request_time: float | None = None
 
     def _request_map_from_cloud(self) -> bool:
         if self._protocol.cloud.dreame_cloud:
@@ -258,18 +263,18 @@ class DreameMapMowerMapManager:
         if object_name_result is None:
             _LOGGER.warn("Getting object_name from cloud failed")
 
-        partial_map_data = None
+        partial_map_data: list[MapDataPartial] = []
         if len(map_data_result):
             partial_map_data = []
             self._latest_map_data_time = map_data_result[0][MAP_PARAMETER_TIME] + 1
 
             for data in map_data_result:
-                partial_map_data.append(
-                    self._decode_map_partial(
-                        json.loads(data[MAP_PARAMETER_VALUE if MAP_PARAMETER_VALUE in data else "val"])[0],
-                        data[MAP_PARAMETER_TIME] * 1000 if data.get(MAP_PARAMETER_TIME) else None,
-                    )
+                partial = self._decode_map_partial(
+                    json.loads(data[MAP_PARAMETER_VALUE if MAP_PARAMETER_VALUE in data else "val"])[0],
+                    data[MAP_PARAMETER_TIME] * 1000 if data.get(MAP_PARAMETER_TIME) else None,
                 )
+                if partial is not None:
+                    partial_map_data.append(partial)
 
         object_name = None
         object_name_timestamp = None
@@ -285,7 +290,7 @@ class DreameMapMowerMapManager:
                     object_name_timestamp = timestamp * 1000
 
         self._add_cloud_map_data(partial_map_data, object_name, object_name_timestamp)
-        return len(map_data_result) or object_name is not None
+        return bool(map_data_result) or object_name is not None
 
     def _request_map(self, parameters: dict[str, Any] | None = None) -> dict[str, Any] | None:
         payload = map_frame_parameters(parameters)
@@ -293,7 +298,8 @@ class DreameMapMowerMapManager:
         try:
             _LOGGER.debug("DreameMapMowerMapManager._request_map %s", payload)
             mapping = DreameMowerActionMapping[DreameMowerAction.REQUEST_MAP]
-            return self._protocol.action(mapping["siid"], mapping["aiid"], payload, 0)
+            response = self._protocol.action(mapping["siid"], mapping["aiid"], payload, 0)
+            return response if isinstance(response, dict) else None
         except Exception as ex:
             _LOGGER.warning("DreameMapMowerMapManager._request_map failed: %s", type(ex).__name__)
         return None
@@ -302,14 +308,13 @@ class DreameMapMowerMapManager:
         """Return whether an app action response contains a successful map payload."""
         if not isinstance(result, Mapping):
             if result is not None:
-                _LOGGER.debug("Ignoring non-mapping map response: %s", result)
+                _LOGGER.debug("Ignoring non-mapping map response: %s", type(result).__name__)
             return False
         return result.get(MAP_PARAMETER_CODE) == 0
 
     def _read_i_map_response(self, result: Mapping[str, Any], start_time: int | None) -> tuple[str | None, str | None]:
         """Read frame metadata without downloading or applying map contents."""
         out = result[MAP_PARAMETER_OUT]
-        _LOGGER.debug("Response from device %s", out)
         has_map = False
         object_name = None
         raw_map_data = None
@@ -317,8 +322,7 @@ class DreameMapMowerMapManager:
             value = prop.get(MAP_PARAMETER_VALUE)
             if value is None:
                 _LOGGER.debug(
-                    "Map response property has no value field: %s",
-                    prop,
+                    "Map response property has no value field",
                 )
                 continue
             if value != "":
@@ -345,7 +349,8 @@ class DreameMapMowerMapManager:
                                 object_name = f"{object_name},{values[2]}"
 
         if has_map:
-            self._latest_object_name_time = int(self._last_robot_time / 1000) + 1
+            if self._last_robot_time is not None:
+                self._latest_object_name_time = int(self._last_robot_time / 1000) + 1
             self._map_request_time = None
 
         return object_name, raw_map_data
@@ -476,8 +481,7 @@ class DreameMapMowerMapManager:
             value = prop.get(MAP_PARAMETER_VALUE)
             if value is None:
                 _LOGGER.debug(
-                    "P-map response property has no value field: %s",
-                    prop,
+                    "P-map response property has no value field",
                 )
                 continue
             if value != "":
@@ -496,7 +500,7 @@ class DreameMapMowerMapManager:
         if self._map_action_succeeded(result):
             self.request_map_list()
 
-    def _request_w_map(self) -> None:
+    def _request_w_map(self) -> Any:
         try:
             _LOGGER.info("Request wifi map from device")
             mapping = DreameMowerActionMapping[DreameMowerAction.WIFI_MAP]
@@ -561,7 +565,7 @@ class DreameMapMowerMapManager:
 
         frame_id = self._current_frame_id
         map_data_queue = copy.deepcopy(self._map_data_queue)
-        for k, v in map_data_queue.items():
+        for k in map_data_queue:
             if k != self._latest_map_id:
                 del self._map_data_queue[k]
 
@@ -569,7 +573,7 @@ class DreameMapMowerMapManager:
             return
 
         queued_frames = copy.deepcopy(self._map_data_queue[self._latest_map_id])
-        for k, v in queued_frames.items():
+        for k in queued_frames:
             if k <= frame_id:
                 del self._map_data_queue[self._latest_map_id][k]
 
@@ -617,7 +621,9 @@ class DreameMapMowerMapManager:
 
         return len(self._map_data_queue[self._latest_map_id])
 
-    def _get_object_file_data(self, object_name: str = "", timestamp=None) -> Tuple[Any, Optional[str]]:
+    def _get_object_file_data(
+        self, object_name: str = "", timestamp: int | None = None,
+    ) -> tuple[bytes | None, str | None]:
         key = None
         if object_name and "," in object_name:
             values = object_name.split(",")
@@ -626,12 +632,14 @@ class DreameMapMowerMapManager:
         response = self._get_interim_file_data(object_name, timestamp)
         return response, key
 
-    def _get_interim_file_data(self, object_name: str = "", timestamp=None) -> str | None:
+    def _get_interim_file_data(
+        self, object_name: str = "", timestamp: int | None = None,
+    ) -> bytes | None:
         if self._protocol.cloud.logged_in:
             if object_name is None or object_name == "":
                 _LOGGER.info("Get object name from cloud")
                 if self._protocol.cloud.dreame_cloud:
-                    object_name_result = self._protocol.cloud.get_properties(DIID(DreameMowerProperty.OBJECT_NAME))
+                    object_name_result = self._protocol.cloud.get_properties(cast(str, DIID(DreameMowerProperty.OBJECT_NAME)))
                     if object_name_result:
                         object_name_result = object_name_result[0][MAP_PARAMETER_VALUE]
                         object_name = object_name_result[0]
@@ -650,11 +658,12 @@ class DreameMapMowerMapManager:
             if url:
                 _LOGGER.info("Request map data from cloud")
                 response = self._protocol.cloud.get_file(url)
-                if response is not None:
+                if isinstance(response, bytes):
                     return response
                 _LOGGER.warning("Request map data from cloud failed")
                 if self._file_urls.get(object_name):
                     del self._file_urls[object_name]
+        return None
 
     def _get_file_url(self, object_name: str, interim: bool = True) -> str | None:
         url = None
@@ -670,7 +679,7 @@ class DreameMapMowerMapManager:
                 if interim
                 else self._protocol.cloud.get_file_url(object_name)
             )
-            if response:
+            if isinstance(response, str) and response:
                 self._file_urls[object_name] = {
                     MAP_PARAMETER_URL: response,
                     MAP_PARAMETER_EXPIRES_TIME: now + (30 * 60),
@@ -678,7 +687,10 @@ class DreameMapMowerMapManager:
                 url = self._file_urls[object_name][MAP_PARAMETER_URL]
         return url
 
-    def _decode_map_partial(self, raw_map, timestamp=None, key=None) -> MapDataPartial | None:
+    def _decode_map_partial(
+        self, raw_map: str, timestamp: int | None = None,
+        key: str | None = None,
+    ) -> MapDataPartial | None:
         partial_map = DreameMowerMapDecoder.decode_map_partial(raw_map, self._aes_iv, key)
         if partial_map is not None:
             # After restart or unsuccessful start robot returns timestamp_ms as uptime and that messes up with the latest map/frame id detection.
@@ -687,21 +699,28 @@ class DreameMapMowerMapManager:
             if timestamp and (partial_map.timestamp_ms is None or partial_map.timestamp_ms < 1577826000000):
                 partial_map.timestamp_ms = timestamp
 
-            if self._latest_map_timestamp_ms is None or partial_map.timestamp_ms > self._latest_map_timestamp_ms:
+            if self._latest_map_timestamp_ms is None or (
+                partial_map.timestamp_ms is not None
+                and partial_map.timestamp_ms > self._latest_map_timestamp_ms
+            ):
                 self._latest_map_timestamp_ms = partial_map.timestamp_ms
                 self._latest_map_id = partial_map.map_id
 
         return partial_map
 
-    def _add_cloud_map_data(self, partial_map_data, object_name, object_name_timestamp):
+    def _add_cloud_map_data(
+        self, partial_map_data: list[MapDataPartial] | None,
+        object_name: str | None, object_name_timestamp: int | None,
+    ) -> bool | None:
         self._run_map_update_plan(self._add_cloud_map_prefix_plan(partial_map_data, object_name))
 
         if object_name is not None:
-            _LOGGER.info("New object name received: %s", object_name)
+            _LOGGER.info("New map object received")
             response, key = self._get_object_file_data(object_name, object_name_timestamp)
             if response:
                 partial_map = self._decode_map_partial(response.decode(), object_name_timestamp, key)
                 return self._run_map_update_plan(self._add_object_map_plan(partial_map))
+        return None
 
     def _add_cloud_map_prefix_plan(
         self, partial_map_data: list[MapDataPartial] | None, object_name: str | None,
@@ -719,7 +738,10 @@ class DreameMapMowerMapManager:
             next_frame_id = self._current_frame_id + 1
 
         if (
-            not (yield from self._add_map_data_plan(self._unqueue_partial_map(self._latest_map_id, next_frame_id)))
+            not (yield from self._add_map_data_plan(
+                self._unqueue_partial_map(self._latest_map_id, next_frame_id)
+                if self._latest_map_id is not None else None
+            ))
             and object_name is None
         ):
             self._delete_invalid_partial_maps()
@@ -753,12 +775,14 @@ class DreameMapMowerMapManager:
                 yield MapUpdateRequest("full" if self._protocol.dreame_cloud else "new")
         return None
 
-    def _add_map_data_file(self, object_name: str, timestamp) -> None:
+    def _add_map_data_file(self, object_name: str, timestamp: int | None) -> None:
         response, key = self._get_object_file_data(object_name, timestamp)
         if response is not None:
             self._add_raw_map_data(response.decode(), timestamp, key)
 
-    def _add_raw_map_data(self, raw_map: str, timestamp=None, key=None) -> bool:
+    def _add_raw_map_data(
+        self, raw_map: str, timestamp: int | None = None, key: str | None = None,
+    ) -> bool:
         return self._add_map_data(self._decode_map_partial(raw_map, timestamp, key))
 
     def _dispatch_map_update(self, request: MapUpdateRequest) -> None:
@@ -797,7 +821,7 @@ class DreameMapMowerMapManager:
         self, partial_map: MapDataPartial | None,
     ) -> Generator[MapUpdateRequest, None, bool]:
         """Apply state in order, yielding before each I/O-capable follow-up."""
-        if partial_map is None:
+        if partial_map is None or partial_map.map_id is None or partial_map.frame_id is None:
             return False
 
         if (
@@ -839,11 +863,12 @@ class DreameMapMowerMapManager:
 
         if (
             self._current_frame_id is not None
-            and self._current_frame_id is not None
             and partial_map.frame_id < self._current_frame_id
         ):
             if (
                 partial_map.frame_type != MapFrameType.I.value
+                or partial_map.timestamp_ms is None
+                or self._current_timestamp_ms is None
                 or partial_map.timestamp_ms <= self._current_timestamp_ms
             ):
                 _LOGGER.info(
@@ -946,7 +971,8 @@ class DreameMapMowerMapManager:
                 self._current_map_id, self._current_frame_id,
                 self._current_timestamp_ms, self._latest_map_id,
             )
-            if saved_map_data is not None and saved_map_data.saved_map:
+            if (saved_map_data is not None and saved_map_data.saved_map
+                    and saved_map_data.map_id is not None):
                 if saved_map_data.map_id in self._saved_map_data:
                     map_data.temporary_map = False
                     self._selected_map_id = saved_map_data.map_id
@@ -996,7 +1022,10 @@ class DreameMapMowerMapManager:
                 # freshness checks before committing the previously decoded frame.
                 return (yield from self._add_map_data_plan(partial_map))
 
-            DreameMowerMapDecoder.set_segment_cleanset(map_data, map_data.cleanset, self._capability)
+            DreameMowerMapDecoder.set_segment_cleanset(
+                map_data, map_data.cleanset if isinstance(map_data.cleanset, dict) else None,
+                self._capability,
+            )
 
             if not map_data.saved_map:
                 if self._vslam_map:
@@ -1040,7 +1069,7 @@ class DreameMapMowerMapManager:
                         and self._map_data is not None
                         and self._updated_frame_id is not None
                     ):
-                        if map_data.frame_id <= self._updated_frame_id + 1:
+                        if map_data.frame_id is not None and map_data.frame_id <= self._updated_frame_id + 1:
                             if not self._map_data.empty_map and (
                                 self._map_data.saved_map_status == 2
                                 or (self._vslam_map and self._map_data.saved_map_status == 1)
@@ -1151,8 +1180,7 @@ class DreameMapMowerMapManager:
             value = prop.get(MAP_PARAMETER_VALUE)
             if value is None:
                 _LOGGER.debug(
-                    "Map property update has no value field: %s",
-                    prop,
+                    "Map property update has no value field",
                 )
                 continue
             if value != "":
@@ -1195,7 +1223,7 @@ class DreameMapMowerMapManager:
             return None
         return self._map_data
 
-    def get_obstacle_image(self, map_data, index):
+    def get_obstacle_image(self, map_data: MapData | None, index: int | str) -> tuple[bytes | None, Obstacle | None]:
         index = str(index)
         if map_data and map_data.obstacles and index in map_data.obstacles:
             obstacle = map_data.obstacles[index]
@@ -1224,7 +1252,7 @@ class DreameMapMowerMapManager:
 
                             cipher = Cipher(
                                 algorithms.AES(
-                                    bytearray.fromhex(hashlib.md5((obstacle.key).encode("utf-8")).hexdigest())
+                                    bytes.fromhex(hashlib.md5((obstacle.key).encode("utf-8")).hexdigest())
                                 ),
                                 modes.ECB(),
                                 backend=default_backend(),
@@ -1249,7 +1277,7 @@ class DreameMapMowerMapManager:
                     )
         return (None, None)
 
-    def get_history_map(self, object_name, key=None):
+    def get_history_map(self, object_name: str | None, key: str | None = None) -> MapData | None:
         if object_name and len(object_name):
             try:
                 _LOGGER.info(
@@ -1264,7 +1292,10 @@ class DreameMapMowerMapManager:
                             response.decode(), self._vslam_map, None, self._aes_iv, key
                         )
                         if map_data:
-                            DreameMowerMapDecoder.set_segment_cleanset(map_data, map_data.cleanset, self._capability)
+                            DreameMowerMapDecoder.set_segment_cleanset(
+                                map_data, map_data.cleanset if isinstance(map_data.cleanset, dict) else None,
+                                self._capability,
+                            )
                             map_data.history_map = True
                             if map_data.need_optimization:
                                 map_data = self.optimizer.optimize(map_data, saved_map_data)
@@ -1275,28 +1306,46 @@ class DreameMapMowerMapManager:
                     "History map decoding failed: %s",
                     type(ex).__name__,
                 )
+        return None
 
-    def get_recovery_map(self, map_id, index):
+    def get_recovery_map(self, map_id: int, index: int | str) -> MapData | None:
+        try:
+            index = int(index) - 1
+        except ValueError:
+            return None
+        if index < 0:
+            return None
         if map_id in self._map_list:
             recovery_map_list = self._saved_map_data[map_id].recovery_map_list
-            index = int(index) - 1
             if recovery_map_list and len(recovery_map_list) > index:
-                if recovery_map_list[index].map_data is None:
-                    recovery_map_list[index].map_data = DreameMowerMapDecoder.decode_saved_map(
-                        recovery_map_list[index].raw_map,
+                recovery = recovery_map_list[index]
+                if recovery.map_data is None:
+                    if recovery.raw_map is None:
+                        return None
+                    map_data = DreameMowerMapDecoder.decode_saved_map(
+                        recovery.raw_map,
                         self._vslam_map,
                         self._saved_map_data[map_id].rotation,
                         self._aes_iv,
                     )
-                    recovery_map_list[index].map_data.last_updated = recovery_map_list[index].date.timestamp()
-                    recovery_map_list[index].map_data.recovery_map_type = recovery_map_list[index].map_type
-                    recovery_map_list[index].map_data.recovery_map = True
-                return recovery_map_list[index].map_data
+                    if map_data is None:
+                        return None
+                    map_data.last_updated = recovery.date.timestamp() if recovery.date is not None else None
+                    map_data.recovery_map_type = recovery.map_type
+                    map_data.recovery_map = True
+                    recovery.map_data = map_data
+                return recovery.map_data
+        return None
 
-    def get_recovery_map_file(self, map_id, index):
+    def get_recovery_map_file(self, map_id: int, index: int | str) -> tuple[bytes | None, str | None, str | None]:
+        try:
+            index = int(index) - 1
+        except ValueError:
+            return None, None, None
+        if index < 0:
+            return None, None, None
         if map_id in self._map_list:
             recovery_map_list = self._saved_map_data[map_id].recovery_map_list
-            index = int(index) - 1
             if recovery_map_list and len(recovery_map_list) > index:
                 object_name = recovery_map_list[index].object_name
                 if object_name and object_name != "":
@@ -1317,11 +1366,14 @@ class DreameMapMowerMapManager:
                         )
         return None, None, None
 
-    def listen(self, change_callback, update_callback) -> None:
+    def listen(
+        self, change_callback: Callable[[], None] | None,
+        update_callback: Callable[[], None] | None,
+    ) -> None:
         self._change_callback = change_callback
         self._update_callback = update_callback
 
-    def listen_error(self, callback) -> None:
+    def listen_error(self, callback: Callable[[Exception], None] | None) -> None:
         self._error_callback = callback
 
     def disconnect(self) -> None:
@@ -1332,7 +1384,7 @@ class DreameMapMowerMapManager:
         self._change_callback = None
         self._error_callback = None
 
-    def schedule_update(self, wait: float = None) -> None:
+    def schedule_update(self, wait: float | None = None) -> None:
         if wait == None:
             wait = self._update_interval
         if self._update_timer is not None:
@@ -1379,7 +1431,7 @@ class DreameMapMowerMapManager:
             return self._request_map()
         if request.kind == "changed":
             return self._map_data_changed()
-        result = self._protocol.cloud.get_properties(DIID(DreameMowerProperty.OBJECT_NAME))
+        result = self._protocol.cloud.get_properties(cast(str, DIID(DreameMowerProperty.OBJECT_NAME)))
         if result and MAP_PARAMETER_VALUE in result[0]:
             return self._add_cloud_map_data(None, result[0][MAP_PARAMETER_VALUE], result[0].get("updateDate"))
         return None
@@ -1455,7 +1507,7 @@ class DreameMapMowerMapManager:
                     if self._map_data and not self._map_data.empty_map:
                         _LOGGER.info(
                             "Need map request: %.2f",
-                            time.time() - (self._map_data.last_updated),
+                            time.time() - self._map_data.last_updated if self._map_data.last_updated is not None else 0,
                         )
                         yield MapPollRequest("full")
                     else:
@@ -1482,7 +1534,7 @@ class DreameMapMowerMapManager:
         if aes_iv:
             self._aes_iv = aes_iv
 
-    def set_capability(self, capability) -> None:
+    def set_capability(self, capability: DreameMowerDeviceCapability) -> None:
         if capability:
             self._capability = capability
             if not capability.lidar_navigation:
@@ -1504,8 +1556,8 @@ class DreameMapMowerMapManager:
                     # Let the existing scheduled worker perform map I/O.
                     self._map_request_count = 0
                     self._need_map_request = True
-                elif self._map_data and self._map_data.saved_map_status == 1:
-                    saved_map_data = self._map_manager.selected_map
+                elif (self._map_data and self._map_data.saved_map_status == 1
+                        and (saved_map_data := self.selected_map) is not None):
                     self._map_data.segments = copy.deepcopy(saved_map_data.segments)
                     self._map_data.data = copy.deepcopy(saved_map_data.data)
                     self._map_data.pixel_type = copy.deepcopy(saved_map_data.pixel_type)
@@ -1563,7 +1615,7 @@ class DreameMapMowerMapManager:
     def request_next_recovery_map_list(self) -> None:
         self._need_recovery_map_list_request = True
 
-    def set_map_list_object_name(self, object_name: str, md5: str = None) -> bool:
+    def set_map_list_object_name(self, object_name: str, md5: str | None = None) -> bool:
         if object_name and object_name != "":
             if self._map_list_object_name != object_name or self._map_list_md5 != md5:
                 self._map_list_object_name = object_name
@@ -1599,35 +1651,41 @@ class DreameMapMowerMapManager:
     def _apply_map_list(self, response: bytes | None) -> None:
         """Apply downloaded map-list data using the shared reconciliation policy."""
         if response:
-            self._need_map_list_request = False
-            raw_map = response.decode()
-
+            # Validate the complete snapshot before deleting or replacing cached
+            # maps. A failed entry must keep the refresh retryable.
             try:
-                map_info = json.loads(raw_map)
-            except:
-                _LOGGER.warn("Get Map List json parse failed")
+                map_info = json.loads(response)
+                if not isinstance(map_info, dict):
+                    raise ValueError("Map list must be an object")
+                saved_map_list = map_info[MAP_PARAMETER_MAPSTR]
+                selected_map_id = map_info[MAP_PARAMETER_CURR_ID]
+                if not isinstance(saved_map_list, list) or type(selected_map_id) is not int:
+                    raise ValueError("Invalid map list fields")
+                map_list: dict[int, MapData] = {}
+                for entry in saved_map_list:
+                    if not isinstance(entry, dict) or not isinstance(entry.get(MAP_PARAMETER_MAP), str):
+                        raise ValueError("Invalid saved map entry")
+                    saved_map_data = DreameMowerMapDecoder.decode_saved_map(
+                        entry[MAP_PARAMETER_MAP], self._vslam_map,
+                        int(entry[MAP_PARAMETER_ANGLE]) if entry.get(MAP_PARAMETER_ANGLE) else 0,
+                        self._aes_iv,
+                    )
+                    if saved_map_data is None or saved_map_data.map_id is None:
+                        raise ValueError("Saved map could not be decoded")
+                    name = entry.get(MAP_PARAMETER_NAME)
+                    if name is not None and not isinstance(name, str):
+                        raise ValueError("Invalid saved map name")
+                    if name:
+                        saved_map_data.custom_name = saved_map_data.map_name = name
+                    map_list[saved_map_data.map_id] = saved_map_data
+            except (ValueError, TypeError, KeyError, OverflowError):
+                _LOGGER.warning("Get Map List parse failed")
                 return
 
-            saved_map_list = map_info[MAP_PARAMETER_MAPSTR]
+            self._need_map_list_request = False
             changed = False
             now = time.time()
-            map_list = {}
             if saved_map_list:
-                for v in saved_map_list:
-                    if v.get(MAP_PARAMETER_MAP):
-                        saved_map_data = DreameMowerMapDecoder.decode_saved_map(
-                            v[MAP_PARAMETER_MAP],
-                            self._vslam_map,
-                            int(v[MAP_PARAMETER_ANGLE]) if v.get(MAP_PARAMETER_ANGLE) else 0,
-                            self._aes_iv,
-                        )
-                        if saved_map_data is not None:
-                            name = v.get(MAP_PARAMETER_NAME)
-                            if name:
-                                saved_map_data.custom_name = name
-                                saved_map_data.map_name = name
-                            map_list[saved_map_data.map_id] = saved_map_data
-
                 for map_id, saved_map_data in sorted(map_list.items()):
                     if map_id in self._saved_map_data:
                         if self._selected_map_id == map_id and self._map_data:
@@ -1663,7 +1721,8 @@ class DreameMapMowerMapManager:
                     del self._saved_map_data[map_id]
                     changed = True
 
-            selected_map_id = map_info[MAP_PARAMETER_CURR_ID]
+            if self._selected_map_id not in self._saved_map_data:
+                self._selected_map_id = None
             if selected_map_id in self._saved_map_data and self._selected_map_id != selected_map_id:
                 self._selected_map_id = selected_map_id
                 changed = True
@@ -1681,7 +1740,6 @@ class DreameMapMowerMapManager:
             _LOGGER.info("Get Recovery Map List: %s", self._recovery_map_list_object_name)
             response = self._get_file_url(self._recovery_map_list_object_name)
             if response:
-                self._need_recovery_map_list_request = False
                 response = self._protocol.cloud.get_file(response)
                 self._apply_recovery_map_list(response)
 
@@ -1689,33 +1747,38 @@ class DreameMapMowerMapManager:
         """Apply recovery metadata after transport completes."""
         if response:
             try:
-                recovery_map_list = json.loads(response.decode())
-            except:
-                _LOGGER.warn("Get Recovery Map List json parse failed")
+                recovery_rows = json.loads(response)
+                if not isinstance(recovery_rows, list):
+                    raise ValueError("Recovery map list must be an array")
+                prepared: dict[int, list[RecoveryMapInfo]] = {}
+                for recovery_map in recovery_rows:
+                    if not isinstance(recovery_map, dict) or type(recovery_map.get("id")) is not int:
+                        raise ValueError("Invalid recovery map ID")
+                    map_id = recovery_map["id"]
+                    if map_id not in self._saved_map_data:
+                        continue
+                    map_info_list = recovery_map["info"]
+                    if not isinstance(map_info_list, list) or any(
+                        not isinstance(info, dict) for info in map_info_list
+                    ):
+                        raise ValueError("Invalid recovery metadata")
+                    recovery_maps = [RecoveryMapInfo(map_id, info) for info in map_info_list]
+                    if len(recovery_maps) > 2:
+                        # Edited entries precede backup/original entries; retain
+                        # vendor ordering within each group.
+                        recovery_maps.sort(key=lambda info: info.map_type != RecoveryMapType.EDITED)
+                    prepared[map_id] = recovery_maps
+            except (ValueError, TypeError, KeyError, OverflowError, OSError):
+                _LOGGER.warning("Get Recovery Map List parse failed")
                 return
 
+            self._need_recovery_map_list_request = False
             changed = False
-            for recovery_map in recovery_map_list:
-                map_id = recovery_map["id"]
-                if map_id in self._map_list:
-                    recovery_map_list = []
-                    map_info_list = recovery_map["info"]
-                    for map_info in map_info_list:
-                        recovery_map_list.append(RecoveryMapInfo(map_id, map_info))
-                    if len(recovery_map_list) > 2:
-                        recovery_map_list.sort(
-                            key=cmp_to_key(
-                                lambda a, b: (
-                                    int(a.map_type) - int(b.map_type)
-                                    if int(a.map_type == 0) and int(b.map_type == 2)
-                                    else 0
-                                )
-                            )
-                        )
-                    if self._saved_map_data[map_id].recovery_map_list != recovery_map_list:
-                        self._saved_map_data[map_id].recovery_map_list = recovery_map_list
-                        _LOGGER.info("Saved recovery map list changed: %s", map_id)
-                        changed = True
+            for map_id, recovery_maps in prepared.items():
+                if self._saved_map_data[map_id].recovery_map_list != recovery_maps:
+                    self._saved_map_data[map_id].recovery_map_list = recovery_maps
+                    _LOGGER.info("Saved recovery map list changed: %s", map_id)
+                    changed = True
 
             if changed:
                 self._refresh_recovery_map_list()
@@ -1742,7 +1805,7 @@ class DreameMapMowerMapManager:
 
     @property
     def map_list(self) -> list[int] | None:
-        return self._saved_map_data.keys()
+        return list(self._saved_map_data)
 
     @property
     def map_data_list(self) -> dict[int, MapData] | None:
@@ -1756,9 +1819,10 @@ class DreameMapMowerMapManager:
 
             if self._map_list and len(self._map_list) == 1 and self._map_list[0] in self._saved_map_data:
                 return self._saved_map_data[self._map_list[0]]
+        return None
 
     @property
-    def cleaning_sequence(self) -> list | None:
+    def cleaning_sequence(self) -> list[int]:
         return (
             [
                 (k)

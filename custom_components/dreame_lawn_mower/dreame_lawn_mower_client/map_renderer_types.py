@@ -35,40 +35,44 @@ class MapRendererConfig:
 
 @dataclass
 class MapRendererColorScheme:
-    floor: tuple[int] = (221, 221, 221, 255)
-    outside: tuple[int] = (0, 0, 0, 0)
-    wall: tuple[int] = (159, 159, 159, 255)
-    passive_segment: tuple[int] = (200, 200, 200, 255)
-    hidden_segment: tuple[int] = (226, 226, 226, 255)
-    new_segment: tuple[int] = (153, 191, 255, 255)
-    cleaned_area: tuple[int] = (158, 240, 117, 255)
-    dirty_area: tuple[int] = (247, 135, 106, 255)
-    clean_area: tuple[int] = (156, 202, 250, 255)
-    second_clean_area: tuple[int] = (123, 148, 172, 255)
-    neglected_segment: tuple[int] = (255, 159, 10, 110)
-    no_go: tuple[int] = (177, 0, 0, 50)
-    no_go_outline: tuple[int] = (199, 0, 0, 200)
-    virtual_wall: tuple[int] = (199, 0, 0, 200)
-    pathway: tuple[int] = (23, 111, 244, 200)
-    active_area: tuple[int] = (255, 255, 255, 80)
-    active_area_outline: tuple[int] = (34, 109, 242, 255)  # (103, 156, 244, 200)
-    active_point: tuple[int] = (255, 255, 255, 80)
-    active_point_outline: tuple[int] = (34, 109, 242, 255)  # (103, 156, 244, 200)
-    path: tuple[int] = (255, 255, 255, 255)
-    segment: tuple[list[tuple[int]]] = (
+    floor: tuple[int, int, int, int] = (221, 221, 221, 255)
+    outside: tuple[int, int, int, int] = (0, 0, 0, 0)
+    wall: tuple[int, int, int, int] = (159, 159, 159, 255)
+    passive_segment: tuple[int, int, int, int] = (200, 200, 200, 255)
+    hidden_segment: tuple[int, int, int, int] = (226, 226, 226, 255)
+    new_segment: tuple[int, int, int, int] = (153, 191, 255, 255)
+    cleaned_area: tuple[int, int, int, int] = (158, 240, 117, 255)
+    dirty_area: tuple[int, int, int, int] = (247, 135, 106, 255)
+    clean_area: tuple[int, int, int, int] = (156, 202, 250, 255)
+    second_clean_area: tuple[int, int, int, int] = (123, 148, 172, 255)
+    neglected_segment: tuple[int, int, int, int] = (255, 159, 10, 110)
+    no_go: tuple[int, int, int, int] = (177, 0, 0, 50)
+    no_go_outline: tuple[int, int, int, int] = (199, 0, 0, 200)
+    virtual_wall: tuple[int, int, int, int] = (199, 0, 0, 200)
+    pathway: tuple[int, int, int, int] = (23, 111, 244, 200)
+    active_area: tuple[int, int, int, int] = (255, 255, 255, 80)
+    active_area_outline: tuple[int, int, int, int] = (
+        34, 109, 242, 255
+    )  # (103, 156, 244, 200)
+    active_point: tuple[int, int, int, int] = (255, 255, 255, 80)
+    active_point_outline: tuple[int, int, int, int] = (
+        34, 109, 242, 255
+    )  # (103, 156, 244, 200)
+    path: tuple[int, int, int, int] = (255, 255, 255, 255)
+    segment: tuple[list[tuple[int, int, int, int]], ...] = (
         [(171, 199, 248, 255), (121, 170, 255, 255)],
         [(249, 224, 125, 255), (255, 211, 38, 255)],
         [(184, 227, 255, 255), (141, 210, 255, 255)],
         [(184, 217, 141, 255), (150, 217, 141, 255)],
     )
-    obstacle_bg: tuple[int] = (34, 109, 242, 255)
-    icon_background: tuple[int] = (0, 0, 0, 100)
-    settings_background: tuple[int] = (255, 255, 255, 175)
-    settings_icon_background: tuple[int] = (255, 255, 255, 205)
-    material_color: tuple[int] = (0, 0, 0, 20)
-    text: tuple[int] = (255, 255, 255, 255)
-    order: tuple[int] = (255, 255, 255, 255)
-    text_stroke: tuple[int] = (240, 240, 240, 200)
+    obstacle_bg: tuple[int, int, int, int] = (34, 109, 242, 255)
+    icon_background: tuple[int, int, int, int] = (0, 0, 0, 100)
+    settings_background: tuple[int, int, int, int] = (255, 255, 255, 175)
+    settings_icon_background: tuple[int, int, int, int] = (255, 255, 255, 205)
+    material_color: tuple[int, int, int, int] = (0, 0, 0, 20)
+    text: tuple[int, int, int, int] = (255, 255, 255, 255)
+    order: tuple[int, int, int, int] = (255, 255, 255, 255)
+    text_stroke: tuple[int, int, int, int] = (240, 240, 240, 200)
     invert: bool = False
     dark: bool = False
 
@@ -211,8 +215,8 @@ class MapRendererLayer(IntEnum):
 
 @dataclass
 class Line:
-    x: int | list[int] = None
-    y: int | list[int] = None
+    x: int | list[int] | None = None
+    y: int | list[int] | None = None
     ishorizontal: bool = False
     direction: int = 0
 
@@ -221,6 +225,22 @@ class Line:
 class CLine(Line):
     length: int = 0
     findEnd: bool = False
+
+    @property
+    def _interval(self) -> list[int]:
+        """Return endpoints on the varying axis of this contour line."""
+        endpoints = self.x if self.ishorizontal else self.y
+        if not isinstance(endpoints, list):
+            raise ValueError("Contour line endpoints must be a list.")
+        return endpoints
+
+    @property
+    def _coordinate(self) -> int:
+        """Return the fixed axis coordinate of this contour line."""
+        coordinate = self.y if self.ishorizontal else self.x
+        if not isinstance(coordinate, int):
+            raise ValueError("Contour line coordinate must be an integer.")
+        return coordinate
 
 
 @dataclass
@@ -232,14 +252,14 @@ class ALine:
 
 @dataclass
 class Paths:
-    clines: list[CLine] = field(default_factory=lambda: [])
-    alines: list[ALine] = field(default_factory=lambda: [])
+    clines: list[ALine] = field(default_factory=lambda: [])
+    alines: list[CLine] = field(default_factory=lambda: [])
     length: int = 0
 
 
 @dataclass
 class Angle:
-    lines: list[ALine] = field(default_factory=lambda: [])
+    lines: list[CLine] = field(default_factory=lambda: [])
     horizontalDir: int = 0
     verticalDir: int = 0
 
@@ -249,65 +269,65 @@ class MapRendererResources:
     renderer: str = ""
     icon_set: int = 0
     robot_type: int = 0
-    robot: str = None
-    charger: str = None
-    charging: str = None
-    cleaning: str = None
-    warning: str = None
-    sleeping: str = None
-    cleaning_direction: str = None
-    selected_segment: str = None
-    cruise_point_background: str = None
-    segment: dict[int, dict[str, str]] = None
-    default_map_image: str = None
-    font: str = None
-    repeats: list[str] = None
-    cleaning_mode: list[str] = None
-    cleaning_route: list[str] = None
-    emptying: str = None
-    cruise_path_point_background: str = None
-    obstacle_background: str = None
-    obstacle_hidden_background: str = None
-    obstacle: dict[int, dict[str, str]] = None
-    furniture: dict[int, dict[str, str]] = None
-    rotate: str = None
-    delete: str = None
-    resize: str = None
-    move: str = None
-    problem: str = None
-    wifi: str = None
+    robot: str | None = None
+    charger: str | None = None
+    charging: str | None = None
+    cleaning: str | None = None
+    warning: str | None = None
+    sleeping: str | None = None
+    cleaning_direction: str | None = None
+    selected_segment: str | None = None
+    cruise_point_background: str | None = None
+    segment: dict[int, dict[str, str | None]] | None = None
+    default_map_image: str | None = None
+    font: str | None = None
+    repeats: list[str] | None = None
+    cleaning_mode: list[str] | None = None
+    cleaning_route: list[str] | None = None
+    emptying: str | None = None
+    cruise_path_point_background: str | None = None
+    obstacle_background: str | None = None
+    obstacle_hidden_background: str | None = None
+    obstacle: dict[int, dict[str, str | None]] | None = None
+    furniture: dict[int, dict[str, str | list[int] | None]] | None = None
+    rotate: str | None = None
+    delete: str | None = None
+    resize: str | None = None
+    move: str | None = None
+    problem: str | None = None
+    wifi: str | None = None
     version: int = 1
 
 
 @dataclass
 class MapRendererData:
     data: dict[int, list[int]]
-    size: list[int] = None
-    frame_id: int = 0
-    saved_map: bool = False
-    wifi_map: bool = False
-    history_map: bool = False
-    recovery_map: bool = False
-    segments: dict[int, list[int | str]] | None = None
-    active_segments: list[int] = field(default_factory=lambda: [])
-    active_areas: list[list[int]] = field(default_factory=lambda: [])
-    active_points: list[list[int]] = field(default_factory=lambda: [])
-    active_cruise_points: list[list[int]] = field(default_factory=lambda: [])
+    size: list[float | list[int] | None] | None = None
+    frame_id: int | None = 0
+    saved_map: bool | None = False
+    wifi_map: bool | None = False
+    history_map: bool | None = False
+    recovery_map: bool | None = False
+    segments: list[list[float | str | list[float | None] | None]] | None = None
+    active_segments: list[int] | None = field(default_factory=lambda: [])
+    active_areas: list[list[float]] = field(default_factory=lambda: [])
+    active_points: list[list[float]] = field(default_factory=lambda: [])
+    active_cruise_points: list[list[float]] = field(default_factory=lambda: [])
     task_cruise_points: bool = False
-    predefined_points: list[list[int]] | None = None
+    predefined_points: list[list[float]] | None = None
     no_mop: list[list[int]] = field(default_factory=lambda: [])
-    no_go: list[list[int]] = field(default_factory=lambda: [])
-    virtual_walls: list[list[int]] = field(default_factory=lambda: [])
-    pathways: list[list[int]] | None = None
-    obstacles: list[list[int | float]] = field(default_factory=lambda: [])
-    furnitures: list[list[int | float]] | None = None
-    path: list[list[int]] = field(default_factory=lambda: [])
-    floor_material: dict[int, list[int]] | None = None
-    hidden_segments: dict[int, list[int]] | None = None
-    neglected_segments: dict[int, list[int]] | None = None
-    robot_position: list[int] | None = None
-    charger_position: list[int] | None = None
-    router_position: list[int] | None = None
+    no_go: list[list[float]] = field(default_factory=lambda: [])
+    virtual_walls: list[list[float]] = field(default_factory=lambda: [])
+    pathways: list[list[float]] | None = None
+    obstacles: list[list[float | str | None]] = field(default_factory=lambda: [])
+    furnitures: list[list[float | None]] | None = None
+    path: list[list[float | None]] | None = field(default_factory=lambda: [])
+    floor_material: dict[int, int] | None = None
+    hidden_segments: list[int] | None = None
+    neglected_segments: dict[int, int] | None = None
+    robot_position: list[float | None] | None = None
+    charger_position: list[float | None] | None = None
+    router_position: list[float] | None = None
     ai_outborders_user: list[list[int]] | None = None
     ai_outborders: list[list[int]] | None = None
     ai_outborders_new: list[list[int]] | None = None
@@ -328,9 +348,9 @@ class MapRendererData:
     completed: bool | None = None
     remaining_battery: int | None = None
     cleanset: bool = False
-    docked: bool = True
-    work_status: int = 0
-    resources: MapRendererResources = None
+    docked: bool | None = True
+    work_status: int | None = 0
+    resources: MapRendererResources | None = None
     version: int = 1
 
 

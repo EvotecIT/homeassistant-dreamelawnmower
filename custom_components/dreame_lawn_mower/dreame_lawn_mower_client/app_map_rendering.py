@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 
 from .map_drawing import draw_lawn_polygon, draw_navigation_path
 from .map_geometry import polygon_label_point, rotate_canvas_point
@@ -164,9 +164,12 @@ def _render_app_map_payload_png(
         polygon = entry.get("points")
         if not isinstance(label, str) or not polygon:
             continue
-        center = tuple(
-            round(value)
-            for value in polygon_label_point([project(point) for point in polygon])
+        center = cast(
+            tuple[int, int],
+            tuple(
+                round(value)
+                for value in polygon_label_point([project(point) for point in polygon])
+            ),
         )
         _draw_app_map_label(draw, center, label, font, style=style)
 

@@ -32,9 +32,14 @@ def _encoded_map_frame(timestamp: int | None, frame_id: int = 10) -> str:
     header[0:2] = (7).to_bytes(2, "little", signed=True)
     header[2:4] = frame_id.to_bytes(2, "little", signed=True)
     header[4] = MapFrameType.I.value
-    metadata = {} if timestamp is None else {"timestamp_ms": timestamp}
+    # Ordering scenarios need an established raster as the base for P frames.
+    for offset, value in ((17, 50), (19, 1), (21, 1)):
+        header[offset:offset + 2] = value.to_bytes(2, "little", signed=True)
+    metadata = {"ris": 0}
+    if timestamp is not None:
+        metadata["timestamp_ms"] = timestamp
     return base64.b64encode(
-        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+        zlib.compress(bytes(header) + b"\x01" + json.dumps(metadata).encode())
     ).decode()
 
 
@@ -43,6 +48,7 @@ def _encoded_p_frame(timestamp, frame_id):
         zlib.decompress(base64.b64decode(_encoded_map_frame(timestamp, frame_id)))
     )
     data[4] = MapFrameType.P.value
+    data[map_manager.DreameMowerMapDecoder.HEADER_SIZE] = 0
     return base64.b64encode(zlib.compress(data)).decode()
 
 

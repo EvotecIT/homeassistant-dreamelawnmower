@@ -146,7 +146,6 @@ async def async_refresh_saved_map_list(
                         and manager._map_list_md5 == md5
                     ):
                         if recovery:
-                            manager._need_recovery_map_list_request = False
                             manager._apply_recovery_map_list(payload)
                         else:
                             manager._apply_map_list(payload)

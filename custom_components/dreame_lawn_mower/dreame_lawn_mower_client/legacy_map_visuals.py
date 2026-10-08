@@ -94,7 +94,8 @@ def _marker_image(value: bytes) -> Image.Image:
         if marker.width > 512 or marker.height > 512:
             raise ValueError("Custom map marker dimensions exceed 512 pixels.")
         marker.load()
-        return marker.convert("RGBA").copy()
+        result: Image.Image = marker.convert("RGBA").copy()
+        return result
 
 
 def _normalize_label_scale(value: float) -> float:

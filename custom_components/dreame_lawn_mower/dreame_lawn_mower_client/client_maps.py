@@ -39,10 +39,10 @@ from .client_property_scan import cloud_property_scan_result
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
+from .client_transport import _DreameLawnMowerClientTransport
 from .client_vector_map_view import vector_map_details, vector_map_view
 from .exceptions import (
     DeviceException,
-    DreameLawnMowerCloudAPIError,
     DreameLawnMowerConnectionError,
 )
 from .exceptions import (
@@ -61,8 +61,11 @@ from .map_probe import (
     build_map_probe_payload,
 )
 from .models import (
+    DreameLawnMowerMapDiagnostics,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    DreameLawnMowerSnapshot,
+    DreameLawnMowerStatusBlob,
     map_diagnostics_from_device,
     map_summary_from_map_data,
 )
@@ -82,6 +85,9 @@ from .point_cloud_diagnostics import (
 from .point_cloud_trace import record_point_cloud_stage
 
 if TYPE_CHECKING:
+    from threading import Lock
+
+    from .device import DreameMowerDevice
     from .map_types import MapData
     from .map_visuals import MapRenderStyle
 
@@ -129,12 +135,58 @@ def _app_map_inventory_identity(
 
 
 class _DreameLawnMowerClientMapsMixin(
-    _DreameLawnMowerClientAppMapsMixin, _DreameLawnMowerClientMowingMapMixin
+    _DreameLawnMowerClientAppMapsMixin, _DreameLawnMowerClientMowingMapMixin,
+    _DreameLawnMowerClientTransport,
 ):
     _app_map_object_cache_lock: Lock
     _latest_app_map_inventory_identity: str | None
     _latest_app_map_object_inventory_identity: str | None
     _latest_app_map_object_names: tuple[str | None, ...]
+    # Runtime tracking state is initialized by the assembled client and updated
+    # by its tracking mixin before map views consume it.
+    _latest_snapshot: DreameLawnMowerSnapshot | None
+    _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
+    _runtime_session_active: bool | None
+    _runtime_live_map_index: int | None
+    _runtime_live_track_segments: tuple[tuple[tuple[int, int], ...], ...]
+
+    if TYPE_CHECKING:
+        def _expire_runtime_live_tracking(self) -> bool: ...
+
+        def _sync_get_current_app_map_index(
+            self, *, deadline: float | None = None,
+        ) -> int | None: ...
+
+        @staticmethod
+        def _with_fallback_app_maps(
+            map_view: DreameLawnMowerMapView, app_view: DreameLawnMowerMapView,
+        ) -> DreameLawnMowerMapView: ...
+
+        @staticmethod
+        def _with_runtime_position_details(
+            map_view: DreameLawnMowerMapView, runtime_view: DreameLawnMowerMapView,
+        ) -> DreameLawnMowerMapView: ...
+
+        def _sync_get_batch_device_data(
+            self, keys: Sequence[str] | None = None, *, deadline: float | None = None,
+        ) -> Mapping[str, Any] | None: ...
+
+        def _sync_get_cloud_device_info(
+            self, language: str | None = None,
+        ) -> dict[str, Any] | None: ...
+
+        def _sync_get_cloud_user_features(self, language: str | None = None) -> Any: ...
+
+        def _sync_get_cloud_device_otc_info(
+            self, language: str | None = None
+        ) -> Any: ...
+
+        def _sync_update_device(
+            self,
+            force_request_properties: bool = False,
+            *,
+            deadline: float | None = None,
+        ) -> DreameMowerDevice: ...
 
     def _sync_get_current_app_map_index_readback(self) -> int | None:
         """Read only MAPL and return its unambiguous current map index."""
@@ -633,98 +685,6 @@ class _DreameLawnMowerClientMapsMixin(
             cloud=cloud,
         )
 
-    def _sync_call_app_action(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        siid: int = 2,
-        aiid: int = 50,
-        retry_count: int | None = None,
-        timeout: float | None = None,
-        deadline: float | None = None,
-        redact_response: bool = False,
-        on_dispatch: Callable[[], None] | None = None,
-        raise_on_api_error: bool = False,
-    ) -> Any:
-        cloud = (
-            self._sync_get_cloud_protocol(deadline=deadline)
-            if deadline is not None
-            else self._sync_get_cloud_protocol()
-        )
-        if not getattr(cloud, "_host", None):
-            try:
-                preflight_options: dict[str, Any] = {}
-                if deadline is not None:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise DreameLawnMowerConnectionError(
-                            "Point-cloud cloud setup timed out."
-                        )
-                    preflight_options = {
-                        "retry_count": 0,
-                        "timeout": remaining,
-                        "deadline": deadline,
-                    }
-                if hasattr(cloud, "get_device_info_v2"):
-                    cloud.get_device_info_v2("en", **preflight_options)
-                elif hasattr(cloud, "get_device_info"):
-                    cloud.get_device_info(**preflight_options)
-            except DeviceException as err:
-                raise DreameLawnMowerConnectionError(str(err)) from err
-        try:
-            request_options: dict[str, Any] = {}
-            if retry_count is not None:
-                request_options["retry_count"] = retry_count
-            if timeout is not None:
-                request_options["timeout"] = timeout
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise DreameLawnMowerConnectionError(
-                        "Point-cloud cloud request timed out."
-                    )
-                request_options["timeout"] = (
-                    min(timeout, remaining) if timeout is not None else remaining
-                )
-                request_options["deadline"] = deadline
-            if redact_response:
-                request_options["redact_response"] = True
-            if on_dispatch is not None:
-                request_options["on_dispatch"] = on_dispatch
-            if raise_on_api_error:
-                request_options["raise_on_api_error"] = True
-            if hasattr(cloud, "call_app_action"):
-                response = cloud.call_app_action(
-                    payload,
-                    siid=siid,
-                    aiid=aiid,
-                    **request_options,
-                )
-            else:
-                request_options.setdefault(
-                    "retry_count",
-                    2 if payload.get("m") == "g" else 0,
-                )
-                response = cloud.send(
-                    "action",
-                    {
-                        "did": str(cloud.device_id),
-                        "siid": siid,
-                        "aiid": aiid,
-                        "in": [payload],
-                    },
-                    **request_options,
-                )
-        except DreameLawnMowerCloudAPIError:
-            raise
-        except DeviceException as err:
-            raise DreameLawnMowerConnectionError(str(err)) from err
-
-        out = response.get("out") if isinstance(response, Mapping) else None
-        if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
-            return out[0] if out else None
-        return response
-
     def _sync_get_cloud_properties(
         self,
         keys: str | Sequence[str],
@@ -979,7 +939,7 @@ class _DreameLawnMowerClientMapsMixin(
         source: str,
         reason: str | None = None,
         cloud_property_summary: Mapping[str, Any] | None = None,
-    ):
+    ) -> DreameLawnMowerMapDiagnostics | None:
         try:
             device = self._ensure_device()
             return map_diagnostics_from_device(
@@ -1016,10 +976,10 @@ class _DreameLawnMowerClientMapsMixin(
             app_maps=map_view.app_maps,
         )
 
-    def _sync_wait_for_map(self, timeout: float, interval: float):
+    def _sync_wait_for_map(self, timeout: float, interval: float) -> MapData | None:
         device = self._sync_update_device()
-        if getattr(device, "current_map", None) is not None:
-            return device.current_map
+        if device.status.current_map is not None:
+            return device.status.current_map
 
         if getattr(device, "_map_manager", None) is None:
             return None
@@ -1031,12 +991,12 @@ class _DreameLawnMowerClientMapsMixin(
 
         deadline = time.monotonic() + max(timeout, 0)
         while time.monotonic() <= deadline:
-            current_map = getattr(device, "current_map", None)
+            current_map = device.status.current_map
             if current_map is not None:
                 return current_map
             time.sleep(max(interval, 0.1))
 
-        return getattr(device, "current_map", None)
+        return device.status.current_map
 
     @staticmethod
     def _normalize_cloud_property_keys(keys: str | Sequence[str]) -> str:

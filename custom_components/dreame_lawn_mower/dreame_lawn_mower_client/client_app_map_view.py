@@ -17,12 +17,12 @@ from .client_map_helpers import (
 from .models import DreameLawnMowerMapView
 
 if TYPE_CHECKING:
-    from .client import DreameLawnMowerClient
+    from .client_maps import _DreameLawnMowerClientMapsMixin
     from .map_visuals import MapRenderStyle
 
 
 def app_map_view(
-    client: DreameLawnMowerClient,
+    client: _DreameLawnMowerClientMapsMixin,
     app_maps: dict[str, Any],
     *,
     legacy_error: str | None,
@@ -66,7 +66,7 @@ def app_map_view(
 
 
 def preferred_map_view(
-    client: DreameLawnMowerClient,
+    client: _DreameLawnMowerClientMapsMixin,
     app_view: DreameLawnMowerMapView,
     vector_view: DreameLawnMowerMapView,
 ) -> DreameLawnMowerMapView | None:

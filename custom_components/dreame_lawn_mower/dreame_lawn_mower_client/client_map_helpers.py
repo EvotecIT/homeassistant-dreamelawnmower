@@ -518,16 +518,24 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {"payload_type": _operation_value_type(value)}
 
-    maps = value.get("map") if isinstance(value.get("map"), list) else []
-    spots = value.get("spot") if isinstance(value.get("spot"), list) else []
-    point_entries = value.get("point") if isinstance(value.get("point"), list) else []
-    semantic = value.get("semantic") if isinstance(value.get("semantic"), list) else []
-    trajectories = (
-        value.get("trajectory") if isinstance(value.get("trajectory"), list) else []
-    )
-    cut_relation = (
-        value.get("cut_relation") if isinstance(value.get("cut_relation"), list) else []
-    )
+    maps = value.get("map")
+    if not isinstance(maps, list):
+        maps = []
+    spots = value.get("spot")
+    if not isinstance(spots, list):
+        spots = []
+    point_entries = value.get("point")
+    if not isinstance(point_entries, list):
+        point_entries = []
+    semantic = value.get("semantic")
+    if not isinstance(semantic, list):
+        semantic = []
+    trajectories = value.get("trajectory")
+    if not isinstance(trajectories, list):
+        trajectories = []
+    cut_relation = value.get("cut_relation")
+    if not isinstance(cut_relation, list):
+        cut_relation = []
 
     zone_maps = [item for item in maps if not _is_app_map_pathway(item)]
     pathways = [item for item in maps if _is_app_map_pathway(item)]
@@ -643,13 +651,13 @@ def _app_map_point_entry_shapes(entries: Sequence[Any]) -> list[dict[str, Any]]:
 
     result: list[dict[str, Any]] = []
     for shape, count in sorted(grouped.items(), key=lambda item: repr(item[0])):
-        entry: dict[str, Any] = {"kind": shape[0], "count": count}
+        shape_entry: dict[str, Any] = {"kind": shape[0], "count": count}
         if shape[0] == "object":
-            entry["keys"] = list(shape[1])
+            shape_entry["keys"] = list(shape[1])
         elif shape[0] == "array":
-            entry["length"] = shape[1]
-            entry["item_types"] = list(shape[2])
-        result.append(entry)
+            shape_entry["length"] = shape[1]
+            shape_entry["item_types"] = list(shape[2])
+        result.append(shape_entry)
     return result
 
 
@@ -735,8 +743,12 @@ def _app_map_objects_view_metadata(value: Any) -> dict[str, Any]:
 
 
 def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
-    summary = entry.get("summary") if isinstance(entry.get("summary"), Mapping) else {}
-    info = entry.get("info") if isinstance(entry.get("info"), Mapping) else {}
+    summary = entry.get("summary")
+    if not isinstance(summary, Mapping):
+        summary = {}
+    info = entry.get("info")
+    if not isinstance(info, Mapping):
+        info = {}
     result = {
         "idx": entry.get("idx"),
         "current": bool(entry.get("current")),

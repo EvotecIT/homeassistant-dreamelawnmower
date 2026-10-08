@@ -18,7 +18,7 @@ from .vector_map import (
 )
 
 if TYPE_CHECKING:
-    from .client import DreameLawnMowerClient
+    from .client_maps import _DreameLawnMowerClientMapsMixin
     from .map_visuals import MapRenderStyle
 
 
@@ -40,7 +40,7 @@ def vector_map_details(
 
 
 def vector_map_view(
-    client: DreameLawnMowerClient,
+    client: _DreameLawnMowerClientMapsMixin,
     batch_data: Mapping[str, Any] | None,
     *,
     current_map_index: int | None,
