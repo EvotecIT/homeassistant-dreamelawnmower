@@ -9,6 +9,10 @@ from types import SimpleNamespace
 import pytest
 from aiohttp import ClientSession, web
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    attempted_write_fields,
+)
+
 from .test_async_app_commands import client_for
 from .test_async_cloud_session import (
     DreameLawnMowerClient,
@@ -212,8 +216,9 @@ def test_native_start_edit_cancellation_stops_followup_requests(
                     await asyncio.wait_for(client.async_close(), 2)
                 else:
                     task.cancel()
-                with pytest.raises(asyncio.CancelledError):
+                with pytest.raises(asyncio.CancelledError) as raised:
                     await task
+                assert attempted_write_fields(raised.value) == ("schedule",)
                 release.set()
                 await client.async_close()
                 assert len(actions) == count

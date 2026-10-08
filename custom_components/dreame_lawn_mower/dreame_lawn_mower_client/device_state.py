@@ -874,7 +874,7 @@ class _DreameMowerDeviceStateMixin:
             for prop in DreameMowerStrAIProperty:
                 if prop.value in settings:
                     value = settings[prop.value]
-                    if prop.value in self._dirty_ai_data:
+                    if prop.name in self._dirty_ai_data:
                         if (
                             self._dirty_ai_data[prop.name].value != value
                             and time.time() - self._dirty_ai_data[prop.name].update_time < self._discard_timeout
@@ -885,7 +885,6 @@ class _DreameMowerDeviceStateMixin:
                                 self._dirty_ai_data[prop.name].value,
                                 value,
                             )
-                            del self._dirty_ai_data[prop.name]
                             continue
                         del self._dirty_ai_data[prop.name]
 
@@ -920,7 +919,6 @@ class _DreameMowerDeviceStateMixin:
                             self._dirty_ai_data[prop.name].value,
                             value,
                         )
-                        del self._dirty_ai_data[prop.name]
                         continue
                     del self._dirty_ai_data[prop.name]
 

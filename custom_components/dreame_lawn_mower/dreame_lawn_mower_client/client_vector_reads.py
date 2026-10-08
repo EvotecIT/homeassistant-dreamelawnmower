@@ -7,10 +7,9 @@ from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_read_app_action
-from .client_map_helpers import _normalize_app_map_entries
+from .client_map_helpers import _current_app_map_index
 from .client_mowing_map import mowing_scene_from_batch
 from .client_refresh import _run_state_worker
-from .client_shared_helpers import _positive_int
 from .client_state_reads import async_read_device_state
 from .client_vector_map_view import vector_map_details, vector_map_view
 from .exceptions import DreameLawnMowerConnectionError
@@ -50,9 +49,7 @@ async def _map_hint(client: DreameLawnMowerClient) -> int | None:
             {"m": "g", "t": "MAPL"},
             deadline=time.monotonic() + 20,
         )
-        for entry in _normalize_app_map_entries(response):
-            if entry.get("current"):
-                return _positive_int(entry.get("idx"))
+        return _current_app_map_index(response)
     except Exception:  # noqa: BLE001 - same best-effort hint as synchronous reader
         return None
     return None

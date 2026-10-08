@@ -1291,37 +1291,37 @@ class _DreameMowerDeviceCommandMixin:
                     DreameMowerAIProperty.AI_OBSTACLE_DETECTION
                     | DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD
                 )
-                # Use the reported mask; ai_data may already contain an optimistic edit.
-                current = self.get_property(DreameMowerProperty.AI_DETECTION)
-                if isinstance(current, int):
-                    enabled &= ~current
                 requires_acceptance = bool(enabled)
             else:
                 requires_acceptance = bool(
                     settings.get(DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION.value)
                     or settings.get(DreameMowerStrAIProperty.AI_OBSTACLE_IMAGE_UPLOAD.value)
                 )
-            if requires_acceptance and not self.status.ai_policy_accepted:
-                if self._protocol.cloud:
-                    response = self._protocol.cloud.get_batch_device_datas(
-                        [AI_POLICY_PROPERTY]
-                    )
-                    accepted = decode_ai_policy_acceptance(response)
-                    if accepted is not None:
-                        self.status.ai_policy_accepted = accepted
-                if not self.status.ai_policy_accepted:
-                    raise InvalidActionException(
-                        "You need to accept privacy policy from the App before enabling AI obstacle detection feature"
-                    )
-            mapping = self.property_mapping[DreameMowerProperty.AI_DETECTION]
-            if isinstance(settings, int):
-                return self._protocol.set_property(mapping["siid"], mapping["piid"], settings, 3)
-            return self._protocol.set_property(
-                mapping["siid"],
-                mapping["piid"],
-                str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""),
-                3,
-            )
+            self._require_ai_policy_acceptance(requires_acceptance)
+            return self._send_ai_detection(settings)
+
+    def _require_ai_policy_acceptance(self, requires_acceptance: bool) -> None:
+        """Validate explicit consent without changing device settings."""
+        if requires_acceptance and not self.status.ai_policy_accepted:
+            if self._protocol.cloud:
+                response = self._protocol.cloud.get_batch_device_datas([AI_POLICY_PROPERTY])
+                accepted = decode_ai_policy_acceptance(response)
+                if accepted is not None:
+                    self.status.ai_policy_accepted = accepted
+            if not self.status.ai_policy_accepted:
+                raise InvalidActionException(
+                    "You need to accept privacy policy from the App before enabling AI obstacle detection feature"
+                )
+
+    def _send_ai_detection(self, settings: dict[str, bool] | int) -> dict[str, Any] | None:
+        """Send settings after the caller has validated the requested edit."""
+        mapping = self.property_mapping[DreameMowerProperty.AI_DETECTION]
+        if isinstance(settings, int):
+            return self._protocol.set_property(mapping["siid"], mapping["piid"], settings, 3)
+        return self._protocol.set_property(
+            mapping["siid"], mapping["piid"],
+            str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""), 3,
+        )
 
     def set_ai_property(
         self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty, value: bool
@@ -1330,17 +1330,34 @@ class _DreameMowerDeviceCommandMixin:
             if prop.name not in self.ai_data:
                 raise InvalidActionException("Not supported")
             current_value = self.get_ai_property(prop)
+            previous_dirty = self._dirty_ai_data.get(prop.name)
+
+            def rollback() -> None:
+                if previous_dirty is None:
+                    self._dirty_ai_data.pop(prop.name, None)
+                else:
+                    self._dirty_ai_data[prop.name] = previous_dirty
+                self.ai_data[prop.name] = current_value
+                self._property_changed()
 
             self._dirty_ai_data[prop.name] = DirtyData(value, current_value, time.time())
             self.ai_data[prop.name] = value
             ai_value = self.get_property(DreameMowerProperty.AI_DETECTION)
             self._property_changed()
             try:
+                self._require_ai_policy_acceptance(bool(value) and prop.name in {
+                    DreameMowerAIProperty.AI_OBSTACLE_DETECTION.name,
+                    DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD.name,
+                })
                 if isinstance(ai_value, int):
-                    bit = DreameMowerAIProperty[prop.name].value
-                    result = self.set_ai_detection((ai_value | bit) if value else (ai_value & -(bit + 1)))
+                    # Preserve acknowledged edits that are newer than raw readback.
+                    for cached_prop in DreameMowerAIProperty:
+                        if cached_prop.name in self.ai_data:
+                            bit = cached_prop.value
+                            ai_value = (ai_value | bit) if self.ai_data[cached_prop.name] else (ai_value & ~bit)
+                    result = self._send_ai_detection(ai_value)
                 else:
-                    result = self.set_ai_detection({DreameMowerStrAIProperty[prop.name].value: bool(value)})
+                    result = self._send_ai_detection({DreameMowerStrAIProperty[prop.name].value: bool(value)})
 
                 if result is None or result[0]["code"] != 0:
                     _LOGGER.error(
@@ -1349,15 +1366,9 @@ class _DreameMowerDeviceCommandMixin:
                         current_value,
                         value,
                     )
-                    if prop.name in self._dirty_ai_data:
-                        del self._dirty_ai_data[prop.name]
-                    self.ai_data[prop.name] = current_value
-                    self._property_changed()
+                    rollback()
             except Exception:
-                if prop.name in self._dirty_ai_data:
-                    del self._dirty_ai_data[prop.name]
-                self.ai_data[prop.name] = current_value
-                self._property_changed()
+                rollback()
                 raise
             return result
 
