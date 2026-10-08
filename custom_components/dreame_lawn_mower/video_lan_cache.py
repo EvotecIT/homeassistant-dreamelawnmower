@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 from collections.abc import Mapping
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
@@ -17,8 +19,31 @@ from .dreame_lawn_mower_client.models import (
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pLiveStreamSession,
 )
+from .video_cache_storage import async_save_video_cache
 
 _STORAGE_VERSION = 1
+
+
+def _cache_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    """Use the same entry-scoped key for loading and removal."""
+    return Store[dict[str, Any]](
+        hass,
+        _STORAGE_VERSION,
+        f"{DOMAIN}.video_lan.{entry_id}",
+    )
+
+
+async def async_remove_video_lan_cache(
+    hass: HomeAssistant, entry: ConfigEntry,
+) -> None:
+    """Remove persisted data even if this entry never loaded successfully."""
+    owner = getattr(
+        hass.data.get(DOMAIN, {}).get(entry.entry_id), "video_lan_cache", None,
+    )
+    if isinstance(owner, DreameLawnMowerVideoLanCache):
+        await owner.async_remove()
+    else:
+        await _cache_store(hass, entry.entry_id).async_remove()
 
 
 class DreameLawnMowerVideoLanCache:
@@ -31,15 +56,27 @@ class DreameLawnMowerVideoLanCache:
         entry_id: str,
         did: str,
     ) -> None:
-        self._store = Store[dict[str, Any]](
-            hass,
-            _STORAGE_VERSION,
-            f"{DOMAIN}.video_lan.{entry_id}",
-        )
+        self._store = _cache_store(hass, entry_id)
+        self._write_lock = asyncio.Lock()
+        self._removed = False
         self._did = did
         self.loaded = False
         self.inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         self.endpoint: DreameLawnMowerLanVideoEndpoint | None = None
+
+    async def async_close(self) -> None:
+        """Fence late writes and drain disk work while preserving reload data."""
+        self._removed = True
+        async with self._write_lock:
+            pass
+
+    async def async_remove(self) -> None:
+        """Fence late writes and remove data when the entry is deleted."""
+        self._removed = True
+        async with self._write_lock:
+            await self._store.async_remove()
+            self.inputs = None
+            self.endpoint = None
 
     async def async_load(self) -> None:
         """Load a cache only when it belongs to this exact mower."""
@@ -94,17 +131,20 @@ class DreameLawnMowerVideoLanCache:
         await self._async_save()
 
     async def _async_save(self) -> None:
-        if self.inputs is None:
-            return
-        payload: dict[str, Any] = {
-            "did": self._did,
-            "product_id": self.inputs.product_id,
-            "device_name": self.inputs.device_name,
-            "stream_channel": self.inputs.stream_channel,
-        }
-        if self.endpoint is not None:
-            payload["endpoint"] = self.endpoint.as_dict()
-        await self._store.async_save(payload)
+        async with self._write_lock:
+            if self._removed:
+                return
+            if self.inputs is None:
+                return
+            payload: dict[str, Any] = {
+                "did": self._did,
+                "product_id": self.inputs.product_id,
+                "device_name": self.inputs.device_name,
+                "stream_channel": self.inputs.stream_channel,
+            }
+            if self.endpoint is not None:
+                payload["endpoint"] = self.endpoint.as_dict()
+            await async_save_video_cache(self._store, payload)
 
 
 def _decode_cache_payload(
