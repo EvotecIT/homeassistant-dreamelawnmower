@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_decoder
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
     Area,
     CleaningHistory,
@@ -147,3 +148,75 @@ def test_recovery_map_attributes_preserve_missing_and_epoch_timestamps(timestamp
         "map_type": "Edited",
         "object_name": "map-object",
     }]
+
+
+def test_segment_coloring_separates_neighbors_and_handles_missing_geometry() -> None:
+    map_data = MapData()
+    map_decoder.DreameMowerMapDecoder.set_segment_color_index(map_data)
+    map_data.segments = {
+        index: Segment(index, neighbors=[other for other in range(4) if other != index])
+        for index in range(4)
+    }
+    map_decoder.DreameMowerMapDecoder.set_segment_color_index(map_data)
+    colors = {segment.color_index for segment in map_data.segments.values()}
+    assert colors == {0, 1, 2, 3}
+
+
+def test_segment_cleaning_mode_clears_when_new_record_omits_it() -> None:
+    map_data = MapData()
+    segment = Segment(3)
+    map_data.segments = {3: segment}
+    map_decoder.DreameMowerMapDecoder.set_segment_cleanset(
+        map_data, {"3": [1, 3, 2, 4, 2]}
+    )
+    assert segment.cleaning_mode == 2
+    map_decoder.DreameMowerMapDecoder.set_segment_cleanset(
+        map_data, {"3": [1, 3, 1, 0]}
+    )
+    assert segment.cleaning_mode is None
+    assert segment.cleaning_times == 1
+    assert segment.order == 0
+
+
+@pytest.mark.parametrize("material,direction,rotation,code,rotated", [
+    (0, None, 0, 0, None), (2, None, 0, 3, None),
+    (1, 0, 0, 1, 0), (1, 0, 90, 1, 90), (1, 90, 90, 2, 0),
+])
+def test_floor_material_preserves_codes_and_rotated_direction(
+    material: int, direction: int | None, rotation: int,
+    code: int, rotated: int | None,
+) -> None:
+    data = MapData()
+    segment = Segment(3, x0=0, y0=0, x1=100, y1=50)
+    segment.floor_material = material
+    segment.floor_material_direction = direction
+    data.segments = {3: segment}
+    data.rotation = rotation
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert data.floor_material == {3: code}
+    assert segment.floor_material_rotated_direction == rotated
+
+
+def test_floor_material_does_not_infer_direction_without_bounds() -> None:
+    data = MapData()
+    segment = Segment(3)
+    segment.floor_material = 1
+    data.segments = {3: segment}
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert data.floor_material is None
+
+
+def test_material_change_clears_previously_rotated_direction() -> None:
+    data = MapData()
+    segment = Segment(3, x0=0, y0=0, x1=100, y1=50)
+    data.segments = {3: segment}
+    data.rotation = 90
+    segment.floor_material = 1
+    segment.floor_material_direction = 0
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert segment.floor_material_rotated_direction == 90
+    segment.floor_material = 2
+    segment.floor_material_direction = None
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert segment.floor_material_rotated_direction is None
+    assert data.floor_material == {3: 3}

@@ -302,3 +302,38 @@ def test_cloud_connection_state_is_boolean(connected: bool | None) -> None:
     mower._protocol = SimpleNamespace(cloud=cloud)
 
     assert mower.cloud_connected is bool(connected)
+
+
+@pytest.mark.parametrize(
+    "age,active,running,failure_age,map_recovery,expected",
+    [
+        (59, False, False, None, False, 5),
+        (60, False, False, None, False, 5),
+        (61, False, False, None, False, 10),
+        (59, True, False, None, False, 3),
+        (61, True, False, None, False, 5),
+        (61, True, True, None, False, 3),
+        (1, False, False, 61, False, 10),
+        (1, False, False, 301, False, 30),
+        (1, False, False, 301, True, 2),
+    ],
+)
+def test_device_polling_tracks_recent_changes_and_priority(
+    monkeypatch, age, active, running, failure_age, map_recovery, expected,
+) -> None:
+    now = 1_000_000.0
+    monkeypatch.setattr(device_module.time, "time", lambda: now)
+    mower = SimpleNamespace(
+        status=SimpleNamespace(
+            map_backup_status=False,
+            map_recovery_status=map_recovery,
+            active=active,
+            started=active,
+            running=running,
+        ),
+        _last_change=now - age,
+        _last_update_failed=None if failure_age is None else now - failure_age,
+        _map_manager=None,
+    )
+
+    assert DreameMowerDevice._update_interval.fget(mower) == expected
