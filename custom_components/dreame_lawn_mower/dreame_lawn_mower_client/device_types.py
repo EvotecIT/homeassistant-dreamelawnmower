@@ -1170,6 +1170,8 @@ class RobotType(IntEnum):
 class PathType(str, Enum):  # noqa: UP042
     LINE = "L"
     SWEEP = "S"
+    SWEEP_AND_MOP = "W"
+    MOP = "M"
 
 
 class ObstacleType(IntEnum):

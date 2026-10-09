@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 import numpy as np
@@ -21,6 +22,8 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types impo
     MapData,
     MapImageDimensions,
     MapPixelType,
+    Path,
+    PathType,
     Point,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
@@ -110,3 +113,63 @@ def test_legacy_renderer_accepts_unknown_headings_in_existing_icon_modes(
         assert image.width > 1 and image.height > 1
     assert map_data.robot_position.a is map_data.charger_position.a is None
     assert not [record for record in caplog.records if record.levelno >= 40]
+
+
+@pytest.mark.parametrize("scale", [1, 2])
+@pytest.mark.parametrize(
+    "start_type", [kind for kind in PathType if kind != PathType.LINE]
+)
+def test_legacy_mowing_trail_draws_segments_without_bridging(
+    scale: int, start_type: PathType,
+) -> None:
+    renderer = legacy_map_visuals._legacy_renderer(
+        style=map_render_style("dark"), label_scale=1.0
+    )
+    trail = [
+        Path(10, 80, start_type),
+        Path(40, 80, PathType.LINE),
+        Path(40, 60, PathType.LINE),
+        Path(60, 20, PathType.SWEEP),
+        Path(90, 20, PathType.LINE),
+    ]
+    layer = renderer.render_path(
+        trail, (40, 200, 80, 255), (100 * scale, 100 * scale), None,
+        MapImageDimensions(0, 0, 100, 100, 1), 3, scale,
+    )
+
+    assert layer.getpixel((25 * scale, 19 * scale)) == (40, 200, 80, 255)
+    assert layer.getpixel((40 * scale, 30 * scale)) == (40, 200, 80, 255)
+    assert layer.getpixel((75 * scale, 79 * scale)) == (40, 200, 80, 255)
+    assert layer.getpixel((50 * scale, 59 * scale))[3] == 0
+
+
+def test_legacy_mowing_trail_with_no_line_is_transparent() -> None:
+    renderer = legacy_map_visuals._legacy_renderer(
+        style=map_render_style("dark"), label_scale=1.0
+    )
+    for trail in ([], [Path(10, 80, PathType.SWEEP)]):
+        layer = renderer.render_path(
+            trail, (40, 200, 80, 255), (100, 100), None,
+            MapImageDimensions(0, 0, 100, 100, 1), 3, 1,
+        )
+        assert layer.getbbox() is None
+
+
+@pytest.mark.parametrize(
+    "empty,dimensions", [(True, False), (False, False), (False, True)],
+)
+def test_incomplete_map_bridge_embeds_default_metadata(
+    empty: bool, dimensions: bool,
+) -> None:
+    data = MapData()
+    data.empty_map = empty
+    if dimensions:
+        data.dimensions = MapImageDimensions(0, 0, 4, 4, 50)
+    result = legacy_map_visuals.render_legacy_map_png(data)
+    with Image.open(BytesIO(result)) as image:
+        image.load()
+        actual = json.loads(image.text[MAP_DATA_JSON_CLASS])
+    renderer = legacy_map_visuals.DreameMowerMapDataJsonRenderer()
+    with Image.open(BytesIO(renderer.default_map_image)) as default:
+        expected = json.loads(default.text[MAP_DATA_JSON_CLASS])
+    assert actual == expected

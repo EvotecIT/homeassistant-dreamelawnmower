@@ -52,6 +52,51 @@ class DreameMowerMapDecoder:
     HEADER_SIZE = 27
 
     @staticmethod
+    def _metadata_cleanset(value: object) -> dict[str, list[int]] | None:
+        """Validate the record shape consumed by segment cleaning settings."""
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError):
+                return None
+        if not isinstance(value, dict):
+            return None
+        result: dict[str, list[int]] = {}
+        for key, record in value.items():
+            if not isinstance(key, str) or not isinstance(record, list):
+                return None
+            if len(record) < 4 or not all(isinstance(item, int) for item in record):
+                return None
+            result[key] = [item for item in record if isinstance(item, int)]
+        return result
+
+    @staticmethod
+    def _metadata_coordinates(value: object) -> tuple[float, float] | None:
+        """Read an optional finite coordinate pair without coercing wire values."""
+        if not isinstance(value, list) or len(value) < 2:
+            return None
+        x, y = value[:2]
+        if not isinstance(x, int | float) or not isinstance(y, int | float):
+            return None
+        if isinstance(x, float) and not math.isfinite(x):
+            return None
+        if isinstance(y, float) and not math.isfinite(y):
+            return None
+        return x, y
+
+    @staticmethod
+    def _optional_int(value: object) -> int | None:
+        """Keep integer flags without coercing strings or container values."""
+        return value if isinstance(value, int) else None
+
+    @staticmethod
+    def _metadata_int(value: object) -> int:
+        """Convert JSON numeric metadata without changing legacy int semantics."""
+        if not isinstance(value, str | int | float):
+            raise TypeError("Map integer metadata must be a number or numeric string")
+        return int(value)
+
+    @staticmethod
     def _read_int_8(data: bytes, offset: int = 0) -> int:
         return int.from_bytes(data[offset : offset + 1], byteorder="big", signed=True)
 
@@ -229,19 +274,24 @@ class DreameMowerMapDecoder:
             grid,
         )
 
+
+    @staticmethod
+    def _map_image_size(raw: bytes) -> int | None:
+        """Return the metadata offset only for a complete map image."""
+        dimensions = DreameMowerMapDecoder._read_dimensions(raw)
+        if dimensions is None:
+            return None
+        return DreameMowerMapDecoder.HEADER_SIZE + dimensions.width * dimensions.height
+
     @staticmethod
     def decode_map_partial(
         raw_map: str, iv: str | None = None, key: str | None = None
     ) -> MapDataPartial | None:
+        if "," in raw_map and key is None:
+            raw_map, key = raw_map.split(",", 1)
         raw_map = raw_map.replace("_", "/").replace("-", "+")
-
         if len(raw_map) < 3:
             return None
-
-        if "," in raw_map and key is None:
-            values = raw_map.split(",")
-            key = values[1]
-            raw_map = values[0]
 
         try:
             raw = base64.decodebytes(raw_map.encode("utf8"))
@@ -332,12 +382,14 @@ class DreameMowerMapDecoder:
     ) -> tuple[MapData | None, MapData | None]:
         if partial_map is None or partial_map.raw is None:
             return None, None
+
         raw = partial_map.raw
-        dimensions = DreameMowerMapDecoder._read_dimensions(raw)
-        if dimensions is None:
+        image_size = DreameMowerMapDecoder._map_image_size(raw)
+        if image_size is None:
             return None, None
 
         map_data = MapData()
+        saved_map_data: MapData | None = None
         map_data.map_id = partial_map.map_id
         map_data.frame_id = partial_map.frame_id
         map_data.frame_type = partial_map.frame_type
@@ -354,31 +406,27 @@ class DreameMowerMapDecoder:
             DreameMowerMapDecoder._read_int_16_le(raw, 15),
         )
 
-        grid_size = dimensions.grid_size
-        width, height = dimensions.width, dimensions.height
-        left, top = dimensions.left, dimensions.top
+        grid_size = DreameMowerMapDecoder._read_int_16_le(raw, 17)
+        width = DreameMowerMapDecoder._read_int_16_le(raw, 19)
+        height = DreameMowerMapDecoder._read_int_16_le(raw, 21)
+        left: float = DreameMowerMapDecoder._read_int_16_le(raw, 23)
+        top: float = DreameMowerMapDecoder._read_int_16_le(raw, 25)
 
-        image_size = DreameMowerMapDecoder.HEADER_SIZE + width * height
-        # Wire metadata contains vendor-specific nested JSON. Dynamic values stay
-        # at this decoding boundary; the resulting map model has typed fields.
-        data_json = cast(dict[str, Any], partial_map.data_json or {})
-        saved_map_data: MapData | None = None
+        # Vendor-specific JSON stays at the decoder boundary.
+        # Public map fields are typed.
+        data_json = cast(dict[str, Any], partial_map.data_json)
+        if data_json is None:
+            data_json = {}
+
 
         try:
-            if (
-                "origin" in data_json
-                and data_json["origin"]
-                and len(data_json["origin"]) > 1
-            ):
-                origin_x, origin_y = data_json["origin"][:2]
-                if (
-                    not isinstance(origin_x, (int, float))
-                    or not isinstance(origin_y, (int, float))
-                    or not math.isfinite(origin_x)
-                    or not math.isfinite(origin_y)
-                ):
-                    raise ValueError("Invalid map origin coordinates")
-                left, top = origin_x, origin_y
+            origin = DreameMowerMapDecoder._metadata_coordinates(
+                data_json.get("origin")
+            )
+            if origin is not None:
+                left, top = origin
+            elif map_data.frame_type == MapFrameType.P.value and "origin" in data_json:
+                return None, None
 
             map_data.dimensions = MapImageDimensions(
                 top, left, height, width, grid_size
@@ -388,26 +436,36 @@ class DreameMowerMapDecoder:
 
             if map_data.frame_type != MapFrameType.W.value:
                 if "mra" in data_json:
-                    map_data.rotation = int(data_json["mra"])
+                    map_data.rotation = DreameMowerMapDecoder._metadata_int(
+                        data_json["mra"]
+                    )
 
                 if "cs" in data_json:
-                    map_data.cleaned_area = int(data_json["cs"])
+                    map_data.cleaned_area = DreameMowerMapDecoder._metadata_int(
+                        data_json["cs"]
+                    )
 
                 if "ct" in data_json:
-                    map_data.cleaning_time = int(data_json["ct"])
+                    map_data.cleaning_time = DreameMowerMapDecoder._metadata_int(
+                        data_json["ct"]
+                    )
 
                 if "wm" in data_json:
-                    map_data.work_status = int(data_json["wm"])
+                    map_data.work_status = DreameMowerMapDecoder._metadata_int(
+                        data_json["wm"]
+                    )
 
                 if "cf" in data_json:
                     map_data.completed = bool(data_json["cf"] == 1)
 
                 if "clean_finish_remain_electricity" in data_json:
-                    map_data.remaining_battery = int(
+                    map_data.remaining_battery = DreameMowerMapDecoder._metadata_int(
                         data_json["clean_finish_remain_electricity"]
                     )
 
-                map_data.customized_cleaning = data_json.get("customeClean")
+                map_data.customized_cleaning = DreameMowerMapDecoder._optional_int(
+                    data_json.get("customeClean")
+                )
                 map_data.docked = bool("oc" in data_json and data_json["oc"])
                 map_data.line_to_robot = bool("l2r" in data_json and data_json["l2r"])
                 map_data.frame_map = bool(
@@ -425,19 +483,25 @@ class DreameMowerMapDecoder:
                 map_data.recovery_map = bool("us" in data_json and data_json["us"] == 1)
                 map_data.new_map = bool("risp" in data_json and data_json["risp"] == 0)
                 if "smd" in data_json:
-                    map_data.startup_method = (
-                        StartupMethod(data_json["smd"])
-                        if data_json["smd"] in StartupMethod._value2member_map_
-                        else StartupMethod.OTHER
+                    map_data.startup_method = next(
+                        (
+                            item for item in StartupMethod
+                            if item.value == data_json["smd"]
+                        ),
+                        StartupMethod.OTHER,
                     )
                 if "ctyi" in data_json:
-                    map_data.task_end_type = (
-                        TaskEndType(data_json["ctyi"])
-                        if data_json["ctyi"] in TaskEndType._value2member_map_
-                        else TaskEndType.OTHER
+                    map_data.task_end_type = next(
+                        (
+                            item for item in TaskEndType
+                            if item.value == data_json["ctyi"]
+                        ),
+                        TaskEndType.OTHER,
                     )
                 map_data.multiple_cleaning_time = data_json.get("multime")
-                map_data.dos = data_json.get("dos")
+                map_data.dos = DreameMowerMapDecoder._optional_int(
+                    data_json.get("dos")
+                )
                 map_data.temporary_map = bool(
                     data_json.get("suw")
                     and (data_json["suw"] == 6 or data_json["suw"] == 5)
@@ -461,14 +525,15 @@ class DreameMowerMapDecoder:
                 ) or map_data.robot_position.a == 32767:
                     map_data.robot_position = None
 
-                if data_json.get("tr"):
+                trajectory = data_json.get("tr")
+                if isinstance(trajectory, str) and trajectory:
                     matches = [
                         m.groupdict()
                         for m in re.compile(
                             r"(?P<operator>[MWSLl])(?P<x>-?\d+),(?P<y>-?\d+)"
-                        ).finditer(data_json["tr"])
+                        ).finditer(trajectory)
                     ]
-                    current_position: Point = Point(0, 0)
+                    current_position = Point(0, 0)
                     map_data.path = []
                     for match in matches:
                         operator = match["operator"]
@@ -491,40 +556,55 @@ class DreameMowerMapDecoder:
 
                         map_data.path.append(current_position)
 
-                if data_json.get("sa") and isinstance(data_json["sa"], list):
-                    map_data.active_segments = [sa[0] for sa in data_json["sa"]]
+                active_segments = data_json.get("sa")
+                if isinstance(active_segments, list) and active_segments:
+                    map_data.active_segments = [
+                        entry[0] for entry in active_segments
+                        if isinstance(entry, list) and entry
+                        and isinstance(entry[0], int)
+                    ]
 
-                if "delsr" in data_json:
-                    map_data.hidden_segments = data_json["delsr"]
+                hidden_segments = data_json.get("delsr")
+                if isinstance(hidden_segments, list) and all(
+                    isinstance(segment, int) for segment in hidden_segments
+                ):
+                    map_data.hidden_segments = [
+                        segment for segment in hidden_segments
+                        if isinstance(segment, int)
+                    ]
 
-                if data_json.get("da2"):
-                    if data_json["da2"].get("areas"):
-                        map_data.active_areas = []
-                        for area in data_json["da2"]["areas"]:
-                            x_coords = sorted([area[0], area[2]])
-                            y_coords = sorted([area[1], area[3]])
-                            map_data.active_areas.append(
-                                Area(
-                                    x_coords[0],
-                                    y_coords[0],
-                                    x_coords[1],
-                                    y_coords[0],
-                                    x_coords[1],
-                                    y_coords[1],
-                                    x_coords[0],
-                                    y_coords[1],
-                                )
+                area_data = data_json.get("da2")
+                areas = area_data.get("areas") if isinstance(area_data, dict) else None
+                if isinstance(areas, list) and areas:
+                    map_data.active_areas = []
+                    for area in areas:
+                        if not isinstance(area, list) or len(area) < 4:
+                            continue
+                        first = DreameMowerMapDecoder._metadata_coordinates(area)
+                        second = DreameMowerMapDecoder._metadata_coordinates(area[2:])
+                        if first is None or second is None:
+                            continue
+                        area_left, area_right = sorted((first[0], second[0]))
+                        area_bottom, area_top = sorted((first[1], second[1]))
+                        map_data.active_areas.append(
+                            Area(
+                                area_left, area_bottom, area_right, area_bottom,
+                                area_right, area_top, area_left, area_top,
                             )
+                        )
 
-                if data_json.get("sp"):
+                active_points = data_json.get("sp")
+                if isinstance(active_points, list) and active_points:
                     map_data.active_points = []
-                    for point in data_json["sp"]:
-                        map_data.active_points.append(Point(point[0], point[1]))
+                    for point in active_points:
+                        coordinates = DreameMowerMapDecoder._metadata_coordinates(point)
+                        if coordinates is not None:
+                            map_data.active_points.append(Point(*coordinates))
 
                 if "cleanset" in data_json:
-                    map_data.cleanset = data_json["cleanset"]
-                    if isinstance(map_data.cleanset, str):
-                        map_data.cleanset = json.loads(map_data.cleanset)
+                    map_data.cleanset = DreameMowerMapDecoder._metadata_cleanset(
+                        data_json["cleanset"]
+                    )
             else:
                 map_data.need_optimization = True
                 map_data.wifi_map = True
@@ -654,11 +734,11 @@ class DreameMowerMapDecoder:
                         segments = DreameMowerMapDecoder.get_segments(
                             map_data, vslam_map
                         )
-                        if segments and "seg_inf" in data_json:
-                            seg_inf = data_json["seg_inf"]
+                        seg_inf = data_json.get("seg_inf")
+                        if segments and isinstance(seg_inf, dict):
                             for k, _value in segments.items():
-                                if seg_inf.get(str(k)):
-                                    segment_info = seg_inf[str(k)]
+                                segment_info = seg_inf.get(str(k))
+                                if isinstance(segment_info, dict) and segment_info:
                                     if segment_info.get("nei_id") is not None:
                                         segments[k].neighbors = segment_info["nei_id"]
                                     if segment_info.get("type") is not None:
@@ -679,7 +759,7 @@ class DreameMowerMapDecoder:
                                         ]
                                     if segment_info.get(MAP_PARAMETER_NAME):
                                         segments[k].custom_name = base64.b64decode(
-                                            segment_info.get(MAP_PARAMETER_NAME)
+                                            segment_info[MAP_PARAMETER_NAME]
                                         ).decode("utf-8")
                                     segments[k].visibility = (
                                         bool(k not in map_data.hidden_segments)
@@ -697,18 +777,16 @@ class DreameMowerMapDecoder:
 
             restored_map = map_data.restored_map
 
-            if "whmp" in data_json:
-                router_position = data_json["whmp"]
-                if router_position and len(router_position) > 1:
-                    map_data.router_position = Point(
-                        router_position[0],
-                        router_position[1],
-                    )
+            router_position = DreameMowerMapDecoder._metadata_coordinates(
+                data_json.get("whmp")
+            )
+            if router_position is not None:
+                map_data.router_position = Point(*router_position)
 
             wifi_map = data_json.get("whm")
-            if map_data.saved_map and wifi_map and len(wifi_map) > 1:
+            if map_data.saved_map and isinstance(wifi_map, str) and len(wifi_map) > 1:
                 wifi_map_data = DreameMowerMapDecoder.decode_saved_map(
-                    data_json["whm"], False, map_data.rotation
+                    wifi_map, False, map_data.rotation
                 )
                 if wifi_map_data:
                     map_data.wifi_map_data = wifi_map_data
@@ -717,9 +795,10 @@ class DreameMowerMapDecoder:
                             map_data.router_position
                         )
 
-            if "rism" in data_json:
+            embedded_saved_map = data_json.get("rism")
+            if isinstance(embedded_saved_map, str):
                 saved_map_data = DreameMowerMapDecoder.decode_saved_map(
-                    data_json["rism"],
+                    embedded_saved_map,
                     vslam_map,
                     map_data.rotation,
                 )
@@ -1028,7 +1107,7 @@ class DreameMowerMapDecoder:
                                         angle = float(furniture[8])
                                         if furniture_key == "ai_furniture":
                                             if angle == 180:
-                                                angle = 0
+                                                angle = 0.0
                                             elif angle == 0:
                                                 angle = 180
                                     if size >= 10:
@@ -1239,7 +1318,6 @@ class DreameMowerMapDecoder:
             if vslam_map and not map_data.saved_map:
                 map_data.need_optimization = not restored_map
         except Exception as ex:
-            # Exception arguments can contain private metadata from the wire.
             _LOGGER.error("Map Parse Failed (%s)", type(ex).__name__)
             return None, None
 
@@ -1630,7 +1708,7 @@ class DreameMowerMapDecoder:
 
             for k, _segment in map_data.segments.items():
                 map_data.segments[k].cleanset_type = cleanset_type
-                if cleanset is not None and cleanset_type != CleansetType.NONE:
+                if cleanset_type != CleansetType.NONE and cleanset is not None:
                     segment_id = str(k)
                     if segment_id not in cleanset:
                         cleanset[segment_id] = default_cleanset.copy()
@@ -1641,6 +1719,7 @@ class DreameMowerMapDecoder:
                     if len(item) > 4:
                         map_data.segments[k].cleaning_mode = item[4]
                     else:
+                        map_data.segments[k].cleaning_mode = None
                         map_data.segments[k].cleaning_route = None
                 else:
                     map_data.segments[k].cleaning_times = None
@@ -1651,11 +1730,12 @@ class DreameMowerMapDecoder:
     @staticmethod
     def set_segment_color_index(map_data: MapData) -> None:
         """Find segment color index as implemented on the app"""
-        if not map_data.segments:
+        segments = map_data.segments
+        if not segments:
             return
         area_color_index: dict[int, int] = {}
         sorted_segments = sorted(
-            map_data.segments.values(),
+            segments.values(),
             key=cmp_to_key(DreameMowerMapDecoder._compare_segment_neighbors),
         )
         for segment in sorted_segments:
@@ -1687,47 +1767,46 @@ class DreameMowerMapDecoder:
                 area_color_index[segment.segment_id] = 0
 
         for k, v in area_color_index.items():
-            map_data.segments[k].color_index = v
+            segments[k].color_index = v
 
     @staticmethod
     def set_segment_floor_material(
         map_data: MapData, segment_id: int, floor_material: dict[int, int] | None
     ) -> None:
-        if (
-            floor_material is not None
-            and map_data.segments
-            and segment_id in map_data.segments
+        segments = map_data.segments
+        if floor_material is None or not segments or segment_id not in segments:
+            return
+        segment = segments[segment_id]
+        material = segment.floor_material
+        direction = segment.floor_material_direction
+        if material is None:
+            return
+        if direction is not None:
+            segment.floor_material_rotated_direction = (
+                direction if map_data.rotation in (0, 180)
+                else 90 if direction == 0 else 0
+            )
+        else:
+            segment.floor_material_rotated_direction = None
+        if material <= 0 or material > 2:
+            floor_material[segment_id] = 0
+        elif material == 2:
+            floor_material[segment_id] = 3
+        elif direction == 90:
+            floor_material[segment_id] = 2
+        elif (
+            segment.x0 is not None and segment.x1 is not None
+            and segment.y0 is not None and segment.y1 is not None
         ):
-            segment = map_data.segments[segment_id]
-            material = segment.floor_material
-            if material is not None:
-                if segment.floor_material_direction is not None:
-                    segment.floor_material_rotated_direction = (
-                        segment.floor_material_direction
-                        if map_data.rotation == 0 or map_data.rotation == 180
-                        else 90
-                        if segment.floor_material_direction == 0
-                        else 0
-                    )
-                if material <= 0 or material > 2:
-                    floor_material[segment_id] = 0
-                elif material == 2:
-                    floor_material[segment_id] = 3
-                elif segment.floor_material_direction == 90:
-                    floor_material[segment_id] = 2
-                elif (
-                    segment.x0 is not None and segment.x1 is not None
-                    and segment.y0 is not None and segment.y1 is not None
-                ):
-                    floor_material[segment_id] = (
-                        2 if segment.x1 - segment.x0 <= segment.y1 - segment.y0 else 1
-                    )
+            floor_material[segment_id] = (
+                2 if segment.x1 - segment.x0 <= segment.y1 - segment.y0 else 1
+            )
 
     @staticmethod
     def set_floor_material(map_data: MapData) -> None:
         if map_data.segments:
             floor_material: dict[int, int] = {}
-            for k in map_data.segments.keys():
+            for k in map_data.segments:
                 DreameMowerMapDecoder.set_segment_floor_material(
                     map_data, k, floor_material
                 )
