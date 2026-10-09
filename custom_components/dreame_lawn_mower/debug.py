@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast, overload
 
 from .const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from .dreame_lawn_mower_client.app_protocol import (
@@ -153,7 +153,7 @@ DOCKED_STATES = {
 def _normalize_debug_value(value: Any) -> Any:
     """Convert a debug value into JSON-friendly data."""
     if is_dataclass(value):
-        return _normalize_debug_value(asdict(value))
+        return _normalize_debug_value(asdict(cast(Any, value)))
     if isinstance(value, Enum):
         name = value.name
         if isinstance(name, str):
@@ -173,9 +173,9 @@ def _normalize_debug_value(value: Any) -> Any:
         return [_normalize_debug_value(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
-    name = value.name if hasattr(value, "name") else None
-    if isinstance(name, str):
-        return name.lower()
+    object_name = value.name if hasattr(value, "name") else None
+    if isinstance(object_name, str):
+        return object_name.lower()
     enum_value = value.value if hasattr(value, "value") else None
     if isinstance(enum_value, (str, int, float, bool)):
         return enum_value
@@ -285,6 +285,14 @@ def _active_error_from_snapshot(snapshot: Any) -> bool:
     )
 
 
+@overload
+def _redact_debug_data(value: Mapping[str, object]) -> dict[str, Any]: ...
+
+
+@overload
+def _redact_debug_data(value: object) -> Any: ...
+
+
 def _redact_debug_data(value: Any) -> Any:
     """Recursively redact sensitive fields from debug data."""
     if isinstance(value, Mapping):
@@ -302,6 +310,14 @@ def _redact_debug_data(value: Any) -> Any:
     if isinstance(value, str):
         return sanitize_diagnostic_text(value)
     return value
+
+
+@overload
+def sanitize_debug_data(value: Mapping[str, object]) -> dict[str, Any]: ...
+
+
+@overload
+def sanitize_debug_data(value: object) -> Any: ...
 
 
 def sanitize_debug_data(value: Any) -> Any:
@@ -669,7 +685,7 @@ def build_debug_payload(
     device: Any,
     report_context: Mapping[str, Any] | None = None,
     coordinator_diagnostics: Mapping[str, Any] | None = None,
-    entity_diagnostics: list[Mapping[str, Any]] | None = None,
+    entity_diagnostics: Sequence[Mapping[str, Any]] | None = None,
     recent_events: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a sanitized structured debug payload for diagnostics or logs."""
@@ -680,7 +696,7 @@ def build_debug_payload(
     unknown_property_summary = _collect_unknown_property_summary(device)
     realtime_summary = _collect_realtime_summary(device)
 
-    payload = {
+    payload: dict[str, object] = {
         "diagnostic_schema_version": DIAGNOSTIC_SCHEMA_VERSION,
         "captured_at": datetime.now(UTC).isoformat(),
         "report_context": _normalize_debug_value(dict(report_context or {})),

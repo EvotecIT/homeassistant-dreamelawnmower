@@ -28,14 +28,14 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
 from functools import cmp_to_key
 from threading import Timer
 from .protocol import DreameMowerProtocol
-from .exceptions import DeviceUpdateFailedException
+from .exceptions import DeviceUpdateFailedException, InvalidActionException
 from .map_decoder import DreameMowerMapDecoder
 from .map_json_renderer import DreameMowerMapDataJsonRenderer
 from .map_optimizer import DreameMowerMapOptimizer
@@ -148,19 +148,22 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .map_manager import DreameMapMowerMapManager
+
 
 class DreameMapMowerMapEditor:
     """Every map change must be handled on memory before actually requesting it to the device because it takes too much time to get the updated map from the cloud.
     This class handles user edits on stored map data like updating customized cleaning settings or setting active segments on segment cleaning.
     Original app has a similar class to handle the same issue (Works optimistically)"""
 
-    def __init__(self, map_manager) -> None:
+    def __init__(self, map_manager: DreameMapMowerMapManager) -> None:
         self.map_manager = map_manager
 
-    def _set_updated_frame_id(self, frame_id) -> None:
+    def _set_updated_frame_id(self, frame_id: int | None) -> None:
         self.map_manager._updated_frame_id = frame_id
 
-    def refresh_map(self, map_id: int = None) -> None:
+    def refresh_map(self, map_id: int | None = None) -> None:
         if map_id:
             if self._saved_map_data and map_id in self._saved_map_data:
                 self._saved_map_data[map_id].last_updated = time.time()
@@ -170,7 +173,7 @@ class DreameMapMowerMapEditor:
             self._map_data.last_updated = time.time()
             self.map_manager._map_data_updated()
 
-    def set_active_areas(self, active_areas: list[list[int]]) -> None:
+    def set_active_areas(self, active_areas: Sequence[Sequence[float]]) -> None:
         map_data = self._map_data
         if map_data is not None:
             map_data.active_cruise_points = None
@@ -200,7 +203,7 @@ class DreameMapMowerMapEditor:
             self._set_updated_frame_id(map_data.frame_id)
             self.refresh_map()
 
-    def set_active_points(self, active_points: list[list[int]]) -> None:
+    def set_active_points(self, active_points: Sequence[Sequence[float]]) -> None:
         map_data = self._map_data
         if map_data is not None:
             map_data.active_points = []
@@ -214,7 +217,9 @@ class DreameMapMowerMapEditor:
             self._set_updated_frame_id(map_data.frame_id)
             self.refresh_map()
 
-    def set_cruise_points(self, active_cruise_points: list[list[int]]) -> None:
+    def set_cruise_points(
+        self, active_cruise_points: Sequence[Sequence[float]]
+    ) -> None:
         map_data = self._map_data
         if map_data is not None:
             map_data.active_cruise_points = {}
@@ -230,7 +235,7 @@ class DreameMapMowerMapEditor:
                         point[0],
                         point[1],
                         bool(point[2]),
-                        point[3],
+                        int(point[3]),
                     )
             self._set_updated_frame_id(map_data.frame_id)
             self.refresh_map()
@@ -303,7 +308,11 @@ class DreameMapMowerMapEditor:
             saved_map_data.saved_map_status = 2
             DreameMowerMapDecoder.set_segment_cleanset(
                 saved_map_data,
-                saved_map_data.cleanset,
+                (
+                    saved_map_data.cleanset
+                    if isinstance(saved_map_data.cleanset, dict)
+                    else None
+                ),
                 self.map_manager._capability,
             )
             self.map_manager._map_data = saved_map_data
@@ -312,7 +321,7 @@ class DreameMapMowerMapEditor:
             self.map_manager._selected_map_id = map_id
             self.refresh_map()
 
-    def set_pathways(self, pathways) -> None:
+    def set_pathways(self, pathways: Sequence[Sequence[float]] | None) -> None:
         map_data = self._map_data
         if not map_data or not self._selected_map_id or map_data.pathways is None:
             return
@@ -329,13 +338,17 @@ class DreameMapMowerMapEditor:
                     )
                 )
 
-        self._saved_map_data[self._selected_map_id].pathways = map_data.pathways
+        saved_map = self._saved_map_data.get(self._selected_map_id)
+        if saved_map is not None:
+            saved_map.pathways = map_data.pathways
         self._set_updated_frame_id(map_data.frame_id)
         self.refresh_map(self._selected_map_id)
         self.refresh_map()
         return
 
-    def set_predefined_points(self, predefined_points) -> None:
+    def set_predefined_points(
+        self, predefined_points: Sequence[Sequence[float]] | None
+    ) -> None:
         map_data = self._map_data
         if not map_data or not self._selected_map_id or map_data.predefined_points is None:
             return
@@ -349,16 +362,18 @@ class DreameMapMowerMapEditor:
                     point[0],
                     point[1],
                     bool(point[2]),
-                    point[3],
+                    int(point[3]),
                 )
 
-        self._saved_map_data[self._selected_map_id].predefined_points = map_data.predefined_points
+        saved_map = self._saved_map_data.get(self._selected_map_id)
+        if saved_map is not None:
+            saved_map.predefined_points = map_data.predefined_points
         self._set_updated_frame_id(map_data.frame_id)
         self.refresh_map(self._selected_map_id)
         self.refresh_map()
         return
 
-    def set_obstacle_ignore(self, x, y, obstacle_ignored):
+    def set_obstacle_ignore(self, x: float, y: float, obstacle_ignored: bool) -> None:
         map_data = self._map_data
         if not map_data or not map_data.obstacles:
             return
@@ -376,15 +391,17 @@ class DreameMapMowerMapEditor:
         self.refresh_map()
         return
 
-    def set_router_position(self, x, y):
+    def set_router_position(self, x: float, y: float) -> None:
         map_data = self._map_data
         if not map_data or not self._selected_map_id or map_data.router_position is None:
             return
 
         router_position = Point(int(x), int(y))
-        self._saved_map_data[self._selected_map_id].router_position = router_position
-        if self._saved_map_data[self._selected_map_id].wifi_map_data:
-            self._saved_map_data[self._selected_map_id].wifi_map_data.router_position = router_position
+        saved_map = self._saved_map_data.get(self._selected_map_id)
+        if saved_map is not None:
+            saved_map.router_position = router_position
+            if saved_map.wifi_map_data is not None:
+                saved_map.wifi_map_data.router_position = router_position
         map_data.router_position = router_position
         if map_data.wifi_map_data:
             map_data.wifi_map_data.router_position = router_position
@@ -393,7 +410,7 @@ class DreameMapMowerMapEditor:
         self.refresh_map()
         return
 
-    def delete_map(self, map_id: int = None) -> None:
+    def delete_map(self, map_id: int | None = None) -> None:
         map_data = self._map_data
         if map_data and map_data.temporary_map:
             return
@@ -406,17 +423,21 @@ class DreameMapMowerMapEditor:
             self.map_manager._refresh_map_list()
             self.map_manager.request_next_map_list()
         else:
-            if self._saved_map_data and map_id not in self._saved_map_data:
+            if map_id not in self._saved_map_data:
                 self.map_manager.schedule_update(2)
                 return
 
             if map_data and self._selected_map_id == map_id:
-                if len(self.map_manager._map_list) > 1:
-                    self.set_current_map(self.map_manager._map_list[-1])
+                remaining_maps = [
+                    key for key in self.map_manager._map_list
+                    if key != map_id and key in self._saved_map_data
+                ]
+                if remaining_maps:
+                    self.set_current_map(remaining_maps[-1])
                 else:
                     self.map_manager._map_data = None
-                    self._updated_frame_id = None
-                    self._selected_map_id = None
+                    self.map_manager._updated_frame_id = None
+                    self.map_manager._selected_map_id = None
 
             del self.map_manager._saved_map_data[map_id]
             self.map_manager._refresh_map_list()
@@ -427,34 +448,45 @@ class DreameMapMowerMapEditor:
         if saved_map_data and map_id in saved_map_data and len(segments) == 2:
             map_data = saved_map_data[map_id]
             if map_data.segments and segments[0] in map_data.segments and segments[1] in map_data.segments:
+                dimensions = map_data.dimensions
+                pixels, raw_data = map_data.pixel_type, map_data.data
+                if dimensions is None or pixels is None or raw_data is None:
+                    return
                 if segments[1] not in map_data.segments[segments[0]].neighbors:
                     _LOGGER.error("Segments are not neighbors with each other: %s", segments)
                     return
 
-                data = np.zeros((map_data.dimensions.width * map_data.dimensions.height), np.uint8)
-                for y in range(map_data.dimensions.height):
-                    for x in range(map_data.dimensions.width):
-                        index = y * map_data.dimensions.width + x
-                        if (map_data.data[index] & 0x3F) == segments[1]:
-                            data[index] = segments[0]
+                data = np.zeros((dimensions.width * dimensions.height), np.uint8)
+                for y in range(dimensions.height):
+                    for x in range(dimensions.width):
+                        index = y * dimensions.width + x
+                        if (raw_data[index] & 0x3F) == segments[1]:
+                            data[index] = (raw_data[index] & 0xC0) | segments[0]
                         else:
-                            data[index] = map_data.data[index]
+                            data[index] = raw_data[index]
 
-                        if int(map_data.pixel_type[x, y]) == segments[1]:
-                            map_data.pixel_type[x, y] = segments[0]
+                        if int(pixels[x, y]) == segments[1]:
+                            pixels[x, y] = segments[0]
 
                 map_data.data = bytes(data)
-                del self.map_manager._saved_map_data[map_id].segments[segments[1]]
+                retained = map_data.segments[segments[0]]
+                retained.neighbors = list(dict.fromkeys(
+                    retained.neighbors + map_data.segments[segments[1]].neighbors
+                ))
+                del map_data.segments[segments[1]]
                 new_segments = DreameMowerMapDecoder.get_segments(map_data, self.map_manager._vslam_map)
-                map_data.segments[segments[0]].x = new_segments[segments[0]].x
-                map_data.segments[segments[0]].y = new_segments[segments[0]].y
+                if segments[0] in new_segments:
+                    merged = new_segments[segments[0]]
+                    retained.x, retained.y = merged.x, merged.y
+                    retained.x0, retained.y0 = merged.x0, merged.y0
+                    retained.x1, retained.y1 = merged.x1, merged.y1
                 if map_data.hidden_segments and segments[1] in map_data.hidden_segments:
                     map_data.hidden_segments.remove(segments[1])
 
                 DreameMowerMapDecoder.set_floor_material(map_data)
                 for k, v in map_data.segments.items():
-                    if segments[1] in v.neighbors:
-                        map_data.segments[k].neighbors.remove(segments[1])
+                    neighbors = [segments[0] if nid == segments[1] else nid for nid in v.neighbors]
+                    v.neighbors = list(dict.fromkeys(nid for nid in neighbors if nid != k))
 
                 DreameMowerMapDecoder.set_segment_color_index(map_data)
                 if self._map_data and map_id == self._selected_map_id:
@@ -478,9 +510,9 @@ class DreameMapMowerMapEditor:
             self.set_current_map(self._selected_map_id)
             self.map_manager.request_next_map_list()
 
-    def replace_temporary_map(self, map_id: int = None) -> None:
+    def replace_temporary_map(self, map_id: int | None = None) -> None:
         map_data = self._map_data
-        if map_data and map_data.temporary_map:
+        if map_data and map_data.temporary_map and map_data.saved_map_id is not None:
             if not map_id and self._selected_map_id:
                 map_id = self._selected_map_id
 
@@ -491,8 +523,8 @@ class DreameMapMowerMapEditor:
                 new_map.saved_map_status = -1
                 new_map.saved_map = True
                 new_map.cleanset = {}
-                self.map_manager._saved_map_data[new_map.map_id] = new_map
                 del self.map_manager._saved_map_data[map_id]
+                self.map_manager._saved_map_data[map_data.saved_map_id] = new_map
                 self.map_manager._refresh_map_list()
 
                 map_data.saved_map_id = new_map.map_id
@@ -548,27 +580,48 @@ class DreameMapMowerMapEditor:
             self.map_manager._need_map_request = True
             self.map_manager._need_map_list_request = True
 
+    @staticmethod
+    def _require_cleanset(
+        map_data: MapData, segment_ids: Sequence[int], cleaning_mode: bool = False
+    ) -> dict[str, list[int]]:
+        """Require authoritative settings before an optimistic single or grouped edit."""
+        cleanset = map_data.cleanset
+        if not isinstance(cleanset, dict) or not map_data.segments:
+            raise InvalidActionException("Cleaning settings are unavailable for current map")
+        for segment_id in segment_ids:
+            if segment_id not in map_data.segments:
+                raise InvalidActionException("Cleaning settings are unavailable for current map")
+            settings = cleanset.get(str(segment_id))
+            if settings is None or len(settings) < (5 if cleaning_mode else 4):
+                raise InvalidActionException("Cleaning settings are unavailable for current map")
+            if cleaning_mode and map_data.segments[segment_id].cleaning_mode is None:
+                raise InvalidActionException("Cleaning settings are unavailable for current map")
+        return cleanset
+
     def set_cleaning_sequence(self, cleaning_sequence: list[int]) -> list[int] | None:
         map_data = self._map_data
-        if map_data and map_data.segments and not map_data.temporary_map:
+        if (
+            map_data and map_data.segments and not map_data.temporary_map
+        ):
+            cleanset = self._require_cleanset(map_data, [*map_data.segments, *cleaning_sequence])
             new_cleaning_sequence = []
             if cleaning_sequence:
                 for k, v in map_data.segments.items():
                     if k not in cleaning_sequence:
                         map_data.segments[k].order = 0
-                        map_data.cleanset[str(k)][3] = 0
+                        cleanset[str(k)][3] = 0
 
                 index = 1
                 for k in cleaning_sequence:
                     if int(k) in map_data.segments.keys():
                         map_data.segments[k].order = index
-                        map_data.cleanset[str(k)][3] = index
+                        cleanset[str(k)][3] = index
                         new_cleaning_sequence.append(k)
                         index = index + 1
             else:
                 for k in map_data.segments.keys():
                     map_data.segments[k].order = 0
-                    map_data.cleanset[str(k)][3] = 0
+                    cleanset[str(k)][3] = 0
 
             if self._saved_map_data and map_data.map_id in self._saved_map_data:
                 self._saved_map_data[map_data.map_id].cleanset = copy.deepcopy(map_data.cleanset)
@@ -576,15 +629,20 @@ class DreameMapMowerMapEditor:
             self._set_updated_frame_id(map_data.frame_id)
             self.refresh_map()
             return self.map_manager.cleaning_sequence
+        return None
 
     def set_segment_order(self, segment_id: int, order: int) -> list[int] | None:
         map_data = self._map_data
-        if map_data and map_data.segments and segment_id in map_data.segments and not map_data.temporary_map:
+        if (
+            map_data and map_data.segments and segment_id in map_data.segments
+            and not map_data.temporary_map
+        ):
+            cleanset = self._require_cleanset(map_data, list(map_data.segments))
             if order > 0:
                 current_order = map_data.segments[segment_id].order
                 if current_order != order:
                     map_data.segments[segment_id].order = order
-                    map_data.cleanset[str(segment_id)][3] = order
+                    cleanset[str(segment_id)][3] = order
                     for k, v in map_data.segments.items():
                         if k != segment_id and v.order == order:
                             map_data.segments[k].order = (
@@ -592,15 +650,16 @@ class DreameMapMowerMapEditor:
                             )
             else:
                 map_data.segments[segment_id].order = 0
+                cleanset[str(segment_id)][3] = 0
 
             index = 1
             for k in self.map_manager.cleaning_sequence:
                 if map_data.segments[k].order:
                     map_data.segments[k].order = index
-                    map_data.cleanset[str(k)][3] = index
+                    cleanset[str(k)][3] = index
                     index = index + 1
                 else:
-                    map_data.cleanset[str(k)][3] = 0
+                    cleanset[str(k)][3] = 0
 
             if (
                 self._saved_map_data
@@ -612,10 +671,16 @@ class DreameMapMowerMapEditor:
             self._set_updated_frame_id(map_data.frame_id)
             self.refresh_map()
             return self.map_manager.cleaning_sequence
+        return None
 
-    def cleanset(self, map_data: MapData) -> list[list[int]] | None:
-        cleanset = []
-        has_cleaning_mode = False
+    def cleanset(self, map_data: MapData) -> list[list[int]]:
+        cleanset: list[list[int]] = []
+        if not map_data.segments:
+            return cleanset
+        has_cleaning_mode = any(
+            segment.cleaning_mode is not None
+            for segment in map_data.segments.values()
+        )
         for k, v in map_data.segments.items():
             if v.cleaning_times is None:
                 v.cleaning_times = 1
@@ -624,9 +689,6 @@ class DreameMapMowerMapEditor:
                 k,
                 v.cleaning_times,
             ]
-
-            if v.cleaning_mode is not None:
-                has_cleaning_mode = True
 
             if has_cleaning_mode:
                 settings.append(v.cleaning_mode if v.cleaning_mode is not None else 2)
@@ -638,9 +700,13 @@ class DreameMapMowerMapEditor:
         self, segment_id: int, cleaning_times: int, refresh_map: bool = True
     ) -> list[list[int]] | None:
         map_data = self._map_data
-        if map_data and map_data.segments and segment_id in map_data.segments and not map_data.temporary_map:
+        if (
+            map_data and map_data.segments and segment_id in map_data.segments
+            and not map_data.temporary_map
+        ):
+            cleanset = self._require_cleanset(map_data, [segment_id])
             map_data.segments[segment_id].cleaning_times = cleaning_times
-            map_data.cleanset[str(segment_id)][2] = cleaning_times
+            cleanset[str(segment_id)][2] = cleaning_times
             if (
                 self._saved_map_data
                 and self._selected_map_id is not None
@@ -651,6 +717,7 @@ class DreameMapMowerMapEditor:
                 self._set_updated_frame_id(map_data.frame_id)
                 self.refresh_map()
                 return self.cleanset(map_data)
+        return None
 
     def set_segment_cleaning_mode(
         self, segment_id: int, cleaning_mode: int, refresh_map: bool = True
@@ -663,8 +730,9 @@ class DreameMapMowerMapEditor:
             and not map_data.temporary_map
             and map_data.segments[segment_id].cleaning_mode is not None
         ):
+            cleanset = self._require_cleanset(map_data, [segment_id], True)
             map_data.segments[segment_id].cleaning_mode = cleaning_mode
-            map_data.cleanset[str(segment_id)][4] = cleaning_mode
+            cleanset[str(segment_id)][4] = cleaning_mode
             if (
                 self._saved_map_data
                 and self._selected_map_id is not None
@@ -675,6 +743,7 @@ class DreameMapMowerMapEditor:
                 self._set_updated_frame_id(map_data.frame_id)
                 self.refresh_map()
                 return self.cleanset(map_data)
+        return None
 
     def set_segment_cleaning_route(
         self, segment_id: int, cleaning_route: int, refresh_map: bool = True
@@ -694,10 +763,11 @@ class DreameMapMowerMapEditor:
                 self._set_updated_frame_id(map_data.frame_id)
                 self.refresh_map()
                 return self.cleanset(map_data)
+        return None
 
     def set_segment_floor_material(
-        self, segment_id: int, floor_material: int, direction: int = None
-    ) -> list[list[int]] | None:
+        self, segment_id: int, floor_material: int, direction: int | None = None
+    ) -> dict[str, dict[str, int | None]]:
         map_data = self._map_data
         if map_data and map_data.segments and segment_id in map_data.segments and not map_data.temporary_map:
             if direction is not None:
@@ -708,18 +778,21 @@ class DreameMapMowerMapEditor:
 
             map_data.segments[segment_id].floor_material = floor_material
             map_data.segments[segment_id].floor_material_direction = direction
+            saved_map = (
+                self._saved_map_data.get(self._selected_map_id)
+                if self._selected_map_id is not None else None
+            )
             if (
-                self._saved_map_data
-                and self._selected_map_id is not None
-                and self._selected_map_id in self._saved_map_data
-                and segment_id in self._saved_map_data[self._selected_map_id].segments
+                saved_map is not None
+                and saved_map.segments is not None
+                and segment_id in saved_map.segments
             ):
-                self._saved_map_data[self._selected_map_id].segments[segment_id].floor_material = floor_material
-                self._saved_map_data[self._selected_map_id].segments[segment_id].floor_material_direction = direction
+                saved_map.segments[segment_id].floor_material = floor_material
+                saved_map.segments[segment_id].floor_material_direction = direction
                 DreameMowerMapDecoder.set_segment_floor_material(
-                    self._saved_map_data[self._selected_map_id],
+                    saved_map,
                     segment_id,
-                    self._saved_map_data[self._selected_map_id].floor_material,
+                    saved_map.floor_material,
                 )
                 self.refresh_map(self._selected_map_id)
 
@@ -739,19 +812,23 @@ class DreameMapMowerMapEditor:
             }
         return {}
 
-    def set_segment_visibility(self, segment_id: int, visibility: int) -> list[list[int]] | None:
+    def set_segment_visibility(self, segment_id: int, visibility: int) -> list[int]:
         map_data = self._map_data
         if map_data and map_data.segments and segment_id in map_data.segments and not map_data.temporary_map:
             map_data.segments[segment_id].visibility = visibility
             map_data.hidden_segments = [k for k, v in map_data.segments.items() if v.visibility == False]
+            saved_map = (
+                self._saved_map_data.get(self._selected_map_id)
+                if self._selected_map_id is not None else None
+            )
             if (
-                self._saved_map_data
-                and self._selected_map_id is not None
-                and self._selected_map_id in self._saved_map_data
+                saved_map is not None
+                and saved_map.segments is not None
+                and segment_id in saved_map.segments
             ):
-                self._saved_map_data[self._selected_map_id].segments[segment_id].visibility = visibility
-                self._saved_map_data[self._selected_map_id].hidden_segments = [
-                    k for k, v in self._saved_map_data[self._selected_map_id].segments.items() if v.visibility == False
+                saved_map.segments[segment_id].visibility = visibility
+                saved_map.hidden_segments = [
+                    k for k, v in saved_map.segments.items() if v.visibility == False
                 ]
 
             self._set_updated_frame_id(map_data.frame_id)
@@ -759,7 +836,9 @@ class DreameMapMowerMapEditor:
             return map_data.hidden_segments
         return []
 
-    def set_segment_name(self, segment_id: int, segment_type: int, custom_name: str = None) -> dict[str, Any] | None:
+    def set_segment_name(
+        self, segment_id: int, segment_type: int, custom_name: str | None = None
+    ) -> dict[int, dict[str, Any]] | None:
         map_data = self._map_data
         if (
             map_data
@@ -788,23 +867,20 @@ class DreameMapMowerMapEditor:
 
                 map_data.segments[segment_id].set_name()
 
-                self._saved_map_data[self._selected_map_id].segments[segment_id].custom_name = map_data.segments[
-                    segment_id
-                ].custom_name
-                self._saved_map_data[self._selected_map_id].segments[segment_id].index = map_data.segments[
-                    segment_id
-                ].index
-                self._saved_map_data[self._selected_map_id].segments[segment_id].type = map_data.segments[
-                    segment_id
-                ].type
-                self._saved_map_data[self._selected_map_id].segments[segment_id].set_name()
-                self.refresh_map(self._selected_map_id)
+                saved_map = self._saved_map_data.get(self._selected_map_id)
+                if saved_map is not None and saved_map.segments and segment_id in saved_map.segments:
+                    saved_segment = saved_map.segments[segment_id]
+                    saved_segment.custom_name = map_data.segments[segment_id].custom_name
+                    saved_segment.index = map_data.segments[segment_id].index
+                    saved_segment.type = map_data.segments[segment_id].type
+                    saved_segment.set_name()
+                    self.refresh_map(self._selected_map_id)
 
                 for k, v in map_data.segments.items():
-                    if map_data.segments[k].custom_name is not None:
+                    if v.custom_name is not None:
                         segment_info[k] = {
                             MAP_PARAMETER_NAME: base64.b64encode(
-                                map_data.segments[k].custom_name.encode("utf-8")
+                                v.custom_name.encode("utf-8")
                             ).decode("utf-8"),
                             MAP_REQUEST_PARAMETER_TYPE: 0,
                             MAP_REQUEST_PARAMETER_INDEX: 0,
@@ -823,8 +899,12 @@ class DreameMapMowerMapEditor:
                 self._set_updated_frame_id(map_data.frame_id)
                 self.refresh_map()
                 return segment_info
+        return None
 
-    def set_zones(self, virtual_walls, no_go_areas) -> None:
+    def set_zones(
+        self, virtual_walls: Sequence[Sequence[float]] | None,
+        no_go_areas: Sequence[Sequence[float]] | None,
+    ) -> None:
         map_data = self._map_data
         if not map_data or not self._selected_map_id:
             return
@@ -876,7 +956,7 @@ class DreameMapMowerMapEditor:
         return self.map_manager._map_data
 
     @property
-    def _saved_map_data(self) -> MapData | None:
+    def _saved_map_data(self) -> dict[int, MapData]:
         return self.map_manager._saved_map_data
 
     @property

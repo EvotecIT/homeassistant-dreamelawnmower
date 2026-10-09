@@ -7,7 +7,6 @@ import ipaddress
 from collections.abc import Mapping
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
@@ -19,6 +18,7 @@ from .dreame_lawn_mower_client.models import (
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pLiveStreamSession,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .video_cache_storage import async_save_video_cache
 
 _STORAGE_VERSION = 1
@@ -34,11 +34,11 @@ def _cache_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
 
 
 async def async_remove_video_lan_cache(
-    hass: HomeAssistant, entry: ConfigEntry,
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
 ) -> None:
     """Remove persisted data even if this entry never loaded successfully."""
     owner = getattr(
-        hass.data.get(DOMAIN, {}).get(entry.entry_id), "video_lan_cache", None,
+        getattr(entry, "runtime_data", None), "video_lan_cache", None,
     )
     if isinstance(owner, DreameLawnMowerVideoLanCache):
         await owner.async_remove()
@@ -180,8 +180,11 @@ def _decode_endpoint(
     if not isinstance(payload, Mapping):
         return None
     address = _text(payload.get("address"))
+    port_value = payload.get("port")
+    if port_value is None:
+        return None
     try:
-        port = int(payload.get("port"))
+        port = int(port_value)
     except (TypeError, ValueError):
         return None
     if address is None or not _valid_cached_address(address) or not 0 < port <= 65535:

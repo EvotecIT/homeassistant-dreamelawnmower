@@ -84,10 +84,15 @@ def test_map_integrity_hash_covers_decoded_text_not_transport_escape_overhead() 
     client = _client()
     text = '{"map":[]}'
     wire_size = len(text) + 2
-    client._sync_call_app_action = lambda payload: {
-        "d": {"size": wire_size, "hash": hashlib.md5(text.encode()).hexdigest()}
-    }
-    client._sync_get_app_map_text = lambda **kwargs: (text, 1, wire_size)
+
+    def read(payload):
+        if payload["t"] == "MAPI":
+            return {
+                "d": {"size": wire_size, "hash": hashlib.md5(text.encode()).hexdigest()}
+            }
+        return {"d": {"data": text, "size": wire_size}}
+
+    client._sync_call_app_action = read
     entry = {"idx": 0}
     client._sync_download_app_map(entry, chunk_size=400, include_payload=True)
     assert entry["available"] is True

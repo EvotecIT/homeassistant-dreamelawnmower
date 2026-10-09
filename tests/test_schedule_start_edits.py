@@ -292,6 +292,12 @@ def test_home_assistant_schema_preserves_whole_minute_time_and_sunday_index():
 
 
 def _coordinator(client, known_active=False):
+    # These coordinator/cache tests use the synchronous synthetic protocol peer.
+    # Native HTTP edit contracts have a separate loopback transport suite.
+    async def writer(**kwargs):
+        return client._sync_set_app_schedule_task_start_time(**kwargs)
+
+    client.async_set_app_schedule_task_start_time = writer
     before = client._sync_get_app_schedules(
         include_raw=False, map_indices=[0], include_current_task=False
     )

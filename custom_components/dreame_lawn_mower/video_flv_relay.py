@@ -13,7 +13,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 from aiohttp import ClientResponseError, ClientSession, ClientTimeout, web
 from homeassistant.core import HomeAssistant
@@ -518,7 +518,8 @@ class DreameLawnMowerFlvRelay:
             await runner.setup()
             site = web.TCPSite(runner, "127.0.0.1", 0)
             await site.start()
-            server = site._server  # noqa: SLF001 - no public bound-port API.
+            # TCPSite starts an asyncio TCP server; no public bound-port API.
+            server = cast(asyncio.Server | None, site._server)  # noqa: SLF001
             if server is None or not server.sockets:
                 await runner.cleanup()
                 raise RuntimeError(

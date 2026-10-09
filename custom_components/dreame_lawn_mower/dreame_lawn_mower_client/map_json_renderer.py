@@ -7,65 +7,84 @@ import io
 import json
 import logging
 import time
-from functools import cmp_to_key
-from io import BytesIO
-from typing import Any
+from typing import NotRequired, TypedDict
 
-from PIL import (
-    Image,
-    PngImagePlugin,
-)
+import numpy as np
+from numpy.typing import NDArray
+from PIL import Image, PngImagePlugin
 
-from .const import (
-    MAP_DATA_JSON_CLASS,
-    MAP_DATA_JSON_PARAMETER_ACTIVE,
-    MAP_DATA_JSON_PARAMETER_ACTIVE_ZONE,
-    MAP_DATA_JSON_PARAMETER_AVG,
-    MAP_DATA_JSON_PARAMETER_CHARGER_POSITION,
-    MAP_DATA_JSON_PARAMETER_CLASS,
-    MAP_DATA_JSON_PARAMETER_COMPRESSED_PIXELS,
-    MAP_DATA_JSON_PARAMETER_DIMENSIONS,
-    MAP_DATA_JSON_PARAMETER_ENTITIES,
-    MAP_DATA_JSON_PARAMETER_FLOOR,
-    MAP_DATA_JSON_PARAMETER_LAYERS,
-    MAP_DATA_JSON_PARAMETER_MAX,
-    MAP_DATA_JSON_PARAMETER_META_DATA,
-    MAP_DATA_JSON_PARAMETER_MID,
-    MAP_DATA_JSON_PARAMETER_MIN,
-    MAP_DATA_JSON_PARAMETER_NAME,
-    MAP_DATA_JSON_PARAMETER_NO_GO_AREA,
-    MAP_DATA_JSON_PARAMETER_PATH,
-    MAP_DATA_JSON_PARAMETER_PIXEL_COUNT,
-    MAP_DATA_JSON_PARAMETER_PIXEL_SIZE,
-    MAP_DATA_JSON_PARAMETER_PIXELS,
-    MAP_DATA_JSON_PARAMETER_POINTS,
-    MAP_DATA_JSON_PARAMETER_ROBOT_POSITION,
-    MAP_DATA_JSON_PARAMETER_ROTATION,
-    MAP_DATA_JSON_PARAMETER_SEGMENT,
-    MAP_DATA_JSON_PARAMETER_SEGMENT_ID,
-    MAP_DATA_JSON_PARAMETER_SIZE,
-    MAP_DATA_JSON_PARAMETER_TYPE,
-    MAP_DATA_JSON_PARAMETER_VERSION,
-    MAP_DATA_JSON_PARAMETER_VIRTUAL_WALL,
-    MAP_DATA_JSON_PARAMETER_WALL,
-    MAP_DATA_JSON_PARAMETER_X,
-    MAP_DATA_JSON_PARAMETER_Y,
-    MAP_PARAMETER_ANGLE,
-)
-from .device_types import (
-    PathType,
-)
-from .map_renderer_types import (
-    MapRendererLayer,
-)
-from .map_types import (
-    Area,
-    MapData,
-    MapPixelType,
-)
+from .const import MAP_DATA_JSON_CLASS
+from .device_types import PathType
+from .map_types import Area, MapData, MapImageDimensions, MapPixelType, Point
 from .resources import DEFAULT_MAP_DATA, DEFAULT_MAP_DATA_IMAGE
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _Entity(TypedDict):
+    type: str
+    points: list[int]
+    metaData: NotRequired[dict[str, float]]
+
+
+class _AxisDimensions(TypedDict):
+    min: int
+    max: int
+    mid: int
+    avg: int
+
+
+class _LayerDimensions(TypedDict):
+    x: _AxisDimensions
+    y: _AxisDimensions
+    pixelCount: float
+
+
+class _SegmentMetadata(TypedDict):
+    segmentId: int
+    active: bool
+    name: str | None
+
+
+class _RasterLayer(TypedDict):
+    type: str
+    pixels: list[int]
+    dimensions: _LayerDimensions
+    compressedPixels: list[int]
+    metaData: NotRequired[_SegmentMetadata]
+
+
+class _Size(TypedDict):
+    x: int
+    y: int
+
+
+class _MapMetadata(TypedDict):
+    version: int
+    rotation: int | None
+
+
+_MapJson = TypedDict(
+    "_MapJson",
+    {
+        "__class": str,
+        "size": _Size,
+        "pixelSize": int,
+        "layers": list[_RasterLayer],
+        "entities": list[_Entity],
+        "metaData": _MapMetadata,
+    },
+)
+_RasterKey = tuple[
+    float,
+    float,
+    int,
+    int,
+    int,
+    bytes,
+    tuple[int, ...],
+    tuple[tuple[int, str | None], ...],
+]
 
 
 class DreameMowerMapDataJsonRenderer:
@@ -74,34 +93,17 @@ class DreameMowerMapDataJsonRenderer:
     MAX = round((HALF_INT16 + HALF_INT16_UPPER_HALF) / 10)
 
     def __init__(self) -> None:
-        self._map_data: MapData = None
-        self._map_data_json: dict[str, Any] = None
-        self._left: int = 0
-        self._top: int = 0
-        self._grid_size: int = 0
-        self.render_complete: bool = True
-        self._layers: dict[MapRendererLayer, dict[str, Any]] = {}
-
-        self._default_map_data: str = base64.b64decode(DEFAULT_MAP_DATA)
-        self._default_map_image = Image.open(
-            BytesIO(base64.b64decode(DEFAULT_MAP_DATA_IMAGE))
-        ).convert("RGBA")
+        self._map_data_json: str | None = None
+        self._map_image: bytes | None = None
+        self._raster_key: _RasterKey | None = None
+        self._raster_layers: list[_RasterLayer] = []
+        self.render_complete = True
+        self._default_map_data = base64.b64decode(DEFAULT_MAP_DATA).decode("utf-8")
+        with Image.open(io.BytesIO(base64.b64decode(DEFAULT_MAP_DATA_IMAGE))) as image:
+            self._default_map_image = image.convert("RGBA")
 
     @staticmethod
-    def _coordinate_tuple_sort(a: list[int], b: list[int]) -> bool:
-        xA = a[0]
-        yA = a[1]
-        xB = b[0]
-        yB = b[1]
-
-        if yB > yA:
-            return -1
-        if xB > xA:
-            return 1
-        return 0
-
-    @staticmethod
-    def _convert_coordinates(x: int, y: int) -> int:
+    def _convert_coordinates(x: float, y: float) -> list[int]:
         return [
             round((x + DreameMowerMapDataJsonRenderer.HALF_INT16) / 10),
             DreameMowerMapDataJsonRenderer.MAX
@@ -109,601 +111,281 @@ class DreameMowerMapDataJsonRenderer:
         ]
 
     @staticmethod
-    def _convert_angle(angle: int) -> int:
+    def _convert_angle(angle: float) -> float:
         return (((180 - angle) if (angle < 180) else (360 - angle + 180)) + 270) % 360
 
     @staticmethod
-    def _to_buffer(image, extra_data: str) -> bytes:
+    def _angle_metadata(angle: float | None) -> dict[str, float]:
+        """Keep an unknown heading absent instead of inventing an orientation."""
+        return (
+            {"angle": DreameMowerMapDataJsonRenderer._convert_angle(angle)}
+            if angle is not None
+            else {}
+        )
+
+    @staticmethod
+    def _to_buffer(image: Image.Image, extra_data: str) -> bytes:
         buffer = io.BytesIO()
         info = PngImagePlugin.PngInfo()
         info.add_text(MAP_DATA_JSON_CLASS, extra_data, zip=True)
         image.save(buffer, format="PNG", pnginfo=info)
         return buffer.getvalue()
 
-    def render_map(
-        self, map_data: MapData, robot_status: int = 0, station_status: int = 0
-    ) -> bytes:
-        if map_data is None or map_data.empty_map:
-            return self.default_map_image
+    @classmethod
+    def _area_entity(cls, area: Area, kind: str) -> _Entity:
+        return {
+            "type": kind,
+            "points": [
+                *cls._convert_coordinates(area.x0, area.y0),
+                *cls._convert_coordinates(area.x1, area.y1),
+                *cls._convert_coordinates(area.x2, area.y2),
+                *cls._convert_coordinates(area.x3, area.y3),
+            ],
+        }
 
-        if (
-            self._map_data
-            and self._map_data == map_data
-            and self._map_data.frame_id == map_data.frame_id
-            and self._map_data_json
-        ):
-            _LOGGER.debug("Skip render map data, not changed")
-            return self._to_buffer(
-                self._default_map_image,
-                json.dumps(self._map_data_json, separators=(",", ":")),
-            )
+    @classmethod
+    def _position_entity(cls, point: Point, kind: str) -> _Entity:
+        return {
+            "type": kind,
+            "points": cls._convert_coordinates(point.x, point.y),
+            "metaData": cls._angle_metadata(point.a),
+        }
 
-        now = time.time()
-        self.render_complete = False
-        if (
-            self._map_data is None
-            or self._map_data.dimensions != map_data.dimensions
-            or self._map_data.map_id != map_data.map_id
-            or self._map_data.saved_map_status != map_data.saved_map_status
-        ):
-            self._map_data = None
-            self._left = round(
-                (map_data.dimensions.left + DreameMowerMapDataJsonRenderer.HALF_INT16)
-                / 10
+    @classmethod
+    def _entities(cls, map_data: MapData, grid_size: int) -> list[_Entity]:
+        entities: list[_Entity] = []
+        if map_data.robot_position is not None:
+            entities.append(
+                cls._position_entity(map_data.robot_position, "robot_position")
             )
-            self._top = round(
-                (map_data.dimensions.top + DreameMowerMapDataJsonRenderer.HALF_INT16)
-                / 10
+        if map_data.charger_position is not None:
+            entities.append(
+                cls._position_entity(map_data.charger_position, "charger_location")
             )
-            self._grid_size = round(map_data.dimensions.grid_size / 10)
+        for area in map_data.no_go_areas or ():
+            entities.append(cls._area_entity(area, "no_go_area"))
+        for area in map_data.active_areas or ():
+            entities.append(cls._area_entity(area, "active_zone"))
+        size = 15 * grid_size
+        for point in map_data.active_points or ():
+            entities.append(
+                cls._area_entity(
+                    Area(
+                        point.x - size,
+                        point.y - size,
+                        point.x + size,
+                        point.y - size,
+                        point.x + size,
+                        point.y + size,
+                        point.x - size,
+                        point.y + size,
+                    ),
+                    "active_zone",
+                )
+            )
+        for wall in map_data.virtual_walls or ():
+            entities.append(
+                {
+                    "type": "virtual_wall",
+                    "points": [
+                        *cls._convert_coordinates(wall.x0, wall.y0),
+                        *cls._convert_coordinates(wall.x1, wall.y1),
+                    ],
+                }
+            )
+        if map_data.path:
+            points: list[int] = []
+            previous = map_data.path[0]
+            for point in map_data.path[1:]:
+                if point.path_type == PathType.LINE:
+                    points.extend(cls._convert_coordinates(previous.x, previous.y))
+                    points.extend(cls._convert_coordinates(point.x, point.y))
+                else:
+                    if points:
+                        entities.append({"type": "path", "points": points})
+                    points = []
+                previous = point
+            if points:
+                entities.append({"type": "path", "points": points})
+        return entities
 
-        map_data_json = {
-            MAP_DATA_JSON_PARAMETER_CLASS: MAP_DATA_JSON_CLASS,
-            MAP_DATA_JSON_PARAMETER_SIZE: {
-                MAP_DATA_JSON_PARAMETER_X: DreameMowerMapDataJsonRenderer.MAX,
-                MAP_DATA_JSON_PARAMETER_Y: DreameMowerMapDataJsonRenderer.MAX,
-            },
-            MAP_DATA_JSON_PARAMETER_PIXEL_SIZE: self._grid_size,
-            MAP_DATA_JSON_PARAMETER_LAYERS: [],
-            MAP_DATA_JSON_PARAMETER_ENTITIES: [],
-            MAP_DATA_JSON_PARAMETER_META_DATA: {
-                MAP_DATA_JSON_PARAMETER_VERSION: 2,
-                MAP_DATA_JSON_PARAMETER_ROTATION: map_data.rotation,
+    @staticmethod
+    def _axis_dimensions(values: list[int]) -> _AxisDimensions:
+        minimum, maximum = min(values), max(values)
+        return {
+            "min": minimum,
+            "max": maximum,
+            "mid": round((minimum + maximum) / 2),
+            "avg": round(sum(values) / len(values)),
+        }
+
+    @classmethod
+    def _raster_layer(cls, kind: str, pixels: list[tuple[int, int]]) -> _RasterLayer:
+        """Encode sorted horizontal runs, retaining gaps and numeric zero averages."""
+        ordered = sorted(pixels, key=lambda point: (point[1], point[0]))
+        runs: list[int] = []
+        start_x, row = ordered[0]
+        count = 1
+        for x, y in ordered[1:]:
+            if y == row and x == start_x + count:
+                count += 1
+            else:
+                runs.extend((start_x, row, count))
+                start_x, row, count = x, y, 1
+        runs.extend((start_x, row, count))
+        return {
+            "type": kind,
+            "pixels": [],
+            "compressedPixels": runs,
+            "dimensions": {
+                "x": cls._axis_dimensions([point[0] for point in pixels]),
+                "y": cls._axis_dimensions([point[1] for point in pixels]),
+                "pixelCount": float(len(pixels)),
             },
         }
 
-        if map_data.robot_position:
-            if (
-                self._map_data is None
-                or self._map_data.robot_position != map_data.robot_position
-                or not self._layers.get(MapRendererLayer.ROBOT)
-            ):
-                self._layers[MapRendererLayer.ROBOT] = {
-                    MAP_DATA_JSON_PARAMETER_TYPE: (
-                        MAP_DATA_JSON_PARAMETER_ROBOT_POSITION
-                    ),
-                    MAP_DATA_JSON_PARAMETER_POINTS: (
-                        DreameMowerMapDataJsonRenderer._convert_coordinates(
-                            map_data.robot_position.x, map_data.robot_position.y
-                        )
-                    ),
-                    MAP_DATA_JSON_PARAMETER_META_DATA: {
-                        MAP_PARAMETER_ANGLE: (
-                            DreameMowerMapDataJsonRenderer._convert_angle(
-                                map_data.robot_position.a
-                            )
-                        )
-                    },
-                }
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].append(
-                self._layers[MapRendererLayer.ROBOT]
-            )
-
-        if map_data.charger_position:
-            if (
-                self._map_data is None
-                or self._map_data.charger_position != map_data.charger_position
-                or not self._layers.get(MapRendererLayer.CHARGER)
-            ):
-                self._layers[MapRendererLayer.CHARGER] = {
-                    MAP_DATA_JSON_PARAMETER_TYPE: (
-                        MAP_DATA_JSON_PARAMETER_CHARGER_POSITION
-                    ),
-                    MAP_DATA_JSON_PARAMETER_POINTS: (
-                        DreameMowerMapDataJsonRenderer._convert_coordinates(
-                            map_data.charger_position.x, map_data.charger_position.y
-                        )
-                    ),
-                    MAP_DATA_JSON_PARAMETER_META_DATA: {
-                        MAP_PARAMETER_ANGLE: (
-                            DreameMowerMapDataJsonRenderer._convert_angle(
-                                map_data.charger_position.a
-                            )
-                        )
-                    },
-                }
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].append(
-                self._layers[MapRendererLayer.CHARGER]
-            )
-
-        if map_data.no_go_areas:
-            if (
-                self._map_data is None
-                or self._map_data.no_go_areas != map_data.no_go_areas
-                or not self._layers.get(MapRendererLayer.NO_GO)
-            ):
-                self._layers[MapRendererLayer.NO_GO] = []
-                for area in map_data.no_go_areas:
-                    a = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x0, area.y0
-                    )
-                    b = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x1, area.y1
-                    )
-                    c = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x2, area.y2
-                    )
-                    d = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x3, area.y3
-                    )
-
-                    self._layers[MapRendererLayer.NO_GO].append(
-                        {
-                            MAP_DATA_JSON_PARAMETER_TYPE: (
-                                MAP_DATA_JSON_PARAMETER_NO_GO_AREA
-                            ),
-                            MAP_DATA_JSON_PARAMETER_POINTS: [
-                                a[0],
-                                a[1],
-                                b[0],
-                                b[1],
-                                c[0],
-                                c[1],
-                                d[0],
-                                d[1],
-                            ],
-                        }
-                    )
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].extend(
-                self._layers[MapRendererLayer.NO_GO]
-            )
-
-        if map_data.active_areas:
-            if (
-                self._map_data is None
-                or self._map_data.active_areas != map_data.active_areas
-                or not self._layers.get(MapRendererLayer.ACTIVE_AREA)
-            ):
-                self._layers[MapRendererLayer.ACTIVE_AREA] = []
-                for area in map_data.active_areas:
-                    a = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x0, area.y0
-                    )
-                    b = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x1, area.y1
-                    )
-                    c = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x2, area.y2
-                    )
-                    d = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x3, area.y3
-                    )
-
-                    self._layers[MapRendererLayer.ACTIVE_AREA].append(
-                        {
-                            MAP_DATA_JSON_PARAMETER_TYPE: (
-                                MAP_DATA_JSON_PARAMETER_ACTIVE_ZONE
-                            ),
-                            MAP_DATA_JSON_PARAMETER_POINTS: [
-                                a[0],
-                                a[1],
-                                b[0],
-                                b[1],
-                                c[0],
-                                c[1],
-                                d[0],
-                                d[1],
-                            ],
-                        }
-                    )
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].extend(
-                self._layers[MapRendererLayer.ACTIVE_AREA]
-            )
-
-        if map_data.active_points:
-            if (
-                self._map_data is None
-                or self._map_data.active_points != map_data.active_points
-                or not self._layers.get(MapRendererLayer.ACTIVE_POINT)
-            ):
-                self._layers[MapRendererLayer.ACTIVE_POINT] = []
-                size = 15 * map_data.dimensions.grid_size
-                for point in map_data.active_points:
-                    area = Area(
-                        point.x - size,
-                        point.y - size,
-                        point.x + size,
-                        point.y - size,
-                        point.x + size,
-                        point.y + size,
-                        point.x - size,
-                        point.y + size,
-                    )
-
-                    a = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x0, area.y0
-                    )
-                    b = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x1, area.y1
-                    )
-                    c = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x2, area.y2
-                    )
-                    d = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        area.x3, area.y3
-                    )
-
-                    self._layers[MapRendererLayer.ACTIVE_POINT].append(
-                        {
-                            MAP_DATA_JSON_PARAMETER_TYPE: (
-                                MAP_DATA_JSON_PARAMETER_ACTIVE_ZONE
-                            ),
-                            MAP_DATA_JSON_PARAMETER_POINTS: [
-                                a[0],
-                                a[1],
-                                b[0],
-                                b[1],
-                                c[0],
-                                c[1],
-                                d[0],
-                                d[1],
-                            ],
-                        }
-                    )
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].extend(
-                self._layers[MapRendererLayer.ACTIVE_POINT]
-            )
-
-        if map_data.virtual_walls:
-            if (
-                self._map_data is None
-                or self._map_data.virtual_walls != map_data.virtual_walls
-                or not self._layers.get(MapRendererLayer.WALL)
-            ):
-                self._layers[MapRendererLayer.WALL] = []
-                for wall in map_data.virtual_walls:
-                    a = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        wall.x0, wall.y0
-                    )
-                    b = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                        wall.x1, wall.y1
-                    )
-
-                    self._layers[MapRendererLayer.WALL].append(
-                        {
-                            MAP_DATA_JSON_PARAMETER_TYPE: (
-                                MAP_DATA_JSON_PARAMETER_VIRTUAL_WALL
-                            ),
-                            MAP_DATA_JSON_PARAMETER_POINTS: [a[0], a[1], b[0], b[1]],
-                        }
-                    )
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].extend(
-                self._layers[MapRendererLayer.WALL]
-            )
-
-        if map_data.path and (
-            self._map_data is None
-            or self._map_data.path is None
-            or len(self._map_data.path) != len(map_data.path)
-            or not self._layers.get(MapRendererLayer.PATH)
-        ):
-            points = []
-            self._layers[MapRendererLayer.PATH] = []
-            if map_data.path and len(map_data.path) > 1:
-                s = map_data.path[0]
-                for point in map_data.path[1:]:
-                    if point.path_type == PathType.LINE:
-                        point = point
-                        a = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                            s.x, s.y
-                        )
-                        b = DreameMowerMapDataJsonRenderer._convert_coordinates(
-                            point.x, point.y
-                        )
-
-                        points.extend([a[0], a[1], b[0], b[1]])
+    @classmethod
+    def _render_raster(
+        cls,
+        map_data: MapData,
+        dimensions: MapImageDimensions,
+        pixel_type: NDArray[np.uint8],
+        grid_size: int,
+    ) -> list[_RasterLayer]:
+        left = round((dimensions.left + cls.HALF_INT16) / 10)
+        top = round((dimensions.top + cls.HALF_INT16) / 10)
+        floor: list[tuple[int, int]] = []
+        walls: list[tuple[int, int]] = []
+        segments: dict[int, list[tuple[int, int]]] = {}
+        for y in range(dimensions.height):
+            for x in range(dimensions.width):
+                segment_id = int(pixel_type[x, y])
+                coordinate = (
+                    round(x + left / grid_size),
+                    round(cls.MAX / grid_size - (y + top / grid_size)),
+                )
+                if segment_id == MapPixelType.WALL:
+                    walls.append(coordinate)
+                elif segment_id in (MapPixelType.FLOOR, MapPixelType.UNKNOWN):
+                    floor.append(coordinate)
+                elif 0 < segment_id < 61:
+                    if (
+                        map_data.active_segments
+                        and segment_id not in map_data.active_segments
+                    ):
+                        floor.append(coordinate)
                     else:
-                        self._layers[MapRendererLayer.PATH].append(
-                            {
-                                MAP_DATA_JSON_PARAMETER_TYPE: (
-                                    MAP_DATA_JSON_PARAMETER_PATH
-                                ),
-                                MAP_DATA_JSON_PARAMETER_POINTS: points,
-                            }
-                        )
-                        points = []
-                    s = point
-            self._layers[MapRendererLayer.PATH].append(
-                {
-                    MAP_DATA_JSON_PARAMETER_TYPE: MAP_DATA_JSON_PARAMETER_PATH,
-                    MAP_DATA_JSON_PARAMETER_POINTS: points,
-                }
+                        if not map_data.segments:
+                            segment_id = 1
+                        segments.setdefault(segment_id, []).append(coordinate)
+        layers: list[_RasterLayer] = []
+        if floor:
+            layers.append(cls._raster_layer("floor", floor))
+        if walls:
+            layers.append(cls._raster_layer("wall", walls))
+        for segment_id, pixels in segments.items():
+            name = None
+            if map_data.segments:
+                segment = map_data.segments.get(segment_id)
+                name = segment.name if segment is not None else f"Room {segment_id}"
+            layer = cls._raster_layer("segment", pixels)
+            layer["metaData"] = {
+                "segmentId": segment_id,
+                "active": bool(
+                    map_data.active_segments and segment_id in map_data.active_segments
+                ),
+                "name": name,
+            }
+            layers.append(layer)
+        return layers
+
+    def _use_default_map(self) -> bytes:
+        image_png = self.default_map_image
+        self._map_data_json, self._map_image = self._default_map_data, image_png
+        self._raster_key, self._raster_layers = None, []
+        return image_png
+
+    def render_map(
+        self,
+        map_data: MapData | None,
+        robot_status: int = 0,
+        station_status: int = 0,
+    ) -> bytes:
+        now = time.monotonic()
+        self.render_complete = False
+        try:
+            if map_data is None or map_data.empty_map:
+                return self._use_default_map()
+            dimensions, pixels = map_data.dimensions, map_data.pixel_type
+            if dimensions is None or pixels is None:
+                return self._use_default_map()
+            grid_size = round(dimensions.grid_size / 10)
+            if (
+                grid_size <= 0
+                or dimensions.width <= 0
+                or dimensions.height <= 0
+                or pixels.ndim != 2
+                or pixels.shape != (dimensions.width, dimensions.height)
+            ):
+                return self._use_default_map()
+            # MapData is mutable. Cache exported content instead of its identity.
+            raster_key: _RasterKey = (
+                dimensions.left,
+                dimensions.top,
+                dimensions.width,
+                dimensions.height,
+                dimensions.grid_size,
+                pixels.tobytes(),
+                tuple(sorted(map_data.active_segments or ())),
+                tuple(
+                    sorted(
+                        (key, segment.name)
+                        for key, segment in (map_data.segments or {}).items()
+                    )
+                ),
             )
-            map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].extend(
-                self._layers[MapRendererLayer.PATH]
+            layers = (
+                self._raster_layers
+                if raster_key == self._raster_key
+                else self._render_raster(
+                    map_data,
+                    dimensions,
+                    pixels,
+                    grid_size,
+                )
             )
-
-        floor_pixels = []
-        wall_pixels = []
-        segments = {}
-
-        if (
-            self._map_data is None
-            or self._map_data.active_segments != map_data.active_segments
-            or self._map_data.active_areas != map_data.active_areas
-            or self._map_data.segments != map_data.segments
-            or self._map_data.data != map_data.data
-            or not self._layers.get(MapRendererLayer.IMAGE)
-        ):
-            self._layers[MapRendererLayer.IMAGE] = []
-            for y in range(map_data.dimensions.height):
-                for x in range(map_data.dimensions.width):
-                    segment_id = int(map_data.pixel_type[x, y])
-                    coords = [
-                        (x + (self._left / self._grid_size)),
-                        (y + (self._top / self._grid_size)),
-                    ]
-
-                    coords[1] = (
-                        DreameMowerMapDataJsonRenderer.MAX / self._grid_size
-                    ) - coords[1]
-
-                    coords[0] = round(coords[0])
-                    coords[1] = round(coords[1])
-
-                    if segment_id == MapPixelType.WALL.value:
-                        wall_pixels.append(coords)
-                    elif (
-                        segment_id == MapPixelType.FLOOR.value
-                        or segment_id == MapPixelType.UNKNOWN.value
-                    ):
-                        floor_pixels.append(coords)
-                    elif segment_id > 0 and segment_id < 61:
-                        if (
-                            map_data.active_segments
-                            and segment_id not in map_data.active_segments
-                        ):
-                            floor_pixels.append(coords)
-                        else:
-                            if not map_data.segments:
-                                segment_id = 1
-
-                            if segment_id not in segments:
-                                segments[segment_id] = []
-                            segments[segment_id].append(coords)
-
-            if floor_pixels:
-                self._layers[MapRendererLayer.IMAGE].append(
-                    {
-                        MAP_DATA_JSON_PARAMETER_TYPE: MAP_DATA_JSON_PARAMETER_FLOOR,
-                        MAP_DATA_JSON_PARAMETER_PIXELS: [
-                            val
-                            for sublist in sorted(
-                                floor_pixels,
-                                key=cmp_to_key(
-                                    DreameMowerMapDataJsonRenderer._coordinate_tuple_sort
-                                ),
-                            )
-                            for val in sublist
-                        ],
-                    }
-                )
-
-            if wall_pixels:
-                self._layers[MapRendererLayer.IMAGE].append(
-                    {
-                        MAP_DATA_JSON_PARAMETER_TYPE: MAP_DATA_JSON_PARAMETER_WALL,
-                        MAP_DATA_JSON_PARAMETER_PIXELS: [
-                            val
-                            for sublist in sorted(
-                                wall_pixels,
-                                key=cmp_to_key(
-                                    DreameMowerMapDataJsonRenderer._coordinate_tuple_sort
-                                ),
-                            )
-                            for val in sublist
-                        ],
-                    }
-                )
-
-            if segments:
-                for k, v in segments.items():
-                    name = None
-                    if map_data.segments:
-                        name = f"Room {k}"
-                        if k in map_data.segments:
-                            name = map_data.segments[k].name
-                    self._layers[MapRendererLayer.IMAGE].append(
-                        {
-                            MAP_DATA_JSON_PARAMETER_TYPE: (
-                                MAP_DATA_JSON_PARAMETER_SEGMENT
-                            ),
-                            MAP_DATA_JSON_PARAMETER_PIXELS: [
-                                val
-                                for sublist in sorted(
-                                    v,
-                                    key=cmp_to_key(
-                                        DreameMowerMapDataJsonRenderer._coordinate_tuple_sort
-                                    ),
-                                )
-                                for val in sublist
-                            ],
-                            MAP_DATA_JSON_PARAMETER_META_DATA: {
-                                MAP_DATA_JSON_PARAMETER_SEGMENT_ID: k,
-                                MAP_DATA_JSON_PARAMETER_ACTIVE: (
-                                    True
-                                    if map_data.active_segments
-                                    and k in map_data.active_segments
-                                    else False
-                                ),
-                                MAP_DATA_JSON_PARAMETER_NAME: name,
-                            },
-                        }
-                    )
-
-            for layers in self._layers[MapRendererLayer.IMAGE]:
-                pixels = layers[MAP_DATA_JSON_PARAMETER_PIXELS]
-                layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS] = {
-                    MAP_DATA_JSON_PARAMETER_X: {
-                        MAP_DATA_JSON_PARAMETER_MIN: 65535,
-                        MAP_DATA_JSON_PARAMETER_MAX: -65535,
-                        MAP_DATA_JSON_PARAMETER_MID: None,
-                        MAP_DATA_JSON_PARAMETER_AVG: None,
-                    },
-                    MAP_DATA_JSON_PARAMETER_Y: {
-                        MAP_DATA_JSON_PARAMETER_MIN: 65535,
-                        MAP_DATA_JSON_PARAMETER_MAX: -65535,
-                        MAP_DATA_JSON_PARAMETER_MID: None,
-                        MAP_DATA_JSON_PARAMETER_AVG: None,
-                    },
-                    MAP_DATA_JSON_PARAMETER_PIXEL_COUNT: len(pixels) / 2,
-                }
-
-                sum_x = 0
-                sum_y = 0
-                for i in range(0, len(pixels), 2):
-                    sum_x = sum_x + pixels[i]
-                    sum_y = sum_y + pixels[i + 1]
-
-                    if (
-                        pixels[i]
-                        < layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_X
-                        ][MAP_DATA_JSON_PARAMETER_MIN]
-                    ):
-                        layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_X
-                        ][MAP_DATA_JSON_PARAMETER_MIN] = pixels[i]
-
-                    if (
-                        pixels[i]
-                        > layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_X
-                        ][MAP_DATA_JSON_PARAMETER_MAX]
-                    ):
-                        layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_X
-                        ][MAP_DATA_JSON_PARAMETER_MAX] = pixels[i]
-
-                    if (
-                        pixels[i + 1]
-                        < layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_Y
-                        ][MAP_DATA_JSON_PARAMETER_MIN]
-                    ):
-                        layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_Y
-                        ][MAP_DATA_JSON_PARAMETER_MIN] = pixels[i + 1]
-
-                    if (
-                        pixels[i + 1]
-                        > layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_Y
-                        ][MAP_DATA_JSON_PARAMETER_MAX]
-                    ):
-                        layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_Y
-                        ][MAP_DATA_JSON_PARAMETER_MAX] = pixels[i + 1]
-
-                layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][MAP_DATA_JSON_PARAMETER_X][
-                    MAP_DATA_JSON_PARAMETER_MID
-                ] = round(
-                    (
-                        layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_X
-                        ][MAP_DATA_JSON_PARAMETER_MAX]
-                        + layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_X
-                        ][MAP_DATA_JSON_PARAMETER_MIN]
-                    )
-                    / 2
-                )
-                layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][MAP_DATA_JSON_PARAMETER_Y][
-                    MAP_DATA_JSON_PARAMETER_MID
-                ] = round(
-                    (
-                        layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_Y
-                        ][MAP_DATA_JSON_PARAMETER_MAX]
-                        + layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                            MAP_DATA_JSON_PARAMETER_Y
-                        ][MAP_DATA_JSON_PARAMETER_MIN]
-                    )
-                    / 2
-                )
-
-                if sum_x:
-                    layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                        MAP_DATA_JSON_PARAMETER_X
-                    ][MAP_DATA_JSON_PARAMETER_AVG] = round(sum_x / (len(pixels) / 2))
-                if sum_y:
-                    layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS][
-                        MAP_DATA_JSON_PARAMETER_Y
-                    ][MAP_DATA_JSON_PARAMETER_AVG] = round(sum_y / (len(pixels) / 2))
-
-                current_x_start = -65535
-                current_y = -65535
-                current_count = 0
-                compressed_pixels = []
-
-                for i in range(0, len(pixels), 2):
-                    x = pixels[i]
-                    y = pixels[i + 1]
-
-                    if y != current_y or x > (current_x_start + current_count):
-                        compressed_pixels.extend(
-                            [current_x_start, current_y, current_count]
-                        )
-                        current_x_start = x
-                        current_y = y
-                        current_count = 1
-                    elif x != current_x_start:
-                        current_count = current_count + 1
-
-                compressed_pixels.extend([current_x_start, current_y, current_count])
-                layers[MAP_DATA_JSON_PARAMETER_COMPRESSED_PIXELS] = compressed_pixels[
-                    3:
-                ]
-                layers[MAP_DATA_JSON_PARAMETER_PIXELS] = []
-
-        map_data_json[MAP_DATA_JSON_PARAMETER_LAYERS].extend(
-            self._layers[MapRendererLayer.IMAGE]
-        )
-
-        self._map_data = map_data
-        self._map_data_json = map_data_json
-        _LOGGER.debug(
-            "Render Map Data: %s:%s took: %.2f",
-            map_data.map_id,
-            map_data.frame_id,
-            time.time() - now,
-        )
-        self.render_complete = True
-        return self._to_buffer(
-            self._default_map_image,
-            json.dumps(self._map_data_json, separators=(",", ":")),
-        )
+            metadata: _MapJson = {
+                "__class": MAP_DATA_JSON_CLASS,
+                "size": {"x": self.MAX, "y": self.MAX},
+                "pixelSize": grid_size,
+                "layers": layers,
+                "entities": self._entities(map_data, dimensions.grid_size),
+                "metaData": {"version": 2, "rotation": map_data.rotation},
+            }
+            encoded = json.dumps(metadata, separators=(",", ":"))
+            if encoded == self._map_data_json and self._map_image is not None:
+                return self._map_image
+            image_png = self._to_buffer(self._default_map_image, encoded)
+            # Publish cache state only after JSON and PNG encoding both succeed.
+            self._raster_key, self._raster_layers = raster_key, layers
+            self._map_data_json, self._map_image = encoded, image_png
+            _LOGGER.debug(
+                "Render Map Data: %s:%s took: %.2f",
+                map_data.map_id,
+                map_data.frame_id,
+                time.monotonic() - now,
+            )
+            return image_png
+        finally:
+            self.render_complete = True
 
     def embed_map_data(self, image_png: bytes) -> bytes:
-        """Embed the last rendered map metadata into a presentation PNG."""
+        """Embed the last successfully rendered map metadata into a presentation PNG."""
         if self._map_data_json is None:
             raise ValueError("Map metadata must be rendered before it can be embedded.")
-        with Image.open(BytesIO(image_png)) as image:
+        with Image.open(io.BytesIO(image_png)) as image:
             image.load()
-            return self._to_buffer(
-                image.convert("RGBA"),
-                json.dumps(self._map_data_json, separators=(",", ":")),
-            )
+            return self._to_buffer(image.convert("RGBA"), self._map_data_json)
 
     @property
     def default_map_image(self) -> bytes:

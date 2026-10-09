@@ -6,12 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .device_settings_control import device_settings_section
 from .dreame_lawn_mower_client.mowing_preferences import (
@@ -24,6 +22,10 @@ from .preference_switch import (
     DreameLawnMowerPreferenceAiClassSwitch,
     DreameLawnMowerPreferenceSwitch,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
+
+# Limit concurrent platform actions and resource refreshes to one.
+PARALLEL_UPDATES = 1
 
 VOICE_PROMPT_SWITCHES = (
     (
@@ -78,11 +80,11 @@ ANTI_THEFT_SWITCHES = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Dreame mower switch entities."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             *(

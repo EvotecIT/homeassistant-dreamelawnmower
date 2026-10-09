@@ -35,6 +35,15 @@
           "password": "Password",
           "country": "Region"
         }
+      },
+      "reconfigure": {
+        "title": "Update mower connection",
+        "description": "Update the login details or region for this mower. The account must still contain the configured mower; its Home Assistant entry and entities are kept.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "country": "Region"
+        }
       }
     },
     "error": {
@@ -46,6 +55,9 @@
       "no_devices": "No supported lawn mower devices were found for this account. Check that the selected region and account type match the vendor app."
     },
     "abort": {
+      "wrong_device": "The discovered mower does not match this entry. No connection settings were changed.",
+      "reauth_successful": "The mower's account credentials were updated.",
+      "reconfigure_successful": "The mower connection was updated.",
       "already_configured": "All supported mowers on this account are already configured."
     }
   },
@@ -194,6 +206,20 @@
           "repositioning": "Repositioning"
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "No Dreame lawn mower entry found for {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Dreame lawn mower entry {entry_id} is not loaded."
+    },
+    "no_loaded_entries": {
+      "message": "No Dreame lawn mower entries are loaded."
+    },
+    "entry_id_required": {
+      "message": "Multiple Dreame lawn mower entries are loaded; pass entry_id."
     }
   }
 }

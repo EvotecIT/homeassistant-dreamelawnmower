@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import DreameLawnMowerCoordinator
@@ -54,7 +55,7 @@ class DreameLawnMowerEntity(CoordinatorEntity[DreameLawnMowerCoordinator]):
         self._descriptor = coordinator.client.descriptor
 
     @property
-    def device_info(self) -> dict[str, Any]:
+    def device_info(self) -> DeviceInfo:
         """Return dynamic device metadata for the registry."""
         snapshot = self.coordinator.data
         descriptor = snapshot.descriptor if snapshot is not None else self._descriptor

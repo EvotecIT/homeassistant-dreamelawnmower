@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from ctypes import POINTER, c_int, c_size_t, c_ubyte, c_void_p, cast
 from pathlib import Path
 from typing import Any
@@ -904,6 +905,58 @@ def test_process_runner_reports_startup_stderr_without_secret(tmp_path) -> None:
         assert "secret-key-1" not in message
     else:
         raise AssertionError("Expected process runner startup failure to fail")
+
+
+def test_process_runner_shutdown_timeout_covers_blocked_write(tmp_path) -> None:
+    """A runner that stops reading cannot retain shutdown with large metadata."""
+    runner_script = tmp_path / "stalled_runner.py"
+    runner_script.write_text(
+        "import json, sys, time\n"
+        "json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'stream_url': 'http://127.0.0.1/ipc.flv', "
+        "'runner_session_id': 'x' * (512 * 1024)}), flush=True)\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    runner = DreameLawnMowerXp2pProcessRunner(
+        (sys.executable, runner_script), shutdown_timeout=0.1
+    )
+    existing_threads = frozenset(threading.enumerate())
+    session = runner.start_live_stream(_runtime_inputs())
+    finished = threading.Event()
+    errors = []
+
+    def stop():
+        try:
+            runner.stop_live_stream(session)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=stop, daemon=True)
+    worker.start()
+    process = session.runner_process
+    try:
+        assert session.runner_session_id == "x" * (512 * 1024)
+        assert finished.wait(3), "shutdown remained blocked outside its timeout"
+        assert not errors
+        assert process.poll() is not None
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=2)
+        worker.join(timeout=2)
+        for pipe in (process.stdin, process.stdout, process.stderr):
+            if pipe is not None:
+                pipe.close()
+        assert not worker.is_alive()
+        for thread in threading.enumerate():
+            if thread not in existing_threads and thread.name.startswith(
+                ("dreame-xp2p", "dreame-deadline-operation")
+            ):
+                thread.join(timeout=2)
+                assert not thread.is_alive()
 
 
 def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:

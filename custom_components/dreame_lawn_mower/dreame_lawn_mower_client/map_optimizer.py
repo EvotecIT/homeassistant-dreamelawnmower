@@ -6,19 +6,38 @@ import copy
 import logging
 import math
 import time
-from functools import cmp_to_key
+from typing import cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .map_javascript import optimize_map
 from .map_renderer_types import ALine, Angle, CLine, Paths
-from .map_types import MapImageDimensions, MapPixelType, Point
+from .map_types import MapData, MapImageDimensions, MapPixelType, Point
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class DreameMowerMapOptimizer:
-    def _clean_wall(self, data, width, height):
+    @staticmethod
+    def _valid_raster(
+        map_data: MapData,
+    ) -> tuple[MapImageDimensions, NDArray[np.uint8]] | None:
+        """Require matching geometry before invoking either pixel algorithm."""
+        dimensions, pixels = map_data.dimensions, map_data.pixel_type
+        if dimensions is None or pixels is None:
+            return None
+        if (
+            dimensions.grid_size <= 0
+            or dimensions.width <= 0
+            or dimensions.height <= 0
+            or pixels.ndim != 2
+            or pixels.shape != (dimensions.width, dimensions.height)
+        ):
+            return None
+        return dimensions, pixels
+
+    def _clean_wall(self, data: list[int], width: int, height: int) -> None:
         for j in range(1, height - 1):
             for i in range(1, width - 1):
                 index = j * width + i
@@ -48,7 +67,7 @@ class DreameMowerMapOptimizer:
             if data[i] == 2:
                 data[i] = 0
 
-    def _obstacle_data(self, data, width, height):
+    def _obstacle_data(self, data: list[int], width: int, height: int) -> None:
         for _it in range(2):
             for j in range(height):
                 for i in range(width):
@@ -67,7 +86,9 @@ class DreameMowerMapOptimizer:
                         ):
                             data[index] = 0
 
-    def _find_first_empty_point(self, data, width, height):
+    def _find_first_empty_point(
+        self, data: list[int], width: int, height: int
+    ) -> list[int] | None:
         for i in range(width):
             if data[i] == 0:
                 return [i, 0]
@@ -81,8 +102,11 @@ class DreameMowerMapOptimizer:
 
             if data[j * width + (width - 1)] == 0:
                 return [(width - 1), j]
+        return None
 
-    def _find_zero_point(self, data, width, height, point):
+    def _find_zero_point(
+        self, data: list[int], width: int, height: int, point: list[int]
+    ) -> list[list[int]]:
         finds = []
         x = point[0]
         y = point[1]
@@ -95,7 +119,9 @@ class DreameMowerMapOptimizer:
                         finds.append([_i, _j])
         return finds
 
-    def _fill_map_data(self, data, width, height, fill):
+    def _fill_map_data(
+        self, data: list[int], width: int, height: int, fill: int
+    ) -> None:
         self._fill_map_data_2(data, width, height)
 
         size = len(data)
@@ -173,7 +199,7 @@ class DreameMowerMapOptimizer:
                         if startX >= 0:
                             isEmpty = True
 
-    def _denoise(self, data, width, height):
+    def _denoise(self, data: list[int], width: int, height: int) -> None:
         tmpMapInfo = data.copy()
         ssize = 20
         for i in range(width):
@@ -279,7 +305,9 @@ class DreameMowerMapOptimizer:
 
                 startX = -1
 
-    def _update_border_value(self, data, width, height, stroke):
+    def _update_border_value(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         for j in range(height):
             for i in range(width):
                 index = j * width + i
@@ -299,7 +327,9 @@ class DreameMowerMapOptimizer:
                         if hasFind:
                             data[index] = stroke
 
-    def _fill_cross_line(self, data, width, height, stroke):
+    def _fill_cross_line(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         size = len(data)
         for i in range(width):
             startY = -1
@@ -409,18 +439,21 @@ class DreameMowerMapOptimizer:
 
         self._update_border_value(data, width, height, stroke)
 
-    def _check_intersect(self, arr1, arr2) -> list[int]:
+    def _check_intersect(self, arr1: list[int], arr2: list[int]) -> list[int] | None:
         if arr1[0] >= arr2[1] or arr2[0] >= arr1[1]:
             return None
 
-        def sort_data(a, b):
-            return a - b
-
-        tmp = arr1 + arr2
-        tmp.sort(key=cmp_to_key(sort_data))
+        tmp = sorted(arr1 + arr2)
         return [tmp[1], tmp[2]]
 
-    def _find_original_points(self, original_data, data, width, xs, ys) -> float:
+    def _find_original_points(
+        self,
+        original_data: list[int],
+        data: list[int],
+        width: int,
+        xs: list[int],
+        ys: list[int],
+    ) -> float:
         if xs[0] > xs[1]:
             tmp = xs[0]
             xs[0] = xs[1]
@@ -448,40 +481,48 @@ class DreameMowerMapOptimizer:
                         data[nIndex] = 1
         return weight
 
-    def _add_line(self, line, covertlines, allLines):
+    def _add_line(
+        self, line: CLine, covertlines: list[ALine], allLines: list[CLine]
+    ) -> None:
         aLine = ALine()
         if line.ishorizontal:
-            aLine.p0.y = line.y
-            aLine.p1.y = line.y
+            aLine.p0.y = line._coordinate
+            aLine.p1.y = line._coordinate
             if line.findEnd:
-                aLine.p0.x = line.x[0]
-                aLine.p1.x = line.x[1]
+                aLine.p0.x = line._interval[0]
+                aLine.p1.x = line._interval[1]
             else:
-                aLine.p0.x = line.x[1]
-                aLine.p1.x = line.x[0]
-            aLine.length = abs(line.x[1] - line.x[0])
+                aLine.p0.x = line._interval[1]
+                aLine.p1.x = line._interval[0]
+            aLine.length = abs(line._interval[1] - line._interval[0])
         else:
-            aLine.p0.x = line.x
-            aLine.p1.x = line.x
-            aLine.length = abs(line.y[1] - line.y[0])
+            aLine.p0.x = line._coordinate
+            aLine.p1.x = line._coordinate
+            aLine.length = abs(line._interval[1] - line._interval[0])
             if line.findEnd:
-                aLine.p0.y = line.y[0]
-                aLine.p1.y = line.y[1]
+                aLine.p0.y = line._interval[0]
+                aLine.p1.y = line._interval[1]
             else:
-                aLine.p0.y = line.y[1]
-                aLine.p1.y = line.y[0]
+                aLine.p0.y = line._interval[1]
+                aLine.p1.y = line._interval[0]
         covertlines.append(aLine)
         allLines.append(line)
 
-    def _find_bounds(self, data, width, horizontalLines, verticalLines) -> list[Paths]:
+    def _find_bounds(
+        self,
+        data: list[int],
+        width: int,
+        horizontalLines: list[CLine],
+        verticalLines: list[CLine],
+    ) -> list[Paths]:
         paths = []
         size = len(data)
 
         while horizontalLines:
             startLine = horizontalLines.pop(0)
             startLine.findEnd = True
-            covertlines = []
-            allLines = []
+            covertlines: list[ALine] = []
+            allLines: list[CLine] = []
             self._add_line(startLine, covertlines, allLines)
             while True:
                 lastLine = allLines[len(allLines) - 1]
@@ -492,39 +533,42 @@ class DreameMowerMapOptimizer:
                     for i in range(len(lines)):
                         vLine = lines[i]
 
-                        x = lastLine.x[0]
+                        x = lastLine._interval[0]
                         if lastLine.findEnd:
-                            x = lastLine.x[1]
+                            x = lastLine._interval[1]
 
-                        if x == vLine.x:
-                            if lastLine.y == vLine.y[0]:
+                        if x == vLine._coordinate:
+                            if lastLine._coordinate == vLine._interval[0]:
                                 vLine.findEnd = True
                                 self._add_line(vLine, covertlines, allLines)
                                 del verticalLines[i]
                                 hasFind = True
                                 break
-                            elif lastLine.y == vLine.y[1]:
+                            elif lastLine._coordinate == vLine._interval[1]:
                                 vLine.findEnd = False
                                 self._add_line(vLine, covertlines, allLines)
                                 del verticalLines[i]
                                 hasFind = True
                                 break
-                            elif lastLine.y > vLine.y[0] and lastLine.y < vLine.y[1]:
+                            elif (
+                                lastLine._coordinate > vLine._interval[0]
+                                and lastLine._coordinate < vLine._interval[1]
+                            ):
                                 if lastLine.findEnd:
-                                    nIndex = (lastLine.y + 1) * width + x - 1
+                                    nIndex = (lastLine._coordinate + 1) * width + x - 1
                                     if nIndex < size and data[nIndex] == 0:
-                                        vLine.y[1] = lastLine.y
+                                        vLine._interval[1] = lastLine._coordinate
                                         vLine.findEnd = False
                                     else:
-                                        vLine.y[0] = lastLine.y
+                                        vLine._interval[0] = lastLine._coordinate
                                         vLine.findEnd = True
                                 else:
-                                    nIndex = (lastLine.y + 1) * width + x + 1
+                                    nIndex = (lastLine._coordinate + 1) * width + x + 1
                                     if nIndex < size and data[nIndex] == 0:
-                                        vLine.y[1] = lastLine.y
+                                        vLine._interval[1] = lastLine._coordinate
                                         vLine.findEnd = False
                                     else:
-                                        vLine.y[0] = lastLine.y
+                                        vLine._interval[0] = lastLine._coordinate
                                         vLine.findEnd = True
 
                                 self._add_line(vLine, covertlines, allLines)
@@ -536,50 +580,56 @@ class DreameMowerMapOptimizer:
                         break
                 else:
                     hasFind = False
-                    _y = lastLine.y[0]
+                    _y = lastLine._interval[0]
                     if lastLine.findEnd:
-                        _y = lastLine.y[1]
+                        _y = lastLine._interval[1]
 
-                    if _y == startLine.y and lastLine.x == startLine.x[0]:
+                    if (
+                        _y == startLine._coordinate
+                        and lastLine._coordinate == startLine._interval[0]
+                    ):
                         break
 
                     lines = horizontalLines.copy()
                     for i in range(len(lines)):
                         hLine = lines[i]
 
-                        y = lastLine.y[0]
+                        y = lastLine._interval[0]
                         if lastLine.findEnd:
-                            y = lastLine.y[1]
+                            y = lastLine._interval[1]
 
-                        if y == hLine.y:
-                            if lastLine.x == hLine.x[0]:
+                        if y == hLine._coordinate:
+                            if lastLine._coordinate == hLine._interval[0]:
                                 hLine.findEnd = True
                                 self._add_line(hLine, covertlines, allLines)
                                 del horizontalLines[i]
                                 hasFind = True
                                 break
-                            elif lastLine.x == hLine.x[1]:
+                            elif lastLine._coordinate == hLine._interval[1]:
                                 hLine.findEnd = False
                                 self._add_line(hLine, covertlines, allLines)
                                 del horizontalLines[i]
                                 hasFind = True
                                 break
-                            elif lastLine.x > hLine.x[0] and lastLine.x < hLine.x[1]:
+                            elif (
+                                lastLine._coordinate > hLine._interval[0]
+                                and lastLine._coordinate < hLine._interval[1]
+                            ):
                                 if lastLine.findEnd:
-                                    nIndex = (y - 1) * width + lastLine.x - 1
+                                    nIndex = (y - 1) * width + lastLine._coordinate - 1
                                     if nIndex < size and data[nIndex] == 0:
-                                        hLine.x[0] = lastLine.x
+                                        hLine._interval[0] = lastLine._coordinate
                                         hLine.findEnd = True
                                     else:
-                                        hLine.x[1] = lastLine.x
+                                        hLine._interval[1] = lastLine._coordinate
                                         hLine.findEnd = False
                                 else:
-                                    nIndex = (y + 1) * width + lastLine.x - 1
+                                    nIndex = (y + 1) * width + lastLine._coordinate - 1
                                     if nIndex < size and data[nIndex] == 0:
-                                        hLine.x[0] = lastLine.x
+                                        hLine._interval[0] = lastLine._coordinate
                                         hLine.findEnd = True
                                     else:
-                                        hLine.x[1] = lastLine.x
+                                        hLine._interval[1] = lastLine._coordinate
                                         hLine.findEnd = False
 
                                 self._add_line(hLine, covertlines, allLines)
@@ -599,7 +649,7 @@ class DreameMowerMapOptimizer:
 
         return paths
 
-    def _fill_map_data_2(self, data, width, height):
+    def _fill_map_data_2(self, data: list[int], width: int, height: int) -> None:
         while True:
             first_point = self._find_first_empty_point(data, width, height)
             if first_point is None:
@@ -618,7 +668,14 @@ class DreameMowerMapOptimizer:
             elif data[i] == 255:
                 data[i] = 0
 
-    def _link_adjacent_areas(self, original_data, data, width, height, stroke):
+    def _link_adjacent_areas(
+        self,
+        original_data: list[int],
+        data: list[int],
+        width: int,
+        height: int,
+        stroke: int,
+    ) -> None:
         horizontalLines = []
         verticalLines = []
         DIR_LEFT = 1
@@ -770,28 +827,52 @@ class DreameMowerMapOptimizer:
                         if not line.ishorizontal and not nLine.ishorizontal:
                             if line.direction != nLine.direction:
                                 if (
-                                    line.x > nLine.x and line.direction == DIR_LEFT
-                                ) or (line.x < nLine.x and line.direction == DIR_RIGHT):
-                                    if abs(line.x - nLine.x) <= 10:
-                                        _ys = self._check_intersect(line.y, nLine.y)
+                                    line._coordinate > nLine._coordinate
+                                    and line.direction == DIR_LEFT
+                                ) or (
+                                    line._coordinate < nLine._coordinate
+                                    and line.direction == DIR_RIGHT
+                                ):
+                                    if abs(line._coordinate - nLine._coordinate) <= 10:
+                                        _ys = self._check_intersect(
+                                            line._interval, nLine._interval
+                                        )
                                         if _ys is not None:
-                                            xs = [line.x + 1, nLine.x - 1]
-                                            if line.x > nLine.x:
-                                                xs = [nLine.x + 1, line.x - 1]
+                                            xs = [
+                                                line._coordinate + 1,
+                                                nLine._coordinate - 1,
+                                            ]
+                                            if line._coordinate > nLine._coordinate:
+                                                xs = [
+                                                    nLine._coordinate + 1,
+                                                    line._coordinate - 1,
+                                                ]
                                             self._find_original_points(
                                                 original_data, data, width, xs, _ys
                                             )
                         elif line.ishorizontal and nLine.ishorizontal:
                             if line.direction != nLine.direction:
                                 if (
-                                    line.y > nLine.y and line.direction == DIR_BOTTOM
-                                ) or (line.y < nLine.y and line.direction == DIR_TOP):
-                                    if abs(line.y - nLine.y) <= 10:
-                                        _xs = self._check_intersect(line.x, nLine.x)
+                                    line._coordinate > nLine._coordinate
+                                    and line.direction == DIR_BOTTOM
+                                ) or (
+                                    line._coordinate < nLine._coordinate
+                                    and line.direction == DIR_TOP
+                                ):
+                                    if abs(line._coordinate - nLine._coordinate) <= 10:
+                                        _xs = self._check_intersect(
+                                            line._interval, nLine._interval
+                                        )
                                         if _xs is not None:
-                                            ys = [line.y + 1, nLine.y - 1]
-                                            if line.y > nLine.y:
-                                                ys = [nLine.y + 1, line.y - 1]
+                                            ys = [
+                                                line._coordinate + 1,
+                                                nLine._coordinate - 1,
+                                            ]
+                                            if line._coordinate > nLine._coordinate:
+                                                ys = [
+                                                    nLine._coordinate + 1,
+                                                    line._coordinate - 1,
+                                                ]
                                             self._find_original_points(
                                                 original_data, data, width, _xs, ys
                                             )
@@ -805,7 +886,9 @@ class DreameMowerMapOptimizer:
             self._update_border_value(data, width, height, stroke)
             self._fill_cross_line(data, width, height, stroke)
 
-    def _fill_angle(self, data, width, stroke, angle):
+    def _fill_angle(
+        self, data: list[int], width: int, stroke: int, angle: Angle
+    ) -> Angle:
         bottom = 5
         right = 6
         top = 7
@@ -827,65 +910,65 @@ class DreameMowerMapOptimizer:
         maxy = None
         if l1.ishorizontal:
             if angle.horizontalDir == right:
-                minx = l1.x[1]
+                minx = l1._interval[1]
             else:
-                maxx = l1.x[0]
+                maxx = l1._interval[0]
 
             if angle.verticalDir == top:
-                miny = l1.y
+                miny = l1._coordinate
             else:
-                maxy = l1.y
+                maxy = l1._coordinate
 
             if l2.ishorizontal:
                 if angle.horizontalDir == right:
-                    maxx = l2.x[0]
+                    maxx = l2._interval[0]
                 else:
-                    minx = l2.x[1]
+                    minx = l2._interval[1]
 
                 if angle.verticalDir == top:
-                    maxy = l2.y
+                    maxy = l2._coordinate
                 else:
-                    miny = l2.y
+                    miny = l2._coordinate
             else:
                 if angle.horizontalDir == right:
-                    maxx = l2.x
+                    maxx = l2._coordinate
                 else:
-                    minx = l2.x
+                    minx = l2._coordinate
                 if angle.verticalDir == top:
-                    maxy = l2.y[0]
+                    maxy = l2._interval[0]
                 else:
-                    miny = l2.y[1]
+                    miny = l2._interval[1]
         else:
             if angle.verticalDir == top:
-                miny = l1.y[1]
+                miny = l1._interval[1]
             else:
-                maxy = l1.y[0]
+                maxy = l1._interval[0]
 
             if angle.horizontalDir == right:
-                minx = l1.x
+                minx = l1._coordinate
             else:
-                maxx = l1.x
+                maxx = l1._coordinate
 
             if l2.ishorizontal:
                 if angle.horizontalDir == right:
-                    maxx = l2.x[0]
+                    maxx = l2._interval[0]
                 else:
-                    minx = l2.x[1]
+                    minx = l2._interval[1]
                 if angle.verticalDir == top:
-                    maxy = l2.y
+                    maxy = l2._coordinate
                 else:
-                    miny = l2.y
+                    miny = l2._coordinate
 
             else:
                 if angle.horizontalDir == right:
-                    maxx = l2.x
+                    maxx = l2._coordinate
                 else:
-                    minx = l2.x
+                    minx = l2._coordinate
 
                 if angle.verticalDir == top:
-                    maxy = l2.y[0]
+                    maxy = l2._interval[0]
                 else:
-                    miny = l2.y[1]
+                    miny = l2._interval[1]
 
         if minx is None or miny is None or maxx is None or maxy is None:
             nextAngle = Angle(lines=[l2])
@@ -897,18 +980,18 @@ class DreameMowerMapOptimizer:
 
         if l1.ishorizontal and l2.ishorizontal and ((maxy - miny) <= 3):
             if angle.horizontalDir == right:
-                minx = l1.x[0]
-                maxx = l2.x[1]
+                minx = l1._interval[0]
+                maxx = l2._interval[1]
             else:
-                minx = l2.x[0]
-                maxx = l1.x[1]
+                minx = l2._interval[0]
+                maxx = l1._interval[1]
         elif not l1.ishorizontal and not l2.ishorizontal and ((maxx - minx) <= 3):
             if angle.verticalDir == top:
-                miny = l1.y[0]
-                maxy = l2.y[1]
+                miny = l1._interval[0]
+                maxy = l2._interval[1]
             else:
-                miny = l2.y[0]
-                maxy = l1.y[1]
+                miny = l2._interval[0]
+                maxy = l1._interval[1]
 
         num = 0
         for i in range(minx, maxx + 1):
@@ -931,7 +1014,9 @@ class DreameMowerMapOptimizer:
             nextAngle.verticalDir = top if l2.findEnd else bottom
         return nextAngle
 
-    def _find_outline(self, data, width, height, stroke, first):
+    def _find_outline(
+        self, data: list[int], width: int, height: int, stroke: int, first: bool
+    ) -> bool:
         horizontalLines = []
         verticalLines = []
         size = len(data)
@@ -1048,7 +1133,10 @@ class DreameMowerMapOptimizer:
         if first and tmp:
             clearPos = []
             for i in range(len(tmp)):
-                clearPos.append([tmp[i][0].p0.x, tmp[i][0].p0.y])
+                point_x, point_y = tmp[i][0].p0.x, tmp[i][0].p0.y
+                if not isinstance(point_x, int) or not isinstance(point_y, int):
+                    raise ValueError("Outline endpoint coordinates must be integers.")
+                clearPos.append([point_x, point_y])
 
             while clearPos:
                 pos = clearPos.pop()
@@ -1067,6 +1155,9 @@ class DreameMowerMapOptimizer:
         top = 7
         left = 8
         dirnone = 0
+
+        if not allLines:
+            return False
 
         angle = Angle()
         for i in range(len(allLines) + 1):
@@ -1103,7 +1194,9 @@ class DreameMowerMapOptimizer:
 
         return True
 
-    def _find_obstacle_border(self, data, width, height, stroke):
+    def _find_obstacle_border(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         size = len(data)
         for j in range(height):
             for i in range(width):
@@ -1129,7 +1222,9 @@ class DreameMowerMapOptimizer:
                     if hasFind:
                         data[index] = 2
 
-    def _clean_small_obstacle(self, data, width, height, stroke):
+    def _clean_small_obstacle(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         for i in range(width):
             startY = -1
             for j in range(height):
@@ -1156,8 +1251,18 @@ class DreameMowerMapOptimizer:
                 startX = -1
 
     def _calculate_charger_position(
-        self, data, width, height, stroke, charger_position
-    ):
+        self,
+        data: list[int],
+        width: int,
+        height: int,
+        stroke: int,
+        charger_position: Point,
+    ) -> Point:
+        heading = charger_position.a
+        if heading is None:
+            return charger_position
+        lastX: int | None
+        lastY: int | None
         vLines = []
         hLines = []
         for i in range(width):
@@ -1233,7 +1338,7 @@ class DreameMowerMapOptimizer:
 
         cX = math.floor(charger_position.x)
         cY = math.floor(charger_position.y)
-        if abs(charger_position.a - 180) <= 30:
+        if abs(heading - 180) <= 30:
             charger_position.a = 180
             lastX = None
             for i in range(len(vLines)):
@@ -1248,7 +1353,7 @@ class DreameMowerMapOptimizer:
                 if lastX - cX <= 11:
                     charger_position.a = 180
                     charger_position.x = lastX + 0.5
-        elif abs(charger_position.a - 360) <= 30 or abs(charger_position.a) <= 3:
+        elif abs(heading - 360) <= 30 or abs(heading) <= 3:
             charger_position.a = 360
             lastX = None
             for i in range(len(vLines)):
@@ -1263,7 +1368,7 @@ class DreameMowerMapOptimizer:
                 if cX - lastX <= 11:
                     charger_position.a = 360
                     charger_position.x = lastX + 0.5
-        elif abs(abs(charger_position.a - 270) <= 30):
+        elif abs(abs(heading - 270) <= 30):
             lastY = None
             for i in range(len(hLines)):
                 line = hLines[i]
@@ -1277,7 +1382,7 @@ class DreameMowerMapOptimizer:
                 if lastY - cY <= 11:
                     charger_position.a = 270
                     charger_position.y = lastY + 0.5
-        elif abs(abs(charger_position.a - 90) <= 30):
+        elif abs(abs(heading - 90) <= 30):
             lastY = None
             for i in range(len(hLines)):
                 line = hLines[i]
@@ -1294,72 +1399,75 @@ class DreameMowerMapOptimizer:
 
         return charger_position
 
-    def _merge_saved_map_data(self, map_data, saved_map_data, original_data=None):
+    def _merge_saved_map_data(
+        self,
+        map_data: MapData,
+        saved_map_data: MapData | None,
+        original_data: list[int] | None = None,
+    ) -> None:
+        if saved_map_data is None:
+            return
+        current_geometry = self._valid_raster(map_data)
+        saved_geometry = self._valid_raster(saved_map_data)
+        if current_geometry is None or saved_geometry is None:
+            return
+        dimensions, source_pixels = current_geometry
+        saved_dimensions, saved_pixels = saved_geometry
+        if saved_dimensions.grid_size != dimensions.grid_size:
+            return
         if saved_map_data:
-            maxX = map_data.dimensions.left + (
-                map_data.dimensions.width * map_data.dimensions.grid_size
-            )
-            maxY = map_data.dimensions.top + (
-                map_data.dimensions.height * map_data.dimensions.grid_size
-            )
+            maxX = dimensions.left + (dimensions.width * dimensions.grid_size)
+            maxY = dimensions.top + (dimensions.height * dimensions.grid_size)
 
-            if maxX < saved_map_data.dimensions.left + (
-                saved_map_data.dimensions.width * saved_map_data.dimensions.grid_size
+            if maxX < saved_dimensions.left + (
+                saved_dimensions.width * saved_dimensions.grid_size
             ):
-                maxX = saved_map_data.dimensions.left + (
-                    saved_map_data.dimensions.width
-                    * saved_map_data.dimensions.grid_size
+                maxX = saved_dimensions.left + (
+                    saved_dimensions.width * saved_dimensions.grid_size
                 )
 
-            if maxY < saved_map_data.dimensions.top + (
-                saved_map_data.dimensions.height * saved_map_data.dimensions.grid_size
+            if maxY < saved_dimensions.top + (
+                saved_dimensions.height * saved_dimensions.grid_size
             ):
-                maxY = saved_map_data.dimensions.top + (
-                    saved_map_data.dimensions.height
-                    * saved_map_data.dimensions.grid_size
+                maxY = saved_dimensions.top + (
+                    saved_dimensions.height * saved_dimensions.grid_size
                 )
 
-            left = map_data.dimensions.left
-            top = map_data.dimensions.top
+            left = dimensions.left
+            top = dimensions.top
 
-            if saved_map_data.dimensions.left < left:
-                left = saved_map_data.dimensions.left
+            if saved_dimensions.left < left:
+                left = saved_dimensions.left
 
-            if saved_map_data.dimensions.top < top:
-                top = saved_map_data.dimensions.top
+            if saved_dimensions.top < top:
+                top = saved_dimensions.top
 
-            width = int((maxX - left) / saved_map_data.dimensions.grid_size)
-            height = int((maxY - top) / saved_map_data.dimensions.grid_size)
+            width = int((maxX - left) / saved_dimensions.grid_size)
+            height = int((maxY - top) / saved_dimensions.grid_size)
 
-            si = int(
-                (saved_map_data.dimensions.left - left)
-                / saved_map_data.dimensions.grid_size
-            )
-            sj = int(
-                (saved_map_data.dimensions.top - top)
-                / saved_map_data.dimensions.grid_size
-            )
+            si = int((saved_dimensions.left - left) / saved_dimensions.grid_size)
+            sj = int((saved_dimensions.top - top) / saved_dimensions.grid_size)
 
-            sim = si + saved_map_data.dimensions.width
-            sjm = sj + saved_map_data.dimensions.height
+            sim = si + saved_dimensions.width
+            sjm = sj + saved_dimensions.height
 
-            ni = int((map_data.dimensions.left - left) / map_data.dimensions.grid_size)
-            nj = int((map_data.dimensions.top - top) / map_data.dimensions.grid_size)
+            ni = int((dimensions.left - left) / dimensions.grid_size)
+            nj = int((dimensions.top - top) / dimensions.grid_size)
 
-            nim = ni + map_data.dimensions.width
-            njm = nj + map_data.dimensions.height
+            nim = ni + dimensions.width
+            njm = nj + dimensions.height
 
             pixel_type = np.zeros((width, height), np.uint8)
             data = (
                 map_data.optimized_pixel_type
                 if map_data.optimized_pixel_type is not None
-                else map_data.pixel_type
+                else source_pixels
             )
 
             for j in range(height):
                 for i in range(width):
                     if j >= sj and i >= si and j < sjm and i < sim:
-                        saved_value = int(saved_map_data.pixel_type[(i - si), (j - sj)])
+                        saved_value = int(saved_pixels[(i - si), (j - sj)])
                     else:
                         saved_value = 0
 
@@ -1387,9 +1495,7 @@ class DreameMowerMapOptimizer:
                     for i in range(width):
                         if j >= nj and i >= ni and j < njm and i < nim:
                             if (
-                                original_data[
-                                    (j - nj) * map_data.dimensions.width + (i - ni)
-                                ]
+                                original_data[(j - nj) * dimensions.width + (i - ni)]
                                 == 2
                                 and pixel_type[i, j] != 0
                             ):
@@ -1415,20 +1521,42 @@ class DreameMowerMapOptimizer:
 
             map_data.optimized_pixel_type = pixel_type
             map_data.optimized_dimensions = MapImageDimensions(
-                top, left, height, width, map_data.dimensions.grid_size
+                top, left, height, width, dimensions.grid_size
             )
 
-    def optimize(self, map_data, saved_map_data=None, js_optimizer=True):
+    def optimize(
+        self,
+        map_data: MapData,
+        saved_map_data: MapData | None = None,
+        js_optimizer: bool = True,
+    ) -> MapData:
         if map_data.saved_map:
             return map_data
 
+        current_geometry = self._valid_raster(map_data)
+        if current_geometry is None:
+            return map_data
+        dimensions, source_pixels = current_geometry
+        saved_geometry = (
+            self._valid_raster(saved_map_data) if saved_map_data is not None else None
+        )
+        if (
+            saved_geometry is not None
+            and saved_geometry[0].grid_size != dimensions.grid_size
+        ):
+            saved_geometry = None
+        if saved_geometry is None:
+            saved_map_data = None
+        else:
+            saved_dimensions, saved_pixels = saved_geometry
+
         if map_data.wifi_map:
-            map_data.optimized_pixel_type = np.copy(map_data.pixel_type)
-            map_data.optimized_dimensions = map_data.dimensions
+            map_data.optimized_pixel_type = np.copy(source_pixels)
+            map_data.optimized_dimensions = dimensions
             if not map_data.empty_map:
-                for y in range(map_data.dimensions.height):
-                    for x in range(map_data.dimensions.width):
-                        if int(map_data.pixel_type[x, y]) > 2:
+                for y in range(dimensions.height):
+                    for x in range(dimensions.width):
+                        if int(source_pixels[x, y]) > 2:
                             max_count = 0
                             max_px = -1
                             value_count = [0, 0, 0, 0]
@@ -1437,14 +1565,14 @@ class DreameMowerMapOptimizer:
                                     for m in range(x - delta, x + delta + 1):
                                         if (
                                             n < 0
-                                            or n >= map_data.dimensions.height
+                                            or n >= dimensions.height
                                             or m < 0
-                                            or m >= map_data.dimensions.width
+                                            or m >= dimensions.width
                                         ):
                                             continue
 
-                                        px = int(map_data.pixel_type[m, n]) - 11
-                                        if px >= 0:
+                                        px = int(source_pixels[m, n]) - 11
+                                        if 0 <= px < len(value_count):
                                             value_count[px] = value_count[px] + 1
                                             if value_count[px] > max_count:
                                                 max_count = value_count[px]
@@ -1461,45 +1589,45 @@ class DreameMowerMapOptimizer:
             now = time.time()
 
             if js_optimizer:
-                data = map_data.pixel_type.tolist()
+                data = cast(list[list[int]], source_pixels.tolist())
                 data_size = [
-                    map_data.dimensions.left,
-                    map_data.dimensions.top,
-                    map_data.dimensions.width,
-                    map_data.dimensions.height,
-                    map_data.dimensions.grid_size,
+                    dimensions.left,
+                    dimensions.top,
+                    dimensions.width,
+                    dimensions.height,
+                    dimensions.grid_size,
                 ]
                 saved_data = (
-                    saved_map_data.pixel_type.tolist() if saved_map_data else None
+                    cast(list[list[int]], saved_pixels.tolist())
+                    if saved_geometry is not None
+                    else None
                 )
                 saved_data_size = (
                     [
-                        saved_map_data.dimensions.left,
-                        saved_map_data.dimensions.top,
-                        saved_map_data.dimensions.width,
-                        saved_map_data.dimensions.height,
-                        saved_map_data.dimensions.grid_size,
+                        saved_dimensions.left,
+                        saved_dimensions.top,
+                        saved_dimensions.width,
+                        saved_dimensions.height,
+                        saved_dimensions.grid_size,
                     ]
                     if saved_map_data
                     else None
                 )
                 charger_position = None
                 if map_data.charger_position:
-                    left = map_data.dimensions.left
-                    top = map_data.dimensions.top
+                    left = dimensions.left
+                    top = dimensions.top
 
-                    if saved_map_data:
-                        if saved_map_data.dimensions.left < left:
-                            left = saved_map_data.dimensions.left
+                    if saved_geometry is not None:
+                        if saved_dimensions.left < left:
+                            left = saved_dimensions.left
 
-                        if saved_map_data.dimensions.top < top:
-                            top = saved_map_data.dimensions.top
+                        if saved_dimensions.top < top:
+                            top = saved_dimensions.top
 
                     charger_position = [
-                        (map_data.charger_position.x - left)
-                        / map_data.dimensions.grid_size,
-                        (map_data.charger_position.y - top)
-                        / map_data.dimensions.grid_size,
+                        (map_data.charger_position.x - left) / dimensions.grid_size,
+                        (map_data.charger_position.y - top) / dimensions.grid_size,
                         map_data.charger_position.a,
                     ]
 
@@ -1513,20 +1641,17 @@ class DreameMowerMapOptimizer:
                 if result and result[0]:
                     map_data.optimized_pixel_type = np.array(result[0], dtype=np.uint8)
 
-                    dimensions = result[1]
+                    result_dimensions = result[1]
                     map_data.optimized_dimensions = MapImageDimensions(
-                        dimensions[1],
-                        dimensions[0],
-                        dimensions[3],
-                        dimensions[2],
-                        map_data.dimensions.grid_size,
+                        result_dimensions[1],
+                        result_dimensions[0],
+                        result_dimensions[3],
+                        result_dimensions[2],
+                        dimensions.grid_size,
                     )
-
-                    if result[2] and map_data.charger_position:
-                        pass
             else:
-                width = map_data.dimensions.width
-                height = map_data.dimensions.height
+                width = dimensions.width
+                height = dimensions.height
                 clean_data = np.zeros((width * height), np.uint8).tolist()
 
                 data_map = {255: 2, 253: 1, 250: 3}
@@ -1534,7 +1659,7 @@ class DreameMowerMapOptimizer:
                 for j in range(height):
                     for i in range(width):
                         index = j * width + i
-                        clean_data[index] = int(map_data.pixel_type[i, j])
+                        clean_data[index] = int(source_pixels[i, j])
                         if clean_data[index]:
                             pointNum = pointNum + 1
                             clean_data[index] = data_map.get(clean_data[index], 0)
@@ -1553,25 +1678,26 @@ class DreameMowerMapOptimizer:
                 if result:
                     self._fill_map_data_2(clean_data, width, height)
                     self._update_border_value(clean_data, width, height, 6)
-                    if map_data.charger_position:
-                        left = map_data.dimensions.left
-                        top = map_data.dimensions.top
+                    if (
+                        map_data.charger_position
+                        and map_data.charger_position.a is not None
+                    ):
+                        left = dimensions.left
+                        top = dimensions.top
 
-                        if saved_map_data:
-                            if saved_map_data.dimensions.left < left:
-                                left = saved_map_data.dimensions.left
+                        if saved_geometry is not None:
+                            if saved_dimensions.left < left:
+                                left = saved_dimensions.left
 
-                            if saved_map_data.dimensions.top < top:
-                                top = saved_map_data.dimensions.top
+                            if saved_dimensions.top < top:
+                                top = saved_dimensions.top
 
                         new_charger_position = copy.deepcopy(map_data.charger_position)
                         new_charger_position.x = int(
-                            (new_charger_position.x - left)
-                            / map_data.dimensions.grid_size
+                            (new_charger_position.x - left) / dimensions.grid_size
                         )
                         new_charger_position.y = int(
-                            (new_charger_position.y - top)
-                            / map_data.dimensions.grid_size
+                            (new_charger_position.y - top) / dimensions.grid_size
                         )
                         if (
                             new_charger_position.y >= 0
@@ -1587,15 +1713,9 @@ class DreameMowerMapOptimizer:
                                 clean_data, width, height, 6, new_charger_position
                             )
                             map_data.optimized_charger_position = Point(
-                                int(
-                                    new_charger_position.x
-                                    * map_data.dimensions.grid_size
-                                )
+                                int(new_charger_position.x * dimensions.grid_size)
                                 + left,
-                                int(
-                                    new_charger_position.y
-                                    * map_data.dimensions.grid_size
-                                )
+                                int(new_charger_position.y * dimensions.grid_size)
                                 + top,
                                 new_charger_position.a,
                             )
@@ -1604,7 +1724,7 @@ class DreameMowerMapOptimizer:
                     self._fill_map_data_2(clean_data, width, height)
                     self._update_border_value(clean_data, width, height, 7)
 
-                    if saved_map_data:
+                    if saved_geometry is not None:
                         self._find_obstacle_border(clean_data, width, height, 3)
                         self._obstacle_data(original_data, width, height)
                     else:
@@ -1624,6 +1744,7 @@ class DreameMowerMapOptimizer:
                         and pointNum > 2000
                     ):
                         map_data.optimized_pixel_type = pixel_type
+                        map_data.optimized_dimensions = dimensions
 
                 self._merge_saved_map_data(map_data, saved_map_data, original_data)
 

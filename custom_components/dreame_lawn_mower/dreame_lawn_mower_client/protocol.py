@@ -1,3 +1,7 @@
+"""Legacy protocol facade and MiIO transport compatibility."""
+
+from __future__ import annotations
+
 import logging
 import random
 import hashlib
@@ -7,6 +11,7 @@ import hmac
 import requests
 import zlib
 import queue
+from collections.abc import Callable
 from threading import Thread, Timer
 from time import sleep
 import time
@@ -18,6 +23,7 @@ from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
 from .exceptions import DeviceException
+from .protocol_queue import RequestQueue, ResponseCallback, run_callback_queue
 from .const import DREAME_STRINGS, MOVA_STRINGS
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
@@ -44,62 +50,55 @@ from .protocol_cloud import (
 class DreameMowerDeviceProtocol(MiIOProtocol):
     def __init__(self, ip: str, token: str) -> None:
         super().__init__(ip, token, 0, 0, True, 2)
-        self.ip = None
-        self.token = None
-        self._queue = queue.Queue()
-        self._thread = None
+        self._queue = RequestQueue()
+        self._thread: Thread | None = None
         self.set_credentials(ip, token)
 
-    def _api_task(self):
-        while True:
-            item = self._queue.get()
-            if len(item) == 0:
-                self._queue.task_done()
-                return
-            response = self.send(item[1], item[2], item[3])
-            if item[0]:
-                item[0](response)
-            self._queue.task_done()
+    def _api_task(self) -> None:
+        run_callback_queue(self._queue, self.send, _LOGGER)
 
-    def send_async(self, callback, command, parameters=None, retry_count=2):
+    def send_async(
+        self,
+        callback: ResponseCallback | None,
+        command: str,
+        parameters: Any = None,
+        retry_count: int = 2,
+    ) -> None:
         if self._thread is None:
             self._thread = Thread(target=self._api_task, daemon=True)
             self._thread.start()
 
         self._queue.put((callback, command, parameters, retry_count))
 
-    def set_credentials(self, ip: str, token: str):
-        if self.ip != ip or self.token != token:
+    def set_credentials(self, ip: str, token: str | None) -> None:
+        token_bytes = bytes.fromhex(token or 32 * "0")
+        if self.ip != ip or self.token != token_bytes:
             self.ip = ip
             self.port = 54321
-            self.token = token
-
-            if token is None or token == "":
-                token = 32 * "0"
-            self.token = bytes.fromhex(token)
+            self.token = token_bytes
             self._discovered = False
 
     @property
     def connected(self) -> bool:
         return self._discovered
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         self._discovered = False
         if self._thread:
-            self._queue.put([])
+            self._queue.stop()
 
 
 class DreameMowerProtocol:
     def __init__(
         self,
-        ip: str = None,
-        token: str = None,
-        username: str = None,
-        password: str = None,
-        country: str = None,
+        ip: str | None = None,
+        token: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        country: str | None = None,
         prefer_cloud: bool = True,
         account_type: str = "dreame",
-        device_id: str = None,
+        device_id: str | None = None,
     ) -> None:
         if account_type != "dreame" and account_type != "mova":
             raise DeviceException(
@@ -111,17 +110,19 @@ class DreameMowerProtocol:
 
         self.prefer_cloud = prefer_cloud
         self._connected = False
-        self._mac = None
+        self._mac: str | None = None
         self._account_type = account_type
 
         self.prefer_cloud = True
-        self.device = None
+        self.device: DreameMowerDeviceProtocol | None = None
 
         self.cloud = DreameMowerDreameHomeCloudProtocol(
             username, password, country, device_id, account_type)
         self.device_cloud = self.cloud
 
-    def set_credentials(self, ip: str, token: str, mac: str = None, account_type: str = "mi"):
+    def set_credentials(
+        self, ip: str, token: str, mac: str | None = None, account_type: str = "mi"
+    ) -> None:
         self._mac = mac
         self._account_type = account_type
         if ip and token and account_type == "mi":
@@ -132,13 +133,18 @@ class DreameMowerProtocol:
         else:
             self.device = None
 
-    def connect(self, message_callback=None, connected_callback=None, retry_count=1) -> Any:
+    def connect(
+        self,
+        message_callback: ResponseCallback | None = None,
+        connected_callback: Callable[[], None] | None = None,
+        retry_count: int = 1,
+    ) -> Any:
         info = self.cloud.connect(message_callback, connected_callback)
         if info:
             self._connected = True
         return info
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         disconnected_protocols: set[int] = set()
         for cloud in (self.cloud, self.device_cloud):
             if cloud is None or id(cloud) in disconnected_protocols:
@@ -147,7 +153,13 @@ class DreameMowerProtocol:
             cloud.disconnect()
         self._connected = False
 
-    def send_async(self, callback, method, parameters: Any = None, retry_count: int = 0):
+    def send_async(
+        self,
+        callback: ResponseCallback,
+        method: str,
+        parameters: Any = None,
+        retry_count: int = 0,
+    ) -> None:
         if not self.device_cloud:
             raise DeviceException("Cloud connection missing") from None
 
@@ -164,13 +176,8 @@ class DreameMowerProtocol:
             raise DeviceException(
                 "Unable to login to device over cloud") from None
 
-        def cloud_callback(response):
-            if response is None:
-                self._connected = False
-                raise DeviceException(
-                    "send_async over cloud failed for method: %s; and parameters: %s",
-                    method, parameters) from None
-            self._connected = True
+        def cloud_callback(response: Any) -> None:
+            self._connected = response is not None
             callback(response)
 
         self.device_cloud.send_async(
@@ -178,7 +185,7 @@ class DreameMowerProtocol:
 
     def send(
         self,
-        method,
+        method: str,
         parameters: Any = None,
         retry_count: int = 0,
         *,
@@ -210,15 +217,14 @@ class DreameMowerProtocol:
                 "Unable to login to device over cloud") from None
 
         _LOGGER.debug("DreameMowerProtocol.send %s %s", method, parameters)
-        send_options = {}
-        if deadline is not None:
-            send_options["deadline"] = deadline
-        response = self.device_cloud.send(
-            method,
-            parameters=parameters,
-            retry_count=retry_count,
-            **send_options,
-        )
+        if deadline is None:
+            response = self.device_cloud.send(
+                method, parameters=parameters, retry_count=retry_count,
+            )
+        else:
+            response = self.device_cloud.send(
+                method, parameters=parameters, retry_count=retry_count, deadline=deadline,
+            )
         _LOGGER.debug("DreameMowerProtocol.send response %s", response)
         return response
 
@@ -242,7 +248,9 @@ class DreameMowerProtocol:
             deadline=deadline,
         )
 
-    def set_property(self, siid: int, piid: int, value: Any = None, retry_count: int = 0) -> Any:
+    def set_property(
+        self, siid: int, piid: int, value: Any = None, retry_count: int = 0
+    ) -> Any:
         return self.set_properties(
             [
                 {
@@ -258,7 +266,14 @@ class DreameMowerProtocol:
     def set_properties(self, parameters: Any = None, retry_count: int = 0) -> Any:
         return self.send("set_properties", parameters=parameters, retry_count=retry_count)
 
-    def action_async(self, callback, siid: int, aiid: int, parameters=[], retry_count: int = 0):
+    def action_async(
+        self,
+        callback: ResponseCallback,
+        siid: int,
+        aiid: int,
+        parameters: Any = [],
+        retry_count: int = 0,
+    ) -> None:
         if parameters is None:
             parameters = []
 
@@ -275,7 +290,9 @@ class DreameMowerProtocol:
             retry_count=retry_count,
         )
 
-    def action(self, siid: int, aiid: int, parameters=[], retry_count: int = 0) -> Any:
+    def action(
+        self, siid: int, aiid: int, parameters: Any = [], retry_count: int = 0
+    ) -> Any:
         if parameters is None:
             parameters = []
 
@@ -295,7 +312,7 @@ class DreameMowerProtocol:
     def connected(self) -> bool:
         if not self.device_cloud:
             raise DeviceException("Cloud connection missing") from None
-        return self.device_cloud.logged_in and self.device_cloud.connected and self._connected
+        return bool(self.device_cloud.logged_in and self.device_cloud.connected and self._connected)
 
     @property
     def dreame_cloud(self) -> bool:

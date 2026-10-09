@@ -20,7 +20,11 @@ from datetime import datetime as datetime
 from io import BytesIO as BytesIO
 from typing import Any
 
+from aiohttp import ClientSession as _ClientSession
 from requests.exceptions import Timeout as _RequestsTimeout
+
+if _typing.TYPE_CHECKING:
+    from .device import DreameMowerDevice
 
 from . import client_camera as _client_camera
 from . import client_constants as _client_constants
@@ -80,19 +84,17 @@ from .client_core_helpers import (
 from .client_core_helpers import (
     _FIRMWARE_DESCRIPTION_PREFERRED_KEYS as _FIRMWARE_DESCRIPTION_PREFERRED_KEYS,
 )
+from .client_core_helpers import async_discover_devices as _async_discover_devices
 from .client_device_settings import _DreameLawnMowerClientDeviceSettingsMixin
-from .client_maps import (
-    _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
-    _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS,
-    _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
-    _DreameLawnMowerClientMapsMixin,
-)
+from .client_maps import _DreameLawnMowerClientMapsMixin
 from .client_schedules import (
     SCHEDULE_READ_TIMEOUT_SECONDS as _SCHEDULE_READ_TIMEOUT_SECONDS,
 )
 from .client_schedules import _DreameLawnMowerClientSchedulesMixin
 from .client_settings import _DreameLawnMowerClientSettingsMixin
+from .client_task_control import serialized_task_control as _serialized_task_control
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
+from .cloud_session import DreameCloudSession as _DreameCloudSession
 from .deadline import DeadlineExceededError as DeadlineExceededError
 from .deadline import run_with_deadline as run_with_deadline
 from .debug_ota_catalog import (
@@ -103,6 +105,9 @@ from .debug_ota_catalog import (
 )
 from .docking import SESSION_STATES_TO_END as _SESSION_STATES_TO_END
 from .docking import async_stop_then_dock
+from .exceptions import (
+    DeviceCommandRejectedException as _DeviceCommandRejectedException,
+)
 from .exceptions import DeviceException as DeviceException
 from .exceptions import (
     DreameLawnMowerAuthError as DreameLawnMowerAuthError,
@@ -194,6 +199,11 @@ from .point_cloud import (
     DreameLawnMowerPointCloudError,
 )
 from .point_cloud import parse_pcd_metadata as parse_pcd_metadata
+from .point_cloud_policy import (
+    _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
+    _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS,
+    _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
+)
 from .point_cloud_trace import PointCloudTrace as _PointCloudTrace
 from .point_cloud_trace import active_point_cloud_trace as _active_point_cloud_trace
 from .position_tracking import MowerPositionTracker as _MowerPositionTracker
@@ -222,7 +232,12 @@ from .vector_map import vector_map_to_details as vector_map_to_details
 from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
+    from .client_mqtt_connection import NativeMqttConnection as _NativeMqttConnection
+    from .client_update_scheduler import NativeDeviceUpdates as _NativeDeviceUpdates
     from .map_visuals import MapRenderStyle
+    from .models import DreameLawnMowerCameraFeatureSupport as _CameraFeatureSupport
+    from .models import DreameLawnMowerCameraStreamRuntimeInputs as _CameraRuntimeInputs
+    from .mowing_map import MowingMapScene
     from .work_log import DreameLawnMowerWorkLogTotals
 
 _CLOUD_PRESENCE_REFRESH_INTERVAL = _client_constants.CLOUD_PRESENCE_REFRESH_INTERVAL
@@ -324,9 +339,7 @@ camera_metadata_advertises_video = _client_camera.camera_metadata_advertises_vid
 camera_stream_block_reason = _client_camera.camera_stream_block_reason
 derive_tx_video_app_credentials = _client_camera.derive_tx_video_app_credentials
 
-_GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES = frozenset(
-    {"starting", "mowing", "paused"}
-)
+_GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES = frozenset({"starting", "mowing", "paused"})
 _ZONE_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | {
     "zone_cleaning",
     "segment_cleaning",
@@ -539,6 +552,7 @@ class DreameLawnMowerClient(
         country: str,
         account_type: str,
         descriptor: DreameLawnMowerDescriptor,
+        session: _ClientSession | None = None,
     ) -> None:
         if account_type not in SUPPORTED_ACCOUNT_TYPES:
             raise ValueError(f"Unsupported account type: {account_type}")
@@ -548,9 +562,20 @@ class DreameLawnMowerClient(
         self._country = country
         self._account_type = account_type
         self._descriptor = descriptor
+        self._http_session = session
+        self._owns_http_session = session is None
+        self._async_cloud: _DreameCloudSession | None = None
+        self._cloud_read_tasks: set[asyncio.Task[Any]] = set()
+        self._native_updates: _NativeDeviceUpdates | None = None
+        self._native_mqtt_connection: _NativeMqttConnection | None = None
         self._device: Any | None = None
         self._device_ownership_lock = _threading.Lock()
+        self._refresh_lock = asyncio.Lock()
         self._schedule_operation_lock = _threading.RLock()
+        self._schedule_async_gate = asyncio.Lock()
+        self._device_settings_write_lock = asyncio.Lock()
+        self._task_control_gate = asyncio.Lock()
+        self._app_schedule_retry_offset = 0
         self._schedule_protocols: dict[int, str] = {}
         self._schedule_document_versions: dict[int, int] = {}
         self._schedule_document_retry_versions: dict[int, int] = {}
@@ -608,15 +633,17 @@ class DreameLawnMowerClient(
         password: str,
         country: str,
         account_type: str,
+        session: _ClientSession | None = None,
     ) -> Sequence[DreameLawnMowerDescriptor]:
-        """Log in and return mower devices from the user's account."""
-        return await asyncio.to_thread(
-            _sync_discover_devices,
-            username,
-            password,
-            country,
-            account_type,
-        )
+        """Discover mowers using a borrowed session, or a temporary owned session."""
+        options = {
+            "username": username, "password": password,
+            "country": country, "account_type": account_type,
+        }
+        if session is not None:
+            return await _async_discover_devices(session, **options)
+        async with _ClientSession(trust_env=True) as owned_session:
+            return await _async_discover_devices(owned_session, **options)
 
     async def async_refresh_authoritative_snapshot(
         self,
@@ -626,9 +653,37 @@ class DreameLawnMowerClient(
         """Force a device-property read for a safety-critical decision."""
         return await self._async_refresh_authoritative_snapshot(deadline=deadline)
 
+    async def _async_get_cached_start_mowing_session_identity(self) -> bool | None:
+        """Read the device's current start branch under its MQTT state lock."""
+        from .client_core import _device_start_session_identity
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, _device_start_session_identity, refresh=False,
+        )
+
+    async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Apply heartbeat reconciliation to the current in-memory device state."""
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, self._snapshot_from_device, refresh=False,
+        )
+
+    async def _async_update_device(
+        self, *, force_request_properties: bool = False,
+        deadline: float | None = None,
+    ) -> DreameMowerDevice:
+        """Use native polling while retaining owned synchronous startup."""
+        from .client_refresh import async_update_device
+
+        return await async_update_device(
+            self, force_request_properties=force_request_properties, deadline=deadline,
+        )
+
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
-        device = await asyncio.to_thread(self._sync_update_device)
+        device = await self._async_update_device()
         info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
         device_info = info_raw.get("deviceInfo", {}) or {}
         refreshed_model = (
@@ -651,13 +706,20 @@ class DreameLawnMowerClient(
             token=getattr(device, "token", None) or self._descriptor.token,
             raw=self._descriptor.raw,
         )
-        snapshot = self._snapshot_from_device(device)
+        from .client_state_reads import async_read_device_state
+
+        def snapshot_current(current: Any) -> DreameLawnMowerSnapshot:
+            if current is not device:
+                raise DreameLawnMowerConnectionError(
+                    "Device changed during snapshot refresh"
+                )
+            return self._snapshot_from_device(current)
+
+        snapshot = await async_read_device_state(
+            self, snapshot_current, refresh=False,
+        )
         try:
-            status_blob = await asyncio.to_thread(
-                self._sync_get_status_blob,
-                False,
-                True,
-            )
+            status_blob = await self.async_get_status_blob()
         except DreameLawnMowerConnectionError:
             status_blob = None
         if status_blob is not None:
@@ -673,9 +735,7 @@ class DreameLawnMowerClient(
             )
 
         try:
-            cloud_device_info = await asyncio.to_thread(
-                self._sync_get_cached_cloud_device_info,
-            )
+            cloud_device_info = await self._async_get_cached_cloud_device_info()
         except DreameLawnMowerConnectionError:
             cloud_device_info = self._latest_cloud_device_info
         if isinstance(cloud_device_info, Mapping):
@@ -683,6 +743,7 @@ class DreameLawnMowerClient(
         self._latest_snapshot = snapshot
         return snapshot
 
+    @_serialized_task_control
     async def async_start_mowing(self) -> bool | None:
         """Start mowing and report fresh, resumed, or unknown session identity."""
         try:
@@ -693,20 +754,25 @@ class DreameLawnMowerClient(
         except DreameLawnMowerConnectionError:
             status_blob = None
         if status_blob is not None and status_blob.task_resumable:
-            try:
-                await asyncio.to_thread(self._sync_resume_mowing)
-            except _DreameLawnMowerCommandRejectedError:
-                raise
-            except DreameLawnMowerConnectionError as err:
-                await self._async_reconcile_ambiguous_mutation(
-                    "resume mowing",
-                    err,
-                    lambda snapshot: bool(
-                        snapshot_session_control_state(snapshot) == "mowing"
-                        and not getattr(snapshot, "task_resumable", False)
-                    ),
-                )
-            return False
+            async def resume(_cloud: _DreameCloudSession) -> bool:
+                try:
+                    await self._async_call_mowing_task(
+                            RESUME_MOWING_REQUEST, task_name="resume mowing",
+                        )
+                except _DreameLawnMowerCommandRejectedError:
+                    raise
+                except DreameLawnMowerConnectionError as err:
+                    await self._async_reconcile_ambiguous_mutation(
+                        "resume mowing",
+                        err,
+                        lambda snapshot: bool(
+                            snapshot_session_control_state(snapshot) == "mowing"
+                            and not getattr(snapshot, "task_resumable", False)
+                        ),
+                    )
+                return False
+
+            return await self._async_cloud_read(resume)
         if (
             status_blob is not None
             and status_blob.mowing_session_active is True
@@ -716,10 +782,37 @@ class DreameLawnMowerClient(
             return False
         return await self._async_call_start_mowing_with_session_identity()
 
+    async def _async_call_start_mowing_with_session_identity(
+        self, *, require_new_session: bool = False,
+    ) -> bool | None:
+        """Start through the shared device policy and retain session identity."""
+        from .client_start_control import async_start_with_session_identity
+
+        return await async_start_with_session_identity(
+            self, require_new_session=require_new_session,
+        )
+
+    @_serialized_task_control
     async def async_pause(self) -> None:
         """Pause mowing."""
-        await self._async_call_device_method("pause")
+        from .client_device_actions import async_run_device_plan
 
+        async def pause(_cloud: _DreameCloudSession) -> None:
+            try:
+                await async_run_device_plan(self, lambda device: device._pause_plan())
+            except _DeviceCommandRejectedException as error:
+                raise _DreameLawnMowerCommandRejectedError(str(error)) from error
+            except DeviceException as error:
+                await self._async_reconcile_ambiguous_mutation(
+                    "pause mowing", DreameLawnMowerConnectionError(str(error)),
+                    lambda snapshot: bool(
+                        snapshot.paused or snapshot.task_status == "paused"
+                    ),
+                )
+
+        await self._async_cloud_read(pause)
+
+    @_serialized_task_control
     async def async_start_fresh_mowing(self) -> bool | None:
         """Start an explicit all-area task, refusing resumable or unknown sessions."""
         baseline = await self.async_refresh_authoritative_snapshot()
@@ -737,8 +830,11 @@ class DreameLawnMowerClient(
 
     async def async_get_schedule_start_evidence(self) -> dict[str, Any]:
         """Read native plans against a fresh authoritative map inventory."""
-        return await asyncio.to_thread(self._sync_get_schedule_start_evidence)
+        from .client_schedule_async import async_read_start_evidence
 
+        return await async_read_start_evidence(self)
+
+    @_serialized_task_control
     async def async_cancel_current_task(self) -> bool:
         """End the current task and require authoritative inactive readback.
 
@@ -746,6 +842,26 @@ class DreameLawnMowerClient(
         ``True`` after a dispatched stop is confirmed. The stop command is never
         retried after dispatch, even when its response is lost.
         """
+        async def cancel(_cloud: _DreameCloudSession) -> bool:
+            return await self._async_cancel_current_task()
+
+        return await self._async_cloud_read(cancel)
+
+    async def _async_stop_current_task(self) -> None:
+        """Dispatch guarded native STOP; the caller owns task settlement."""
+        from .client_device_actions import async_run_device_plan
+
+        try:
+            await async_run_device_plan(
+                self, lambda device: device._stop_plan(authoritative_task_active=True),
+            )
+        except _DeviceCommandRejectedException as error:
+            raise _DreameLawnMowerCommandRejectedError(str(error)) from error
+        except DeviceException as error:
+            raise DreameLawnMowerConnectionError(str(error)) from error
+
+    async def _async_cancel_current_task(self) -> bool:
+        """Keep authoritative preflight, dispatch and settlement in one lifetime."""
         baseline = await self.async_refresh_authoritative_snapshot()
         if _snapshot_is_fast_mapping(baseline):
             raise _DreameLawnMowerCommandRejectedError(
@@ -758,11 +874,7 @@ class DreameLawnMowerClient(
 
         ambiguous_stop_error: DreameLawnMowerConnectionError | None = None
         try:
-            await self._async_call_device_method(
-                "stop",
-                reconcile_ambiguous=False,
-                method_kwargs={"authoritative_task_active": True},
-            )
+            await self._async_stop_current_task()
         except (
             _DreameLawnMowerCommandRejectedError,
             InvalidActionException,
@@ -849,12 +961,50 @@ class DreameLawnMowerClient(
             raise readback_error from ambiguous_stop_error
         raise readback_error
 
+    @_serialized_task_control
     async def async_dock(self) -> None:
         """End an active mowing session and return the mower to base."""
+        async def dock(_cloud: _DreameCloudSession) -> None:
+            await self._async_stop_then_dock()
+
+        await self._async_cloud_read(dock)
+
+    async def _async_device_control(self, *, dock: bool) -> None:
+        """Run a native dock or ordinary STOP with existing confirmation policy."""
+        from .client_device_actions import async_run_device_plan
+
+        async def control(_cloud: _DreameCloudSession) -> None:
+            try:
+                await async_run_device_plan(
+                    self, lambda device: (
+                        device._dock_plan() if dock else device._ordinary_stop_plan()
+                    ),
+                )
+            except _DeviceCommandRejectedException as error:
+                raise _DreameLawnMowerCommandRejectedError(str(error)) from error
+            except DeviceException as error:
+                await self._async_reconcile_ambiguous_mutation(
+                    "return to dock" if dock else "stop mowing",
+                    DreameLawnMowerConnectionError(str(error)),
+                    lambda snapshot: bool(
+                        snapshot.returning or snapshot.docked or snapshot.state
+                        in {"returning", "charging", "charging_completed"}
+                    ) if dock else bool(
+                        snapshot.mowing_session_active is False or (
+                            not snapshot.started and not snapshot.mowing
+                            and not snapshot.paused
+                        )
+                    ),
+                )
+
+        await self._async_cloud_read(control)
+
+    async def _async_stop_then_dock(self) -> None:
+        """Keep the complete dock sequence under the caller's operation lifetime."""
         try:
             snapshot = await self.async_refresh()
         except DreameLawnMowerConnectionError:
-            await self._async_call_device_method("dock")
+            await self._async_device_control(dock=True)
             return
         initial_state = snapshot_session_control_state(snapshot)
 
@@ -863,15 +1013,17 @@ class DreameLawnMowerClient(
 
         await async_stop_then_dock(
             initial_state=initial_state,
-            stop=lambda: self._async_call_device_method("stop"),
-            dock=lambda: self._async_call_device_method("dock"),
+            stop=lambda: self._async_device_control(dock=False),
+            dock=lambda: self._async_device_control(dock=True),
             refresh_state=async_refresh_state,
         )
 
+    @_serialized_task_control
     async def async_dock_without_stopping(self) -> None:
         """Return to base while preserving a resumable mowing session."""
-        await self._async_call_device_method("dock")
+        await self._async_device_control(dock=True)
 
+    @_serialized_task_control
     async def async_start_zone_mowing(
         self, zone_ids: Sequence[int], *, require_inactive_task: bool = False
     ) -> Any:
@@ -886,32 +1038,36 @@ class DreameLawnMowerClient(
             requested_target_ids=requested_zone_ids,
             require_inactive_task=require_inactive_task,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._sync_start_zone_mowing,
-                normalized_zone_ids,
-            )
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError as err:
+        async def start_task(_cloud: _DreameCloudSession) -> Any:
+            try:
+                response = await self._async_call_mowing_task(
+                    build_zone_mowing_request(normalized_zone_ids),
+                    task_name="zone mowing",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_require_targeted_task_confirmation(
+                    "zone mowing",
+                    baseline,
+                    _ZONE_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_ZONE,
+                    requested_target_ids=requested_zone_ids,
+                    original_error=err,
+                )
+                return None
             await self._async_require_targeted_task_confirmation(
                 "zone mowing",
                 baseline,
                 _ZONE_TASK_CONFIRMATION_STATUSES,
                 expected_operation=_MOWING_TASK_ZONE,
                 requested_target_ids=requested_zone_ids,
-                original_error=err,
             )
-            return None
-        await self._async_require_targeted_task_confirmation(
-            "zone mowing",
-            baseline,
-            _ZONE_TASK_CONFIRMATION_STATUSES,
-            expected_operation=_MOWING_TASK_ZONE,
-            requested_target_ids=requested_zone_ids,
-        )
-        return response
+            return response
 
+        return await self._async_cloud_read(start_task)
+
+    @_serialized_task_control
     async def async_start_edge_mowing(
         self,
         contour_ids: Sequence[Sequence[int]],
@@ -930,30 +1086,34 @@ class DreameLawnMowerClient(
             _MOWING_TASK_EDGE,
             require_inactive_task=require_inactive_task,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._sync_start_edge_mowing,
-                normalized_contour_ids,
-            )
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError as err:
+        async def start_task(_cloud: _DreameCloudSession) -> Any:
+            try:
+                response = await self._async_call_mowing_task(
+                    build_edge_mowing_request(normalized_contour_ids),
+                    task_name="edge mowing",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_require_targeted_task_confirmation(
+                    "edge mowing",
+                    baseline,
+                    _EDGE_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_EDGE,
+                    original_error=err,
+                )
+                return None
             await self._async_require_targeted_task_confirmation(
                 "edge mowing",
                 baseline,
                 _EDGE_TASK_CONFIRMATION_STATUSES,
                 expected_operation=_MOWING_TASK_EDGE,
-                original_error=err,
             )
-            return None
-        await self._async_require_targeted_task_confirmation(
-            "edge mowing",
-            baseline,
-            _EDGE_TASK_CONFIRMATION_STATUSES,
-            expected_operation=_MOWING_TASK_EDGE,
-        )
-        return response
+            return response
 
+        return await self._async_cloud_read(start_task)
+
+    @_serialized_task_control
     async def async_start_spot_mowing(
         self, spot_ids: Sequence[int], *, require_inactive_task: bool = False
     ) -> Any:
@@ -968,31 +1128,34 @@ class DreameLawnMowerClient(
             requested_target_ids=requested_spot_ids,
             require_inactive_task=require_inactive_task,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._sync_start_spot_mowing,
-                normalized_spot_ids,
-            )
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError as err:
+        async def start_task(_cloud: _DreameCloudSession) -> Any:
+            try:
+                response = await self._async_call_mowing_task(
+                    build_spot_mowing_request(normalized_spot_ids),
+                    task_name="spot mowing",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_require_targeted_task_confirmation(
+                    "spot mowing",
+                    baseline,
+                    _SPOT_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_SPOT,
+                    requested_target_ids=requested_spot_ids,
+                    original_error=err,
+                )
+                return None
             await self._async_require_targeted_task_confirmation(
                 "spot mowing",
                 baseline,
                 _SPOT_TASK_CONFIRMATION_STATUSES,
                 expected_operation=_MOWING_TASK_SPOT,
                 requested_target_ids=requested_spot_ids,
-                original_error=err,
             )
-            return None
-        await self._async_require_targeted_task_confirmation(
-            "spot mowing",
-            baseline,
-            _SPOT_TASK_CONFIRMATION_STATUSES,
-            expected_operation=_MOWING_TASK_SPOT,
-            requested_target_ids=requested_spot_ids,
-        )
-        return response
+            return response
+
+        return await self._async_cloud_read(start_task)
 
     @staticmethod
     def _require_targeted_task_preflight(
@@ -1124,17 +1287,36 @@ class DreameLawnMowerClient(
             "state before retrying."
         )
 
+    async def _async_call_mowing_task(
+        self, action: Mapping[str, Any], *, task_name: str,
+    ) -> Any:
+        """Dispatch one app task through the native command and reply owners."""
+        from .client_app_reads import async_command_app_action
+        from .mowing_tasks import client_task_result
+
+        try:
+            response = await async_command_app_action(
+                self, action, deadline=time.monotonic() + 20,
+            )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        return client_task_result(response, task_name=task_name)
+
+    @_serialized_task_control
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
         snapshot = await self.async_refresh_authoritative_snapshot()
         block_reason = _maintenance_point_command_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
-        return await asyncio.to_thread(
-            self._sync_go_to_maintenance_point,
-            int(point_id),
+        from .mowing_tasks import build_maintenance_point_request
+
+        return await self._async_call_mowing_task(
+            build_maintenance_point_request([int(point_id)]),
+            task_name="maintenance point",
         )
 
+    @_serialized_task_control
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active map only while idle and require map-list readback."""
         map_index = int(map_index)
@@ -1149,40 +1331,50 @@ class DreameLawnMowerClient(
                 "dock. Finish or "
                 "cancel the task first."
             )
-        try:
-            response = await asyncio.to_thread(self._sync_switch_current_map, map_index)
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError:
-            # A timed-out setter can still have reached the mower. The same
-            # mandatory readback below decides whether it took effect.
-            response = None
 
-        readable = False
-        for delay in (0.0, 0.75, 1.5, 3.0):
-            if delay:
-                await asyncio.sleep(delay)
+        async def switch(_cloud: _DreameCloudSession) -> Any:
             try:
-                current_map_index = await self.async_get_current_app_map_index()
-            except DreameLawnMowerConnectionError:
-                continue
-            readable = True
-            if current_map_index == map_index:
-                return response
+                from .mowing_tasks import build_map_switch_request
 
-        if readable:
-            raise _DreameLawnMowerCommandRejectedError(
-                "The mower acknowledged the map switch but stayed on its previous "
-                "map. Map switching is only supported while no task is active."
+                response = await self._async_call_mowing_task(
+                    build_map_switch_request(map_index), task_name="map switch",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError:
+                # A timed-out setter can still have reached the mower. The same
+                # mandatory readback below decides whether it took effect.
+                response = None
+
+            readable = False
+            for delay in (0.0, 0.75, 1.5, 3.0):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    current_map_index = await self.async_get_current_app_map_index()
+                except DreameLawnMowerConnectionError:
+                    continue
+                readable = True
+                if current_map_index == map_index:
+                    return response
+
+            if readable:
+                raise _DreameLawnMowerCommandRejectedError(
+                    "The mower acknowledged the map switch but stayed on its previous "
+                    "map. Map switching is only supported while no task is active."
+                )
+            raise DreameLawnMowerConnectionError(
+                "The active map could not be confirmed because every map-list "
+                "readback failed. Refresh the mower before trying again."
             )
-        raise DreameLawnMowerConnectionError(
-            "The active map could not be confirmed because every map-list "
-            "readback failed. Refresh the mower before trying again."
-        )
+
+        return await self._async_cloud_read(switch)
 
     async def async_get_vector_map_details(self) -> dict[str, Any]:
         """Return JSON-safe parsed batch vector-map details."""
-        return await asyncio.to_thread(self._sync_get_vector_map_details)
+        from .client_vector_reads import async_vector_details
+
+        return await async_vector_details(self)
 
     async def async_get_remote_control_support(
         self,
@@ -1190,8 +1382,13 @@ class DreameLawnMowerClient(
         refresh: bool = False,
     ) -> DreameLawnMowerRemoteControlSupport:
         """Return whether the mower currently exposes remote-control support."""
-        return await asyncio.to_thread(self._sync_get_remote_control_support, refresh)
+        from .client_state_reads import async_read_device_state
 
+        return await async_read_device_state(
+            self, self._remote_control_support_from_device, refresh=refresh,
+        )
+
+    @_serialized_task_control
     async def async_remote_control_move_step(
         self,
         *,
@@ -1205,12 +1402,9 @@ class DreameLawnMowerClient(
         added only after the command shape is validated on real hardware.
         """
         _validate_remote_control_step(rotation=rotation, velocity=velocity)
-        return await asyncio.to_thread(
-            self._sync_remote_control_move_step,
-            rotation,
-            velocity,
-            prompt,
-        )
+        from .client_remote_control import async_remote_control_step
+
+        return await async_remote_control_step(self, rotation, velocity, prompt)
 
     async def async_remote_control_stop(self) -> Any:
         """Send a remote-control stop step."""
@@ -1229,12 +1423,25 @@ class DreameLawnMowerClient(
         language: str | None = "en",
     ) -> DreameLawnMowerFirmwareUpdateSupport:
         """Return firmware/update evidence without guessing availability."""
-        return await asyncio.to_thread(
-            self._sync_get_firmware_update_support,
-            refresh,
-            include_cloud,
-            include_debug_ota_catalog,
-            language,
+        from .client_firmware_reads import async_read_firmware_support
+
+        return await async_read_firmware_support(
+            self, refresh=refresh, include_cloud=include_cloud,
+            include_debug_ota_catalog=include_debug_ota_catalog, language=language,
+        )
+
+    async def _async_get_decoded_status_blob(
+        self, property_key: str, *, refresh: bool, include_cloud: bool,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Prefer device realtime data, then fetch missing status with native HTTP."""
+        from .client_core import _decoded_realtime_status_blob
+        from .client_state_reads import async_read_cached_property
+
+        return await async_read_cached_property(
+            self, property_key,
+            lambda device: _decoded_realtime_status_blob(device, property_key),
+            lambda response: self._decode_cloud_status_blob(response, property_key),
+            refresh=refresh, include_cloud=include_cloud,
         )
 
     async def async_get_status_blob(
@@ -1244,10 +1451,9 @@ class DreameLawnMowerClient(
         include_cloud: bool = True,
     ) -> DreameLawnMowerStatusBlob | None:
         """Return the latest decoded raw realtime status blob, if available."""
-        return await asyncio.to_thread(
-            self._sync_get_status_blob,
-            refresh,
-            include_cloud,
+        return await self._async_get_decoded_status_blob(
+            MOWER_RAW_STATUS_PROPERTY_KEY,
+            refresh=refresh, include_cloud=include_cloud,
         )
 
     async def async_get_runtime_status_blob(
@@ -1257,10 +1463,9 @@ class DreameLawnMowerClient(
         include_cloud: bool = True,
     ) -> DreameLawnMowerStatusBlob | None:
         """Return the latest decoded runtime-status blob, if available."""
-        return await asyncio.to_thread(
-            self._sync_get_runtime_status_blob,
-            refresh,
-            include_cloud,
+        return await self._async_get_decoded_status_blob(
+            MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+            refresh=refresh, include_cloud=include_cloud,
         )
 
     async def async_get_bluetooth_connected(
@@ -1270,10 +1475,20 @@ class DreameLawnMowerClient(
         include_cloud: bool = True,
     ) -> bool | None:
         """Return whether the mower reports an active Bluetooth connection."""
-        return await asyncio.to_thread(
-            self._sync_get_bluetooth_connected,
-            refresh,
-            include_cloud,
+        from .client_state_reads import async_read_cached_property
+
+        return await async_read_cached_property(
+            self, MOWER_BLUETOOTH_PROPERTY_KEY,
+            self._bluetooth_connected_from_device, self._decode_cloud_bluetooth,
+            refresh=refresh, include_cloud=include_cloud,
+        )
+
+    async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Return an owned snapshot from the latest in-memory device state."""
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, self._snapshot_from_device, refresh=False,
         )
 
     async def async_capture_operation_snapshot(
@@ -1296,17 +1511,14 @@ class DreameLawnMowerClient(
         diagnostics, and firmware/update evidence. It never starts mowing,
         remote control, camera streaming, or docking.
         """
-        return await asyncio.to_thread(
-            self._sync_capture_operation_snapshot,
-            label,
-            include_status_blob,
-            include_cloud_status_blob,
-            include_remote_control,
-            include_map_view,
-            include_firmware,
-            map_timeout,
-            map_interval,
-            language,
+        from .client_operation_reads import async_capture_operation_snapshot
+
+        return await async_capture_operation_snapshot(
+            self, label=label, include_status_blob=include_status_blob,
+            include_cloud_status_blob=include_cloud_status_blob,
+            include_remote_control=include_remote_control,
+            include_map_view=include_map_view, include_firmware=include_firmware,
+            map_timeout=map_timeout, map_interval=map_interval, language=language,
         )
 
     async def async_refresh_map_summary(
@@ -1336,6 +1548,21 @@ class DreameLawnMowerClient(
         )
         return view.image_png
 
+    async def _async_refresh_legacy_map_view(
+        self,
+        timeout: float,
+        interval: float,
+        *,
+        label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
+    ) -> DreameLawnMowerMapView:
+        from .client_map_views import async_legacy_map_view
+
+        return await async_legacy_map_view(
+            self, timeout=timeout, interval=interval,
+            label_scale=label_scale, style=style,
+        )
+
     async def async_refresh_map_view(
         self,
         *,
@@ -1345,12 +1572,21 @@ class DreameLawnMowerClient(
         style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         """Try to refresh map data and return metadata plus rendered image bytes."""
-        return await asyncio.to_thread(
-            self._sync_refresh_map_view,
-            timeout,
-            interval,
-            label_scale,
-            style,
+        from .client_map_views import async_map_view
+
+        return await async_map_view(
+            self, timeout=timeout, interval=interval,
+            label_scale=label_scale, style=style,
+        )
+
+    async def async_get_mowing_map_scene(
+        self, *, map_index: int, style: MapRenderStyle, label_scale: float = 1.0
+    ) -> MowingMapScene:
+        """Read current geometry natively and render off the event loop."""
+        from .client_vector_reads import async_mowing_scene
+
+        return await async_mowing_scene(
+            self, map_index=map_index, style=style, label_scale=label_scale
         )
 
     async def async_refresh_vector_map_view(
@@ -1361,9 +1597,10 @@ class DreameLawnMowerClient(
         style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
-        return await asyncio.to_thread(
-            self._sync_refresh_vector_map_view,
-            label_scale=label_scale,
+        from .client_vector_reads import async_vector_view
+
+        return await async_vector_view(
+            self, label_scale=label_scale,
             current_map_index=current_map_index,
             style=style,
         )
@@ -1377,13 +1614,32 @@ class DreameLawnMowerClient(
         include_current_task: bool = True,
     ) -> dict[str, Any]:
         """Return read-only mower schedules from the app action protocol."""
-        return await asyncio.to_thread(
-            self._sync_get_app_schedules,
-            include_raw,
-            map_indices,
-            chunk_size,
-            include_current_task,
+        from .client_schedule_async import async_read_schedules
+
+        return await async_read_schedules(
+            self, include_raw=include_raw, map_indices=map_indices,
+            chunk_size=chunk_size, include_current_task=include_current_task,
         )
+
+    async def async_set_app_schedule_task_start_time(
+        self,
+        *,
+        map_index: int,
+        plan_id: int,
+        week_day: int,
+        task_index: int,
+        start: int,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Preview or change one existing A2 daily all-area start time."""
+        from .client_schedule_writes import async_run_schedule_write
+        from .schedule_edit_plan import plan_schedule_start_time
+
+        return await async_run_schedule_write(self, plan_schedule_start_time(
+            self._descriptor.model, map_index, plan_id, week_day, task_index,
+            start, execute, confirm_write,
+        ))
 
     async def async_set_app_schedule_plan_enabled(
         self,
@@ -1395,13 +1651,13 @@ class DreameLawnMowerClient(
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute the app action request to toggle a schedule plan."""
-        return await asyncio.to_thread(
-            self._sync_set_app_schedule_plan_enabled,
-            map_index,
-            plan_id,
-            enabled,
-            execute,
-            confirm_write,
+        from .client_schedule_writes import async_run_schedule_write
+        from .schedule_write_plan import plan_schedule_enabled
+
+        return await async_run_schedule_write(
+            self, plan_schedule_enabled(
+                map_index, plan_id, enabled, execute, confirm_write
+            ),
         )
 
     async def async_plan_app_schedule_upload(
@@ -1414,13 +1670,13 @@ class DreameLawnMowerClient(
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
     ) -> dict[str, Any]:
         """Build or execute a full schedule upload from readable plans."""
-        return await asyncio.to_thread(
-            self._sync_plan_app_schedule_upload,
-            map_index,
-            plans,
-            execute,
-            confirm_write,
-            chunk_size,
+        from .client_schedule_writes import async_run_schedule_write
+        from .schedule_write_plan import plan_schedule_upload
+
+        return await async_run_schedule_write(
+            self, plan_schedule_upload(
+                map_index, plans, execute, confirm_write, chunk_size
+            ),
         )
 
     async def async_get_mowing_preferences(
@@ -1430,11 +1686,12 @@ class DreameLawnMowerClient(
         map_indices: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Return read-only mower preference settings from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_mowing_preferences,
-            include_raw,
-            map_indices,
-        )
+        from .client_app_reads import async_run_app_read
+        from .mowing_preferences_read_plan import read_mowing_preferences
+
+        return await async_run_app_read(self, read_mowing_preferences(
+            include_raw, map_indices, deadline=time.monotonic() + 20.0,
+        ))
 
     async def async_plan_app_mowing_preference_update(
         self,
@@ -1446,14 +1703,60 @@ class DreameLawnMowerClient(
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute a mower preference update from the current app state."""
-        return await asyncio.to_thread(
-            self._sync_plan_app_mowing_preference_update,
-            map_index,
-            area_id,
-            changes,
-            execute,
-            confirm_write,
+        from .client_preference_writes import async_update_preferences
+
+        return await async_update_preferences(
+            self, map_index, area_id, changes, execute, confirm_write,
         )
+
+    async def async_set_charging_period(
+        self, *, enabled: bool | None = None, start_minutes: int | None = None,
+        end_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        """Set and confirm the mower-native charging period."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_charging_period
+
+        return await async_write_device_settings(self, plan_charging_period(
+            enabled=enabled, start_minutes=start_minutes, end_minutes=end_minutes,
+        ))
+
+    async def async_set_rain_protection(
+        self, *, enabled: bool | None = None, delay_hours: int | None = None,
+    ) -> dict[str, Any]:
+        """Set and confirm rain protection while preserving sensitivity."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_rain_protection
+
+        return await async_write_device_settings(self, plan_rain_protection(
+            enabled=enabled, delay_hours=delay_hours,
+        ))
+
+    async def async_set_anti_theft_settings(
+        self, *, lift_alarm_enabled: bool | None = None,
+        off_map_alarm_enabled: bool | None = None,
+        real_time_location_enabled: bool | None = None,
+        pin_check_before_power_off_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Set anti-theft flags and require exact configuration readback."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_anti_theft_settings
+
+        return await async_write_device_settings(self, plan_anti_theft_settings(
+            lift_alarm_enabled=lift_alarm_enabled,
+            off_map_alarm_enabled=off_map_alarm_enabled,
+            real_time_location_enabled=real_time_location_enabled,
+            pin_check_before_power_off_enabled=pin_check_before_power_off_enabled,
+        ))
+
+    async def async_get_device_settings(
+        self, *, include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return decoded mower-native device settings."""
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_device_settings
+
+        return await async_run_app_read(self, read_device_settings(include_raw))
 
     async def async_get_weather_protection(
         self,
@@ -1461,14 +1764,22 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Return read-only weather/rain protection settings from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_weather_protection,
-            include_raw,
-        )
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_device_settings
+
+        result = await async_run_app_read(self, read_device_settings(include_raw))
+        result["source"] = "app_action_weather_protection"
+        return result
 
     async def async_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
         """Return mower-owned lifetime area, time, and session totals."""
-        return await asyncio.to_thread(self._sync_get_work_log_totals)
+        from .client_app_reads import async_read_app_action
+        from .work_log import WORK_LOG_TOTALS_REQUEST, work_log_totals_from_app_data
+
+        response = await async_read_app_action(
+            self, WORK_LOG_TOTALS_REQUEST, deadline=time.monotonic() + 20.0,
+        )
+        return work_log_totals_from_app_data(response)
 
     async def async_get_maintenance_status(
         self,
@@ -1476,10 +1787,11 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Return read-only CMS maintenance counter state from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_maintenance_status,
-            include_raw,
-        )
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_maintenance
+
+        result = await async_run_app_read(self, read_maintenance(include_raw))
+        return result
 
     async def async_plan_maintenance_reset(
         self,
@@ -1489,12 +1801,9 @@ class DreameLawnMowerClient(
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute a guarded CMS maintenance counter reset."""
-        return await asyncio.to_thread(
-            self._sync_plan_maintenance_reset,
-            item,
-            execute,
-            confirm_write,
-        )
+        from .client_maintenance_reset import async_reset_maintenance
+
+        return await async_reset_maintenance(self, item, execute, confirm_write)
 
     async def async_get_voice_settings(
         self,
@@ -1502,24 +1811,25 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Return read-only voice and language settings from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_voice_settings,
-            include_raw,
-        )
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_voice
+
+        result = await async_run_app_read(self, read_voice(include_raw))
+        return result
 
     async def async_set_voice_language(self, voice_language: int) -> dict[str, Any]:
         """Set the mower voice language by app language-pack index."""
-        return await asyncio.to_thread(
-            self._sync_set_voice_language,
-            int(voice_language),
-        )
+        from .client_voice_writes import async_write_voice
+        from .voice_write_plan import write_voice_language
+
+        return await async_write_voice(self, write_voice_language(int(voice_language)))
 
     async def async_set_voice_volume(self, volume: int) -> dict[str, Any]:
         """Set the mower voice volume from 0 to 100."""
-        return await asyncio.to_thread(
-            self._sync_set_voice_volume,
-            int(volume),
-        )
+        from .client_voice_writes import async_write_voice
+        from .voice_write_plan import write_voice_volume
+
+        return await async_write_voice(self, write_voice_volume(int(volume)))
 
     async def async_set_voice_prompts(
         self,
@@ -1527,10 +1837,10 @@ class DreameLawnMowerClient(
     ) -> dict[str, Any]:
         """Set the four mower voice prompt toggles."""
         normalized = _normalize_voice_prompt_flags(prompts)
-        return await asyncio.to_thread(
-            self._sync_set_voice_prompts,
-            normalized,
-        )
+        from .client_voice_writes import async_write_voice
+        from .voice_write_plan import write_voice_prompts
+
+        return await async_write_voice(self, write_voice_prompts(normalized))
 
     async def async_get_cloud_device_info(
         self,
@@ -1538,7 +1848,101 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/info` payload used by the mobile app."""
-        return await asyncio.to_thread(self._sync_get_cloud_device_info, language)
+        from .client_refresh import _run_state_worker
+
+        deadline = time.monotonic() + 20
+        cancelled = _threading.Event()
+
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any] | None:
+            try:
+                info = await cloud.async_get_device_info(
+                    self._descriptor.did, language=language, deadline=deadline,
+                )
+                if info:
+                    try:
+                        async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                            await _run_state_worker(
+                                lambda: self._sync_apply_cloud_device_info(
+                                    info, cancelled, deadline,
+                                ),
+                                cancelled,
+                            )
+                    except TimeoutError as err:
+                        raise DreameLawnMowerConnectionError(
+                            "Cloud device info timed out waiting for device state."
+                        ) from err
+                return info
+            finally:
+                # Cancelling an executor await cannot stop its worker. Prevent
+                # that worker from applying a response after this read ends.
+                cancelled.set()
+
+        return await self._async_cloud_read(read)
+
+    async def async_probe_camera_stream_handshake(
+        self, *, timeout: float = 6.0, interval: float = 0.75,
+        operation: str = "monitor", payload_mode: str = "app_action",
+    ) -> dict[str, Any]:
+        """Start a short camera session and always attempt a bounded end call.
+
+        This does not start audio, remote control, or mowing.
+        """
+        from .client_camera_handshake import async_camera_handshake
+
+        return await async_camera_handshake(
+            self, timeout=timeout, interval=interval,
+            operation=operation, payload_mode=payload_mode,
+        )
+
+    async def async_get_camera_stream_inputs(self) -> dict[str, Any]:
+        """Fetch camera provisioning through native owned cloud HTTP."""
+        from .client_camera_credentials import async_camera_stream_inputs
+
+        return await async_camera_stream_inputs(self)
+
+    async def async_get_camera_stream_runtime_inputs(
+        self,
+    ) -> _CameraRuntimeInputs:
+        """Normalize native provisioning with the shared runtime-input contract."""
+        return _camera_stream_runtime_inputs_from_cloud_payload(
+            await self.async_get_camera_stream_inputs()
+        )
+
+    async def async_probe_camera_sources(
+        self, *, language: str = "en", request_device_properties: bool = True,
+    ) -> dict[str, Any]:
+        """Probe camera sources natively without starting a stream."""
+        from .client_camera_reads import async_probe_camera_sources
+
+        return await async_probe_camera_sources(
+            self, language=language, request_device_properties=request_device_properties
+        )
+
+    async def async_set_camera_stream_enabled(self, enabled: bool) -> Any:
+        """Toggle app video with a fresh safety guard before enabling."""
+        from .client_camera_actions import async_set_camera_stream_enabled
+
+        return await async_set_camera_stream_enabled(self, enabled)
+
+    async def async_request_photo_info(self, parameters: Any = None) -> Any:
+        """Request photo metadata through the native device action transport."""
+        from .client_camera_actions import async_request_photo_info
+
+        return await async_request_photo_info(self, parameters)
+
+    async def async_get_camera_feature_support(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+        language: str | None = "en",
+    ) -> _CameraFeatureSupport:
+        """Read cached camera capabilities and optional native cloud metadata."""
+        from .client_camera_reads import async_camera_feature_support
+
+        return await async_camera_feature_support(
+            self, refresh=refresh, include_cloud=include_cloud, language=language
+        )
 
     async def async_get_cloud_user_features(
         self,
@@ -1546,7 +1950,11 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> Any:
         """Fetch raw cloud feature/permit data from the mobile app endpoint."""
-        return await asyncio.to_thread(self._sync_get_cloud_user_features, language)
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_device_metadata(
+                self._descriptor.did, "features", language=language,
+            )
+        )
 
     async def async_get_cloud_device_otc_info(
         self,
@@ -1554,7 +1962,11 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> Any:
         """Fetch read-only cloud OTC metadata from the mobile app endpoint."""
-        return await asyncio.to_thread(self._sync_get_cloud_device_otc_info, language)
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_device_metadata(
+                self._descriptor.did, "otc", language=language,
+            )
+        )
 
     async def async_get_cloud_firmware_check(
         self,
@@ -1563,11 +1975,25 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch the app-approved mower firmware check payload."""
-        return await asyncio.to_thread(
-            self._sync_get_cloud_firmware_check,
-            language,
-            include_raw,
-        )
+        from .client_core_helpers import _normalize_cloud_firmware_check
+
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any]:
+            raw = await cloud.async_get_device_metadata(
+                self._descriptor.did, "firmware", language=language,
+            )
+            result = _normalize_cloud_firmware_check(
+                raw,
+                current_version=_as_optional_text(
+                    getattr(
+                        getattr(self._device, "info", None), "firmware_version", None,
+                    )
+                ),
+            )
+            if include_raw:
+                result["raw"] = _json_safe(raw, max_depth=4)
+            return result
+
+        return await self._async_cloud_read(read)
 
     async def async_approve_firmware_update(
         self,
@@ -1575,7 +2001,15 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> dict[str, Any]:
         """Trigger the cloud firmware approval step used by the mobile app."""
-        return await asyncio.to_thread(self._sync_approve_firmware_update, language)
+        from .firmware_approval import firmware_approval_result
+
+        async def approve(cloud: _DreameCloudSession) -> dict[str, Any]:
+            raw = await cloud.async_approve_firmware_update(
+                self._descriptor.did, language,
+            )
+            return firmware_approval_result(raw)
+
+        return await self._async_cloud_read(approve)
 
     async def async_get_app_plugin_version(
         self,
@@ -1584,10 +2018,10 @@ class DreameLawnMowerClient(
         os: int = 1,
     ) -> Any:
         """Fetch read-only mobile plugin metadata for this mower model."""
-        return await asyncio.to_thread(
-            self._sync_get_app_plugin_version,
-            app_version_code,
-            os,
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_app_plugin_version(
+                self._descriptor.model, app_version_code, os,
+            )
         )
 
     async def async_get_app_maps(
@@ -1599,19 +2033,22 @@ class DreameLawnMowerClient(
         include_object_urls: bool = False,
     ) -> dict[str, Any]:
         """Fetch mower-native app map payloads through read-only app commands."""
-        return await asyncio.to_thread(
-            self._sync_get_app_maps,
-            chunk_size,
-            include_payload,
-            include_objects,
-            include_object_urls,
+        from .client_map_reads import async_read_maps
+
+        return await async_read_maps(
+            self, chunk_size=chunk_size, include_payload=include_payload,
+            include_objects=include_objects, include_object_urls=include_object_urls,
         )
 
     async def async_get_current_app_map_index(self) -> int | None:
         """Read the active map index without downloading map payloads."""
-        return await asyncio.to_thread(
-            self._sync_get_current_app_map_index_readback,
+        from .client_app_reads import async_read_app_action
+        from .client_map_helpers import _current_app_map_index
+
+        response = await async_read_app_action(
+            self, {"m": "g", "t": "MAPL"}, deadline=time.monotonic() + 20,
         )
+        return _current_app_map_index(response)
 
     async def async_get_batch_schedules(
         self,
@@ -1622,13 +2059,15 @@ class DreameLawnMowerClient(
         timeout: float = _SCHEDULE_READ_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Fetch and decode schedule data from batch device data."""
+        from .client_batch_reads import async_read_batch_schedules
+
         timeout = _validate_positive_number(timeout, "batch schedule timeout")
-        return await asyncio.to_thread(
-            self._sync_get_batch_schedules,
-            include_raw,
-            map_index_hint,
-            discover_map_index,
-            timeout,
+        return await async_read_batch_schedules(
+            self,
+            include_raw=include_raw,
+            map_index_hint=map_index_hint,
+            discover_map_index=discover_map_index,
+            timeout=timeout,
         )
 
     async def async_get_batch_mowing_preferences(
@@ -1640,13 +2079,17 @@ class DreameLawnMowerClient(
         map_slot_index_hints: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
-        return await asyncio.to_thread(
-            self._sync_get_batch_mowing_preferences,
-            include_raw,
-            map_indices,
-            map_index_hints,
-            map_slot_index_hints,
-        )
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any]:
+            data = await cloud.async_get_batch_device_datas(
+                self._descriptor.did, _batch_settings_keys(),
+            )
+            return decode_batch_mowing_preferences(
+                data, include_raw=include_raw, map_indices=map_indices,
+                map_index_hints=map_index_hints,
+                map_slot_index_hints=map_slot_index_hints,
+            )
+
+        return await self._async_cloud_read(read)
 
     async def async_get_batch_ota_info(
         self,
@@ -1654,7 +2097,13 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch and decode OTA state from batch device data."""
-        return await asyncio.to_thread(self._sync_get_batch_ota_info, include_raw)
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any]:
+            data = await cloud.async_get_batch_device_datas(
+                self._descriptor.did, _batch_ota_keys(),
+            )
+            return decode_batch_ota_info(data, include_raw=include_raw)
+
+        return await self._async_cloud_read(read)
 
     async def async_get_debug_ota_catalog(
         self,
@@ -1664,11 +2113,11 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch the public debug/manual OTA catalog for the mower model."""
-        return await asyncio.to_thread(
-            self._sync_get_debug_ota_catalog,
-            model_name,
-            current_version,
-            include_raw,
+        from .client_public_reads import async_read_debug_catalog
+
+        return await async_read_debug_catalog(
+            self, model_name=model_name, current_version=current_version,
+            include_raw=include_raw,
         )
 
     async def async_get_app_map_objects(
@@ -1677,10 +2126,9 @@ class DreameLawnMowerClient(
         include_urls: bool = False,
     ) -> dict[str, Any]:
         """Fetch read-only 3D map object metadata from the app command path."""
-        return await asyncio.to_thread(
-            self._sync_get_app_map_objects,
-            include_urls,
-        )
+        from .client_map_object_reads import async_read_map_objects
+
+        return await async_read_map_objects(self, include_urls=include_urls)
 
     async def async_download_app_map_point_cloud(
         self,
@@ -1705,40 +2153,48 @@ class DreameLawnMowerClient(
             else _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS
         )
         operation_timeout = (
-            timeout
-            + _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS
-            + preflight_timeout
+            timeout + _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS + preflight_timeout
         )
         deadline = time.monotonic() + operation_timeout
-        abandoned = _threading.Event()
+        worker: asyncio.Task[DreameLawnMowerPointCloudDownload] | None = None
         trace = _PointCloudTrace()
         trace.record("queue")
         trace_token = _active_point_cloud_trace.set(trace)
         timeout_scope = asyncio.timeout(operation_timeout)
         try:
             async with timeout_scope:
-                worker = asyncio.create_task(
-                    asyncio.to_thread(
-                        self._sync_download_app_map_point_cloud_singleflight,
-                        map_index,
-                        timeout,
-                        poll_interval,
-                        download_timeout,
-                        max_bytes,
-                        deadline,
-                        allow_stored,
-                        allow_unscoped_stored,
-                        abandoned,
+                from .client_point_cloud_async import async_generate_point_cloud
+
+                async def download() -> DreameLawnMowerPointCloudDownload:
+                    return await async_generate_point_cloud(
+                        self,
+                        map_index=map_index,
+                        timeout=timeout,
+                        poll_interval=poll_interval,
+                        download_timeout=download_timeout,
+                        max_bytes=max_bytes,
+                        deadline=deadline,
+                        allow_stored=allow_stored,
+                        allow_unscoped_stored=allow_unscoped_stored,
                     )
-                )
-                worker.add_done_callback(
-                    lambda completed: (
-                        completed.exception() if not completed.cancelled() else None
-                    )
-                )
+
+                def completed(task: asyncio.Task[Any]) -> None:
+                    self._cloud_read_tasks.discard(task)
+                    if not task.cancelled():
+                        task.exception()
+
+                with self._device_ownership_lock:
+                    if self._closing:
+                        raise DreameLawnMowerConnectionError("Client is closing")
+                    worker = asyncio.create_task(download())
+                    # Caller cancellation is prompt; shutdown still owns any
+                    # CPU worker until cancellation cleanup has drained it.
+                    self._cloud_read_tasks.add(worker)
+                    worker.add_done_callback(completed)
                 return await asyncio.shield(worker)
         except (TimeoutError, _RequestsTimeout) as err:
-            abandoned.set()
+            if worker is not None:
+                worker.cancel()
             outer_expired = timeout_scope.expired()
             trace.record("outer_timeout" if outer_expired else "worker_timeout")
             raise DreameLawnMowerPointCloudError(
@@ -1761,82 +2217,48 @@ class DreameLawnMowerClient(
             # Unknown transport/parser failures still need the observations
             # preceding them, without publishing a raw exception message.
             kind = type(err).__name__
-            trace.record("failed", {"exception_kind": kind if kind in {
-                "KeyError", "TypeError", "ValueError", "AttributeError",
-                "RuntimeError", "OSError", "ConnectionError",
-            } else "other"})
+            trace.record(
+                "failed",
+                {
+                    "exception_kind": kind
+                    if kind
+                    in {
+                        "KeyError",
+                        "TypeError",
+                        "ValueError",
+                        "AttributeError",
+                        "RuntimeError",
+                        "OSError",
+                        "ConnectionError",
+                    }
+                    else "other"
+                },
+            )
             raise DreameLawnMowerPointCloudError(
                 "The point-cloud operation failed unexpectedly.",
-                code="point_cloud_failed", stage="generation",
+                code="point_cloud_failed",
+                stage="generation",
                 diagnostic_context=trace.snapshot(complete=True),
             ) from err
         except asyncio.CancelledError:
-            abandoned.set()
+            if worker is not None:
+                worker.cancel()
             raise
         finally:
             _active_point_cloud_trace.reset(trace_token)
 
-    def _sync_download_app_map_point_cloud_singleflight(
-        self,
-        map_index: int,
-        timeout: float,
-        poll_interval: float,
-        download_timeout: float,
-        max_bytes: int,
-        deadline: float,
-        allow_stored: bool,
-        allow_unscoped_stored: bool,
-        abandoned: _threading.Event,
-    ) -> DreameLawnMowerPointCloudDownload:
-        """Run one mower-wide generation while retaining ownership after cancel."""
-        if abandoned.is_set() or time.monotonic() >= deadline:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud request ended before generation started.",
-                code="point_cloud_timeout",
-                stage="queue",
-                public_message="The mower point-cloud request timed out in the queue.",
-                timeout_seconds=timeout,
-                retry_after_seconds=2,
-            )
-        if not self._point_cloud_generation_lock.acquire(blocking=False):
-            raise DreameLawnMowerPointCloudError(
-                "Another point-cloud generation is already in progress.",
-                code="point_cloud_generation_in_progress",
-                stage="queue",
-                public_message="A 3D map is already being generated for this mower.",
-                retry_after_seconds=5,
-            )
-        try:
-            if abandoned.is_set():
-                raise DreameLawnMowerPointCloudError(
-                    "Point-cloud request ended before generation started.",
-                    code="point_cloud_timeout",
-                    stage="queue",
-                    public_message=(
-                        "The mower point-cloud request timed out in the queue."
-                    ),
-                    timeout_seconds=timeout,
-                    retry_after_seconds=2,
-                )
-            return self._sync_download_app_map_point_cloud(
-                map_index,
-                timeout,
-                poll_interval,
-                download_timeout,
-                max_bytes,
-                deadline,
-                allow_stored,
-                allow_unscoped_stored,
-            )
-        finally:
-            self._point_cloud_generation_lock.release()
 
     async def async_get_cloud_properties(
         self,
         keys: str | Sequence[str],
     ) -> Any:
         """Fetch raw cloud property values from the `iotstatus/props` endpoint."""
-        return await asyncio.to_thread(self._sync_get_cloud_properties, keys)
+        normalized_keys = self._normalize_cloud_property_keys(keys)
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_properties(
+                self._descriptor.did, normalized_keys,
+            )
+        )
 
     async def async_scan_cloud_properties(
         self,
@@ -1851,17 +2273,12 @@ class DreameLawnMowerClient(
         include_key_definition: bool = True,
     ) -> dict[str, Any]:
         """Scan cloud properties in chunks and return normalized results."""
-        return await asyncio.to_thread(
-            self._sync_scan_cloud_properties,
-            keys,
-            siids,
-            piid_start,
-            piid_end,
-            chunk_size,
-            language,
-            only_values,
-            include_key_definition,
-            None,
+        from .client_property_scan import async_scan_properties
+
+        return await async_scan_properties(
+            self, keys=keys, siids=siids, piid_start=piid_start, piid_end=piid_end,
+            chunk_size=chunk_size, language=language, only_values=only_values,
+            include_key_definition=include_key_definition,
         )
 
     async def async_get_cloud_device_list_page(
@@ -1874,14 +2291,42 @@ class DreameLawnMowerClient(
         shared_status: int | None = None,
     ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/listV2` page used by the mobile app."""
-        return await asyncio.to_thread(
-            self._sync_get_cloud_device_list_page,
-            current,
-            size,
-            language,
-            master,
-            shared_status,
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_device_list_page(
+                current=current, size=size, language=language,
+                master=master, shared_status=shared_status,
+            )
         )
+
+    async def _async_cloud_read[ReadResult](
+        self,
+        read: _typing.Callable[
+            [_DreameCloudSession], _typing.Coroutine[Any, Any, ReadResult]
+        ],
+    ) -> ReadResult:
+        """Own one native read from session creation through cancellation cleanup."""
+        if self._closing:
+            raise DreameLawnMowerConnectionError("Client is closing")
+        if self._native_updates is None:
+            from .client_update_scheduler import NativeDeviceUpdates
+
+            self._native_updates = NativeDeviceUpdates(self)
+        if self._async_cloud is None:
+            if self._http_session is None:
+                self._http_session = _ClientSession(trust_env=True)
+            self._async_cloud = _DreameCloudSession(
+                self._http_session,
+                username=self._username,
+                password=self._password,
+                country=self._country,
+                account_type=self._account_type,
+            )
+        task = asyncio.create_task(read(self._async_cloud))
+        self._cloud_read_tasks.add(task)
+        try:
+            return await task
+        finally:
+            self._cloud_read_tasks.discard(task)
 
     async def async_get_cloud_key_definition(
         self,
@@ -1889,10 +2334,9 @@ class DreameLawnMowerClient(
         language: str | None = "en",
     ) -> dict[str, Any]:
         """Fetch the public device status translation JSON advertised by cloud."""
-        return await asyncio.to_thread(
-            self._sync_get_cloud_key_definition,
-            language,
-        )
+        from .client_public_reads import async_read_key_definition
+
+        return await async_read_key_definition(self, language=language)
 
     async def async_probe_map_sources(
         self,
@@ -1902,32 +2346,70 @@ class DreameLawnMowerClient(
         language: str = "en",
     ) -> dict[str, Any]:
         """Probe known read-only map sources and return a JSON-safe payload."""
-        return await asyncio.to_thread(
-            self._sync_probe_map_sources,
-            timeout,
-            interval,
-            language,
+        from .client_map_probe_reads import async_probe_maps
+
+        return await async_probe_maps(
+            self, timeout=timeout, interval=interval, language=language,
         )
 
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
         with self._device_ownership_lock:
             self._closing = True
-            device = self._device
-            self._device = None
-        if device is not None:
+        if self._native_updates is not None:
+            self._native_updates.close()
+        # Stop native reads before releasing an owned pool. A borrowed HA pool
+        # remains usable by other integrations after this client has closed.
+        reads = tuple(self._cloud_read_tasks)
+        for task in reads:
+            task.cancel()
+        try:
+            if reads:
+                await asyncio.gather(*reads, return_exceptions=True)
+        finally:
             try:
-                device.listen(None)
-                await self._async_disconnect_device(device)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
+                if self._owns_http_session and self._http_session is not None:
+                    await self._http_session.close()
+            finally:
+                # Cancellation or a pool-close failure must still initiate
+                # cleanup of the legacy device's listener and MQTT resources.
                 with self._device_ownership_lock:
-                    if self._device is None:
-                        self._device = device
-                raise
+                    device = self._device
+                    self._device = None
+                if device is not None:
+                    try:
+                        device.listen(None)
+                        await self._async_disconnect_device(device)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        with self._device_ownership_lock:
+                            if self._device is None:
+                                self._device = device
+                        raise
 
     async def _async_disconnect_device(self, device: Any) -> None:
+        """Finish both transport owners before propagating cancellation."""
+        async def cleanup() -> None:
+            try:
+                mqtt_owner = self._native_mqtt_connection
+                if mqtt_owner is not None:
+                    await mqtt_owner.async_close()
+            finally:
+                await self._async_disconnect_legacy_device(device)
+
+        task = asyncio.create_task(cleanup())
+        interrupted = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                interrupted = True
+        task.result()
+        if interrupted:
+            raise asyncio.CancelledError
+
+    async def _async_disconnect_legacy_device(self, device: Any) -> None:
         """Bound device disconnect without retaining HA's default executor."""
         loop = asyncio.get_running_loop()
         completed: asyncio.Future[None] = loop.create_future()

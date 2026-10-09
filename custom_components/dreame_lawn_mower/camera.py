@@ -12,10 +12,9 @@ from time import monotonic
 from typing import Any
 
 from homeassistant.components.camera import Camera
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MATCH_ALL
+from homeassistant.const import MATCH_ALL, EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -37,7 +36,8 @@ from .const import (
     DOMAIN,
 )
 from .control_options import active_map_index
-from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
+from .coordinator import DreameLawnMowerCoordinator
+from .coordinator_refresh import runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
@@ -73,7 +73,12 @@ from .map_presentation import map_rotation, map_style
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_scope
 from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
+from .runtime_data import DreameLawnMowerConfigEntry
 from .video_camera import DreameLawnMowerVideoCamera
+
+# Capture and stream owners manage concurrency; turn-off must reach their
+# cancellation paths while snapshot or recording services are running.
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -84,11 +89,11 @@ _MAP_ACTIVE_REFRESH_WINDOW_SECONDS = 90.0
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the mower map camera."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     live_map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     all_maps_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
@@ -218,7 +223,7 @@ class DreameLawnMowerMapCamera(
         )
 
     @property
-    def device_info(self) -> dict[str, Any]:
+    def device_info(self) -> DeviceInfo:
         """Return dynamic device metadata for the registry."""
         snapshot = self.coordinator.data
         descriptor = snapshot.descriptor if snapshot is not None else self._descriptor
@@ -467,7 +472,7 @@ class DreameLawnMowerMapCamera(
         )
 
     async def _async_save_restart_preview(
-        self, image: bytes | None, render_context: tuple
+        self, image: bytes | None, render_context: tuple[Any, ...]
     ) -> None:
         """Renew successful map evidence without repeating JPEG conversion."""
         if (
@@ -798,18 +803,18 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 safe_error,
                 source="app_maps_contact_sheet",
             )
-            image = self._map_cache.last_image
-            if image is None:
-                image = await self.hass.async_add_executor_job(
+            fallback_image = self._map_cache.last_image
+            if fallback_image is None:
+                fallback_image = await self.hass.async_add_executor_job(
                     partial(
                         map_placeholder_jpeg,
                         title="Dreame all maps unavailable",
                         detail=safe_error,
                     )
                 )
-                self._map_cache.store_image(image, placeholder=True)
+                self._map_cache.store_image(fallback_image, placeholder=True)
             self.async_write_ha_state()
-            return image
+            return fallback_image
 
 
 def _all_maps_contact_sheet_from_payload(
@@ -832,14 +837,18 @@ def _all_maps_contact_sheet_from_payload(
                 "summary": item.get("summary"),
             }
             payload = item.get("payload")
+            map_index = item.get("idx")
+            render_style = style or map_render_style()
             try:
                 image_png, width, height = render_app_map_payload_png(
                     payload,
                     label_scale=label_scale,
                     style=replace(
-                        style or map_render_style(),
-                        rotation=(rotations or {}).get(
-                            item.get("idx"), (style or map_render_style()).rotation
+                        render_style,
+                        rotation=(
+                            (rotations or {}).get(map_index, render_style.rotation)
+                            if map_index is not None
+                            else render_style.rotation
                         ),
                     ),
                 )

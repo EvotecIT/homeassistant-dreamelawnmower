@@ -1,0 +1,131 @@
+"""Native app reads sharing device ownership with legacy commands."""
+
+from __future__ import annotations
+
+import math
+import time
+from collections.abc import Callable, Generator, Mapping
+from typing import TYPE_CHECKING, Any
+
+from .app_read_transport import AppReadRequest, capture_app_result
+from .client_rpc import async_device_rpc
+
+if TYPE_CHECKING:
+    from .client import DreameLawnMowerClient
+    from .client_cleanup import OwnedCleanup
+    from .cloud_session import DreameCloudSession
+
+
+async def async_read_app_action(
+    client: DreameLawnMowerClient,
+    action: Mapping[str, Any],
+    *,
+    deadline: float,
+    strict_response: bool = False,
+) -> Any:
+    """Keep setup, routing and RPC within one owned, bounded native read."""
+    if action.get("m") != "g":
+        raise ValueError("App action read requires m='g'")
+    if not math.isfinite(deadline):
+        raise ValueError("App read deadline must be finite")
+    return await _async_app_action(
+        client,
+        action,
+        deadline=deadline,
+        strict_response=strict_response,
+    )
+
+
+async def async_command_app_action(
+    client: DreameLawnMowerClient,
+    action: Mapping[str, Any],
+    *,
+    deadline: float,
+    on_dispatch: Callable[[], None] | None = None,
+    _cleanup: OwnedCleanup | None = None,
+) -> Any:
+    """Share device routing and RPC ownership without retrying mutations."""
+    if action.get("m") not in {"a", "s"}:
+        raise ValueError("App command requires m='a' or m='s'")
+    if not math.isfinite(deadline):
+        raise ValueError("App command deadline must be finite")
+    return await _async_app_action(
+        client,
+        action,
+        deadline=deadline,
+        command=True,
+        on_dispatch=on_dispatch,
+        _cleanup=_cleanup,
+    )
+
+
+async def _async_app_action(
+    client: DreameLawnMowerClient,
+    action: Mapping[str, Any],
+    *,
+    deadline: float,
+    strict_response: bool = False,
+    command: bool = False,
+    on_dispatch: Callable[[], None] | None = None,
+    _cleanup: OwnedCleanup | None = None,
+) -> Any:
+    async def operation(device: Any, cloud: DreameCloudSession,
+                        protocol: Any, request_id: int) -> Any:
+        if command:
+            return await cloud.async_command_app_action(
+                client._descriptor.did,
+                protocol._host,
+                request_id,
+                action,
+                deadline=deadline,
+                on_dispatch=on_dispatch,
+                timeout=max(0.001, deadline - time.monotonic()),
+            )
+        return await cloud.async_read_app_action(
+            client._descriptor.did,
+            protocol._host,
+            request_id,
+            action,
+            deadline=deadline,
+            strict_response=strict_response,
+            timeout=max(0.001, deadline - time.monotonic()),
+        )
+
+    return await async_device_rpc(
+        client, operation, deadline=deadline, _cleanup=_cleanup,
+    )
+
+
+async def async_run_app_read(
+    client: DreameLawnMowerClient,
+    plan: Generator[AppReadRequest, Any, dict[str, Any]],
+    *, deadline: float | None = None,
+) -> dict[str, Any]:
+    """Own all requests and cleanup in one read-only protocol plan."""
+    async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
+        result: list[dict[str, Any]] = []
+        plan_with_result = capture_app_result(plan, result)
+        try:
+            request = next(plan_with_result)
+            while True:
+                request_deadline = time.monotonic() + request.timeout
+                if deadline is not None:
+                    request_deadline = min(request_deadline, deadline)
+                if request.deadline is not None:
+                    request_deadline = min(request_deadline, request.deadline)
+                try:
+                    response = await async_read_app_action(
+                        client,
+                        request.action,
+                        deadline=request_deadline,
+                    )
+                except Exception as error:
+                    request = plan_with_result.throw(error)
+                else:
+                    request = plan_with_result.send(response)
+        except StopIteration:
+            return result[0]
+        finally:
+            plan_with_result.close()
+
+    return await client._async_cloud_read(read)

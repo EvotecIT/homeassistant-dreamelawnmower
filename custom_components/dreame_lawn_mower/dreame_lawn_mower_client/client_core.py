@@ -8,7 +8,8 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from threading import Event
+from typing import TYPE_CHECKING, Any
 
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
@@ -29,9 +30,10 @@ from .client_core_helpers import (
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
+from .client_transport import _DreameLawnMowerClientTransport
+from .cloud_session import DreameCloudSession
 from .device_types import DreameMowerTaskStatus
 from .exceptions import (
-    DeviceCommandRejectedException,
     DeviceException,
     DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
@@ -40,6 +42,7 @@ from .exceptions import (
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
+from .firmware_approval import firmware_approval_result
 from .models import (
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapView,
@@ -56,6 +59,7 @@ from .mowing_tasks import (
     build_maintenance_point_request,
     build_spot_mowing_request,
     build_zone_mowing_request,
+    client_task_result,
     ensure_mowing_task_succeeded,
 )
 from .payload_utils import (
@@ -67,6 +71,11 @@ from .runtime_state import (
     RESUME_MOWING_REQUEST,
     snapshot_with_heartbeat_task_state,
 )
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
+    from .map_visuals import MapRenderStyle
+
 
 _MUTATION_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
 
@@ -140,125 +149,23 @@ def _device_start_session_identity(device: Any) -> bool | None:
     return None
 
 
-class _DreameLawnMowerClientCoreMixin:
-    async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
-        """Return a snapshot from the latest in-memory device state."""
-        device = await asyncio.to_thread(self._ensure_device)
-        return await asyncio.to_thread(self._snapshot_from_device, device)
+class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
+    if TYPE_CHECKING:
+        # Native refresh dispatch belongs to the complete client.
+        async def _async_update_device(
+            self, *, force_request_properties: bool = False,
+            deadline: float | None = None,
+        ) -> DreameMowerDevice: ...
 
-    async def _async_call_device_method(
-        self,
-        method_name: str,
-        *,
-        reconcile_ambiguous: bool = True,
-        method_kwargs: Mapping[str, Any] | None = None,
-    ) -> Any:
-        device = await asyncio.to_thread(self._ensure_device)
-        method = getattr(device, method_name)
-        try:
-            return await asyncio.to_thread(method, **(method_kwargs or {}))
-        except DeviceCommandRejectedException as err:
-            raise DreameLawnMowerCommandRejectedError(str(err)) from err
-        except DeviceException as err:
-            connection_error = DreameLawnMowerConnectionError(str(err))
-            if not reconcile_ambiguous:
-                raise connection_error from err
-            confirmation = {
-                "start_mowing": (
-                    "start mowing",
-                    lambda snapshot: bool(
-                        snapshot.started
-                        or snapshot.mowing
-                        or snapshot.mowing_session_active is True
-                    ),
-                ),
-                "pause": (
-                    "pause mowing",
-                    lambda snapshot: bool(
-                        snapshot.paused or snapshot.task_status == "paused"
-                    ),
-                ),
-                "dock": (
-                    "return to dock",
-                    lambda snapshot: bool(
-                        snapshot.returning
-                        or snapshot.docked
-                        or snapshot.state
-                        in {"returning", "charging", "charging_completed"}
-                    ),
-                ),
-                "stop": (
-                    "stop mowing",
-                    lambda snapshot: bool(
-                        snapshot.mowing_session_active is False
-                        or (
-                            not snapshot.started
-                            and not snapshot.mowing
-                            and not snapshot.paused
-                        )
-                    ),
-                ),
-            }.get(method_name)
-            if confirmation is None:
-                raise connection_error from err
-            label, predicate = confirmation
-            return await self._async_reconcile_ambiguous_mutation(
-                label,
-                connection_error,
-                predicate,
-            )
+        # Implemented by the map mixin on the concrete client.
+        def _sync_refresh_map_view(
+            self, timeout: float, interval: float, label_scale: float = 1.0,
+            style: MapRenderStyle | None = None,
+        ) -> DreameLawnMowerMapView: ...
 
-    async def _async_get_cached_start_mowing_session_identity(self) -> bool | None:
-        """Read the device's current start branch under its MQTT state lock."""
-        device = await asyncio.to_thread(self._ensure_device)
-
-        def read_session_identity() -> bool | None:
-            state_lock = getattr(device, "_state_lock", None)
-            state_context = state_lock if state_lock is not None else nullcontext()
-            with state_context:
-                return _device_start_session_identity(device)
-
-        return await asyncio.to_thread(read_session_identity)
-
-    async def _async_call_start_mowing_with_session_identity(
-        self,
-        *,
-        require_new_session: bool = False,
-    ) -> bool | None:
-        """Invoke the fallback start and capture its cached-state decision."""
-        device = await asyncio.to_thread(self._ensure_device)
-        new_session: bool | None = None
-
-        def call_start_mowing() -> Any:
-            nonlocal new_session
-
-            state_lock = getattr(device, "_state_lock", None)
-            state_context = state_lock if state_lock is not None else nullcontext()
-            with state_context:
-                # Keep the identity decision and the device's own branch under
-                # the same lock used by MQTT state mutations.
-                new_session = _device_start_session_identity(device)
-                if require_new_session and new_session is not True:
-                    raise DreameLawnMowerCommandRejectedError(
-                        "Scheduled mowing cannot resume or replace an existing task."
-                    )
-                return device.start_mowing()
-
-        try:
-            await asyncio.to_thread(call_start_mowing)
-        except DeviceCommandRejectedException as err:
-            raise DreameLawnMowerCommandRejectedError(str(err)) from err
-        except DeviceException as err:
-            await self._async_reconcile_ambiguous_mutation(
-                "start mowing",
-                DreameLawnMowerConnectionError(str(err)),
-                lambda snapshot: bool(
-                    snapshot.started
-                    or snapshot.mowing
-                    or snapshot.mowing_session_active is True
-                ),
-            )
-        return new_session
+    _latest_snapshot: DreameLawnMowerSnapshot | None
+    _latest_cloud_device_info: Mapping[str, Any] | None
+    _cloud_device_info_refreshed_at: float
 
     async def _async_reconcile_ambiguous_mutation(
         self,
@@ -287,31 +194,66 @@ class _DreameLawnMowerClientCoreMixin:
         deadline: float | None = None,
     ) -> DreameLawnMowerSnapshot:
         """Force properties and apply heartbeat reconciliation before decisions."""
-        if deadline is None:
-            device = await asyncio.to_thread(self._sync_update_device, True)
-        else:
-            device = await asyncio.to_thread(
-                self._sync_update_device,
-                True,
-                deadline=deadline,
-            )
-        return await asyncio.to_thread(
-            self._snapshot_from_device,
-            device,
-            fresh_task_state=True,
-        )
+        from .client_refresh import _run_state_worker
+        from .client_state_reads import read_locked_device_state
 
-    async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
-        """Apply heartbeat reconciliation to the current in-memory device state."""
-        device = await asyncio.to_thread(self._ensure_device)
-        return await asyncio.to_thread(self._snapshot_from_device, device)
+        cancelled = Event()
+
+        async def read(_cloud: DreameCloudSession) -> DreameLawnMowerSnapshot:
+            try:
+                device = await self._async_update_device(
+                    force_request_properties=True, deadline=deadline,
+                )
+
+                def require_active() -> None:
+                    if cancelled.is_set() or self._closing:
+                        raise DreameLawnMowerConnectionError("Client is closing")
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise DreameLawnMowerConnectionError(
+                            "Authoritative snapshot timed out"
+                        )
+                    if self._device is not device:
+                        raise DreameLawnMowerConnectionError(
+                            "Device changed during snapshot"
+                        )
+
+                def build_snapshot() -> DreameLawnMowerSnapshot:
+                    return read_locked_device_state(
+                        device,
+                        lambda current: self._snapshot_from_device(
+                            current, fresh_task_state=True,
+                        ),
+                        require_active,
+                    )
+
+                async with asyncio.timeout(
+                    None if deadline is None else max(0, deadline - time.monotonic())
+                ):
+                    snapshot = await _run_state_worker(build_snapshot, cancelled)
+                if self._closing:
+                    raise DreameLawnMowerConnectionError("Client is closing")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise DreameLawnMowerConnectionError(
+                        "Authoritative snapshot timed out"
+                    )
+                return snapshot
+            except TimeoutError as err:
+                raise DreameLawnMowerConnectionError(
+                    "Authoritative snapshot timed out"
+                ) from err
+            finally:
+                cancelled.set()
+
+        return await self._async_cloud_read(read)
+
+
 
     def _sync_update_device(
         self,
         force_request_properties: bool = False,
         *,
         deadline: float | None = None,
-    ):
+    ) -> DreameMowerDevice:
         device = self._ensure_device()
         try:
             if force_request_properties:
@@ -382,8 +324,11 @@ class _DreameLawnMowerClientCoreMixin:
                     # An older idle heartbeat must not clear newly read legacy
                     # paused tasks merely because the physical mower is docked.
                     try:
-                        legacy_task = DreameMowerTaskStatus(
-                            evidence.get("legacy_task_status")
+                        legacy_value = evidence.get("legacy_task_status")
+                        legacy_task = (
+                            DreameMowerTaskStatus(legacy_value)
+                            if legacy_value is not None
+                            else DreameMowerTaskStatus.UNKNOWN
                         )
                     except (ValueError, TypeError):
                         legacy_task = DreameMowerTaskStatus.UNKNOWN
@@ -422,6 +367,11 @@ class _DreameLawnMowerClientCoreMixin:
         else:
             device = self._ensure_device()
 
+        return self._remote_control_support_from_device(device)
+
+    def _remote_control_support_from_device(
+        self, device: Any,
+    ) -> DreameLawnMowerRemoteControlSupport:
         try:
             from .device_types import DreameMowerProperty, DreameMowerStatus
         except ImportError:
@@ -627,6 +577,13 @@ class _DreameLawnMowerClientCoreMixin:
         else:
             device = self._ensure_device()
 
+        cached = self._bluetooth_connected_from_device(device)
+        if cached is not None or not include_cloud:
+            return cached
+        response = self._sync_get_cloud_properties(MOWER_BLUETOOTH_PROPERTY_KEY)
+        return self._decode_cloud_bluetooth(response)
+
+    def _bluetooth_connected_from_device(self, device: Any) -> bool | None:
         realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
             MOWER_BLUETOOTH_PROPERTY_KEY
         )
@@ -635,10 +592,9 @@ class _DreameLawnMowerClientCoreMixin:
             if parsed is not None:
                 return parsed
 
-        if not include_cloud:
-            return None
+        return None
 
-        response = self._sync_get_cloud_properties(MOWER_BLUETOOTH_PROPERTY_KEY)
+    def _decode_cloud_bluetooth(self, response: Any) -> bool | None:
         for entry in self._normalize_cloud_property_entries(response):
             if str(entry.get("key", "")) != MOWER_BLUETOOTH_PROPERTY_KEY:
                 continue
@@ -667,6 +623,12 @@ class _DreameLawnMowerClientCoreMixin:
             return None
 
         response = self._sync_get_cloud_properties(property_key)
+        return self._decode_cloud_status_blob(response, property_key)
+
+    def _decode_cloud_status_blob(
+        self, response: Any, property_key: str,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Decode matching cloud values identically for sync and async callers."""
         for entry in self._normalize_cloud_property_entries(response):
             if str(entry.get("key", "")) == property_key:
                 decoded = decode_mower_status_blob(
@@ -681,19 +643,9 @@ class _DreameLawnMowerClientCoreMixin:
                     )
         return None
 
-    def _sync_capture_operation_snapshot(
-        self,
-        label: str | None,
-        include_status_blob: bool,
-        include_cloud_status_blob: bool,
-        include_remote_control: bool,
-        include_map_view: bool,
-        include_firmware: bool,
-        map_timeout: float,
-        map_interval: float,
-        language: str | None,
+    def _operation_snapshot_from_device(
+        self, device: Any, label: str | None,
     ) -> dict[str, Any]:
-        device = self._sync_update_device()
         snapshot = self._snapshot_from_device(device)
         errors: list[dict[str, str]] = []
         payload: dict[str, Any] = {
@@ -709,6 +661,24 @@ class _DreameLawnMowerClientCoreMixin:
             ),
             "errors": errors,
         }
+
+        return payload
+
+    def _sync_capture_operation_snapshot(
+        self,
+        label: str | None,
+        include_status_blob: bool,
+        include_cloud_status_blob: bool,
+        include_remote_control: bool,
+        include_map_view: bool,
+        include_firmware: bool,
+        map_timeout: float,
+        map_interval: float,
+        language: str | None,
+    ) -> dict[str, Any]:
+        device = self._sync_update_device()
+        payload = self._operation_snapshot_from_device(device, label)
+        errors = payload["errors"]
 
         if include_status_blob:
             try:
@@ -809,19 +779,25 @@ class _DreameLawnMowerClientCoreMixin:
             response = self._sync_call_app_action(
                 build_maintenance_point_request([point_id])
             )
-            return ensure_mowing_task_succeeded(
-                response,
-                task_name="maintenance point",
-            )
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-        except MowingTaskResponseError as err:
-            error_type = (
-                DreameLawnMowerCommandRejectedError
-                if isinstance(response, Mapping)
-                else DreameLawnMowerConnectionError
-            )
-            raise error_type(str(err)) from err
+        return client_task_result(response, task_name="maintenance point")
+
+    async def _async_read_device_properties(
+        self, device: Any, properties: Sequence[Mapping[str, int | str]], *,
+        deadline: float,
+    ) -> Any:
+        """Read device RPC properties under the existing protocol's ID/lock owner."""
+        protocol = device._protocol.cloud
+
+        async def read(cloud: DreameCloudSession) -> Any:
+            async with protocol.async_rpc_operation(deadline=deadline) as request_id:
+                return await cloud.async_read_device_properties(
+                    self._descriptor.did, protocol._host, request_id, properties,
+                    deadline=deadline,
+                )
+
+        return await self._async_cloud_read(read)
 
     def _sync_get_batch_device_data(
         self,
@@ -852,6 +828,41 @@ class _DreameLawnMowerClientCoreMixin:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return response if isinstance(response, Mapping) else None
 
+    def _sync_apply_cloud_device_info(
+        self, info: dict[str, Any], cancelled: Event, deadline: float,
+    ) -> None:
+        """Apply native HTTP state under the legacy device's ownership locks."""
+        if cancelled.is_set():
+            return
+        device = self._ensure_device(deadline=deadline, cancelled=cancelled)
+        cloud = device._protocol.cloud
+        lock = cloud._operation_lock()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not lock.acquire(timeout=remaining):
+            raise DreameLawnMowerConnectionError(
+                "Cloud device info timed out waiting for device state."
+            )
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self._device_ownership_lock.acquire(
+                timeout=remaining,
+            ):
+                raise DreameLawnMowerConnectionError(
+                    "Cloud device info timed out waiting for device state."
+                )
+            try:
+                if cancelled.is_set() or self._closing or self._device is not device:
+                    return
+                if time.monotonic() >= deadline:
+                    raise DreameLawnMowerConnectionError(
+                        "Cloud device info timed out waiting for device state."
+                    )
+                cloud._handle_device_info(info)
+            finally:
+                self._device_ownership_lock.release()
+        finally:
+            lock.release()
+
     def _sync_get_cloud_device_info(
         self,
         language: str | None = None,
@@ -865,7 +876,7 @@ class _DreameLawnMowerClientCoreMixin:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
-    def _sync_get_cached_cloud_device_info(self) -> Mapping[str, Any] | None:
+    async def _async_get_cached_cloud_device_info(self) -> Mapping[str, Any] | None:
         """Refresh cloud presence at a bounded rate and retain last-known state."""
         now = time.monotonic()
         if (
@@ -876,7 +887,7 @@ class _DreameLawnMowerClientCoreMixin:
             return self._latest_cloud_device_info
 
         self._cloud_device_info_refreshed_at = now
-        info = self._sync_get_cloud_device_info("en")
+        info = await self.async_get_cloud_device_info(language="en")
         if isinstance(info, Mapping):
             self._latest_cloud_device_info = dict(info)
         return self._latest_cloud_device_info
@@ -999,36 +1010,7 @@ class _DreameLawnMowerClientCoreMixin:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
-        result: dict[str, Any] = {
-            "source": "cloud_manual_firmware_update",
-            "available": isinstance(raw, Mapping),
-            "accepted": False,
-            "success": False,
-        }
-        if isinstance(raw, Mapping):
-            code = raw.get("code")
-            success = raw.get("success")
-            data = raw.get("data")
-            inner_code = data.get("code") if isinstance(data, Mapping) else None
-            inner_success = data.get("success") if isinstance(data, Mapping) else None
-            accepted = bool(success) if isinstance(success, bool) else code == 0
-            result.update(
-                {
-                    "code": code,
-                    "accepted": accepted,
-                    "success": accepted,
-                    "msg": _as_optional_text(raw.get("msg")),
-                    "data": _json_safe(data, max_depth=3),
-                    "wrapper_success": success if isinstance(success, bool) else None,
-                    "inner_code": inner_code,
-                    "inner_success": (
-                        inner_success if isinstance(inner_success, bool) else None
-                    ),
-                }
-            )
-        else:
-            result["errors"] = [{"stage": "response", "error": "invalid_response"}]
-        return result
+        return firmware_approval_result(raw)
 
     def _sync_get_app_plugin_version(
         self,
@@ -1046,54 +1028,3 @@ class _DreameLawnMowerClientCoreMixin:
             return None
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-
-    def _sync_get_cloud_protocol(self, *, deadline: float | None = None):
-        device = self._ensure_device()
-        protocol = getattr(device, "_protocol", None)
-        cloud = getattr(protocol, "cloud", None)
-        if cloud is None:
-            raise DreameLawnMowerConnectionError("Cloud connection is unavailable.")
-        if not getattr(cloud, "logged_in", False):
-            login_options: dict[str, Any] = {}
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise DreameLawnMowerConnectionError(
-                        "Point-cloud cloud login timed out."
-                    )
-                login_options = {
-                    "timeout": remaining,
-                    "deadline": deadline,
-                }
-            if not cloud.login(**login_options):
-                raise DreameLawnMowerConnectionError(
-                    "Unable to log in to the mower cloud API."
-                )
-        return cloud
-
-    def _ensure_device(self):
-        with self._device_ownership_lock:
-            if self._closing:
-                raise DreameLawnMowerConnectionError(
-                    "The mower client is shutting down."
-                )
-            if self._device is not None:
-                return self._device
-
-            from .device import DreameMowerDevice
-
-            self._device = DreameMowerDevice(
-                self._descriptor.name,
-                self._descriptor.host,
-                self._descriptor.token or " ",
-                self._descriptor.mac,
-                self._username,
-                self._password,
-                self._country,
-                True,
-                self._account_type,
-                self._descriptor.did,
-            )
-            if self._update_callback is not None:
-                self._device.listen(self._update_callback)
-            return self._device

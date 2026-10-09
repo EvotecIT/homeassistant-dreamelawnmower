@@ -2,66 +2,61 @@
 
 from __future__ import annotations
 
-import logging
-from typing import Any
-
-_LOGGER = logging.getLogger(__name__)
+from collections.abc import Mapping as _Mapping
 
 
 class DreameMowerDeviceInfo:
     """Container of device information."""
 
-    def __init__(self, data):
+    def __init__(self, data: _Mapping[str, object]) -> None:
         self.data = data
         self.version = 0
         firmware_version = self.firmware_version
         if firmware_version is not None:
-            firmware_version = firmware_version.split("_")
-            if len(firmware_version) == 2:
-                self.version = int(firmware_version[1])
+            firmware_parts = firmware_version.split("_")
+            if len(firmware_parts) == 2:
+                try:
+                    self.version = int(firmware_parts[1])
+                except ValueError:
+                    pass
 
-    def __repr__(self):
-        local_ip = (
-            self.network_interface.get("localIp", "") if self.network_interface else ""
-        )
+    def __repr__(self) -> str:
+        network = self.network_interface
+        local_ip = network.get("localIp", "") if network else ""
         return f"{self.model} v{self.version} ({self.mac_address}) @ {local_ip}"
 
     @property
-    def network_interface(self) -> str:
+    def network_interface(self) -> _Mapping[str, object] | None:
         """Information about network configuration."""
-        if "netif" in self.data:
-            return self.data["netif"]
-        return None
+        value = self.data.get("netif")
+        return value if isinstance(value, _Mapping) else None
 
     @property
     def model(self) -> str | None:
         """Model string if available."""
-        if "model" in self.data:
-            return self.data["model"]
-        return None
+        value = self.data.get("model")
+        return value if isinstance(value, str) else None
 
     @property
     def firmware_version(self) -> str | None:
         """Firmware version if available."""
-        if "fw_ver" in self.data and self.data["fw_ver"] is not None:
-            return self.data["fw_ver"]
-        if "ver" in self.data and self.data["ver"] is not None:
-            return self.data["ver"]
+        for key in ("fw_ver", "ver"):
+            value = self.data.get(key)
+            if isinstance(value, str):
+                return value
         return None
 
     @property
     def hardware_version(self) -> str | None:
         """Hardware version if available."""
-        if "hw_ver" in self.data:
-            return self.data["hw_ver"]
-        return "Linux"
+        value = self.data.get("hw_ver", "Linux")
+        return value if isinstance(value, str) else None
 
     @property
     def mac_address(self) -> str | None:
         """MAC address if available."""
-        if "mac" in self.data:
-            return self.data["mac"]
-        return None
+        value = self.data.get("mac")
+        return value if isinstance(value, str) else None
 
     @property
     def manufacturer(self) -> str:
@@ -69,6 +64,6 @@ class DreameMowerDeviceInfo:
         return "Dreametech™"
 
     @property
-    def raw(self) -> dict[str, Any]:
+    def raw(self) -> _Mapping[str, object]:
         """Raw data as returned by the device."""
         return self.data

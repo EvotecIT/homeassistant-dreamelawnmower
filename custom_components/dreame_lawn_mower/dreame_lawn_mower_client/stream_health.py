@@ -143,6 +143,21 @@ def _probe_response(
     # first media tag is still pending. Reading the full diagnostic budget here
     # would block for bytes that are not needed to establish stream health.
     chunk = response.read(min(read_bytes, len(b"FLV"))) if read_bytes else b""
+    return _probe_chunk(
+        int(status_code), content_type, chunk,
+        attempts=attempts, elapsed_seconds=elapsed_seconds,
+    )
+
+
+def _probe_chunk(
+    status_code: int,
+    content_type: str | None,
+    chunk: bytes,
+    *,
+    attempts: int,
+    elapsed_seconds: float,
+) -> DreameLawnMowerStreamUrlProbeResult:
+    """Interpret the same short FLV signature for both HTTP transports."""
     flv_header_present = chunk.startswith(b"FLV")
     return DreameLawnMowerStreamUrlProbeResult(
         available=200 <= int(status_code) < 300,

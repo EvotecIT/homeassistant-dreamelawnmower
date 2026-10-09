@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
 from .vector_map import parse_batch_vector_map
+
+if TYPE_CHECKING:
+    from .models import DreameLawnMowerSnapshot
+
 
 MAX_SCENE_INPUT_UNITS = 4 * 1024 * 1024
 MAX_SCENE_CHUNKS = 1024
@@ -38,29 +42,22 @@ def bounded_mowing_map_batch(batch: Mapping[str, Any] | None) -> dict[str, Any]:
     return geometry
 
 
-class _DreameLawnMowerClientMowingMapMixin:
-    """Reuse the client transport and session owner; keep HTTP out of the core."""
+class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
+    """Reuse transport and live tracking owners for cached map overlays."""
 
-    async def async_get_mowing_map_scene(
-        self, *, map_index: int, style: MapRenderStyle, label_scale: float = 1.0
-    ) -> MowingMapScene:
-        """Read current-map geometry and build a background off the event loop."""
-        return await asyncio.to_thread(
-            self._sync_get_mowing_map_scene,
-            map_index=map_index,
-            style=style,
-            label_scale=label_scale,
-        )
+    _latest_snapshot: DreameLawnMowerSnapshot | None
+
+    if TYPE_CHECKING:
+        # Implemented by the concrete client's map owner.
+        def _sync_get_vector_map_batch_data(self) -> Mapping[str, Any] | None: ...
 
     def _sync_get_mowing_map_scene(
         self, *, map_index: int, style: MapRenderStyle, label_scale: float
     ) -> MowingMapScene:
         batch = self._sync_get_vector_map_batch_data()
-        geometry = bounded_mowing_map_batch(batch)
-        vector_map = parse_batch_vector_map(geometry, current_map_index=map_index)
-        if vector_map is None:
-            raise ValueError("No geometry is available for the current map.")
-        return build_mowing_map_scene(vector_map, style=style, label_scale=label_scale)
+        return mowing_scene_from_batch(
+            batch, map_index=map_index, style=style, label_scale=label_scale
+        )
 
     def mowing_map_runtime_overlay(self, scene: MowingMapScene) -> dict[str, Any]:
         """Read the existing session cache without requesting mower operations."""
@@ -91,3 +88,18 @@ class _DreameLawnMowerClientMowingMapMixin:
             retained_position=position,
             docked=snapshot_is_docked(self._latest_snapshot),
         )
+
+
+def mowing_scene_from_batch(
+    batch: Mapping[str, Any] | None,
+    *,
+    map_index: int,
+    style: MapRenderStyle,
+    label_scale: float,
+) -> MowingMapScene:
+    """Build a bounded scene using the common synchronous/native render policy."""
+    geometry = bounded_mowing_map_batch(batch)
+    vector_map = parse_batch_vector_map(geometry, current_map_index=map_index)
+    if vector_map is None:
+        raise ValueError("No geometry is available for the current map.")
+    return build_mowing_map_scene(vector_map, style=style, label_scale=label_scale)

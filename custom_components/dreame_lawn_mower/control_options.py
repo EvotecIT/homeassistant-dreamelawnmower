@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from .dreame_lawn_mower_client.app_map_metadata import verified_app_map_zone_names
 
@@ -437,7 +437,7 @@ def find_spot_center(
         selected_map_index=selected_map_index,
     ):
         if entry["spot_id"] == spot_id:
-            return entry["center"]
+            return cast(tuple[int, int] | None, entry["center"])
     return None
 
 

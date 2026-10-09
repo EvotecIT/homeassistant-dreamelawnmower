@@ -208,13 +208,14 @@ def _property_value_type(value: Any) -> str:
 
 
 def _property_value_preview(value: Any) -> Any:
+    preview: list[Any] | dict[str, Any]
     if isinstance(value, list):
         preview = [_redact_probe_value(item) for item in value[:10]]
         if len(value) > 10:
             preview.append(f"... +{len(value) - 10} items")
         return preview
     if isinstance(value, Mapping):
-        preview: dict[str, Any] = {}
+        preview = {}
         for index, (key, item) in enumerate(value.items()):
             if index >= 10:
                 preview["..."] = f"+{len(value) - 10} keys"

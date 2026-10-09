@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from threading import RLock
 from types import SimpleNamespace
 
 import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device_code_semantics,
+    device_plan_cleanup,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
@@ -528,11 +530,23 @@ def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
     fault = _snapshot(0, "drop")
     device = _ErrorDevice(0, "drop", state="MOWING")
     client = object.__new__(DreameLawnMowerClient)
+    device._state_lock = RLock()
+    device._plan_cleanup = device_plan_cleanup._DevicePlanCleanup()
+    client._closing = False
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
+    client._async_cloud_read = lambda read: read(None)
     client._descriptor = descriptor
     client._latest_snapshot = fault
-    client._sync_update_device = lambda: device
-    client._sync_get_status_blob = lambda *_args: None
-    client._sync_get_cached_cloud_device_info = lambda: None
+    async def update_device():
+        return device
+
+    client._async_update_device = update_device
+    async def no_cloud_presence():
+        return None
+
+    client.async_get_status_blob = no_cloud_presence
+    client._async_get_cached_cloud_device_info = no_cloud_presence
 
     recovered = asyncio.run(client.async_refresh())
     repeated = asyncio.run(client.async_refresh())

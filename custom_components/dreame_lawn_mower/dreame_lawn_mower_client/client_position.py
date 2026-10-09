@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .position_tracking import MowerPosition, map_position_identity, snapshot_is_docked
 from .vector_map import position_within_vector_map
 
+if TYPE_CHECKING:
+    from .client_maps import _DreameLawnMowerClientMapsMixin
+    from .vector_map import DreameLawnMowerVectorMap
 
-def vector_map_position(client: Any, vector_map: Any) -> MowerPosition | None:
+
+def vector_map_position(
+    client: _DreameLawnMowerClientMapsMixin,
+    vector_map: DreameLawnMowerVectorMap,
+) -> MowerPosition | None:
     """Resolve the same geometry-scoped evidence as the interactive overlay."""
     return client._position_tracker.resolve(
         map_index=vector_map.map_index,

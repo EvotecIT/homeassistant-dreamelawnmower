@@ -20,7 +20,9 @@ def _font_bytes(*, bold: bool) -> bytes:
 
 
 @lru_cache(maxsize=32)
-def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
+def _font(
+    size: int, *, bold: bool = False
+) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     """Return a readable font with safe fallbacks for Home Assistant containers."""
     try:
         return ImageFont.truetype(BytesIO(_font_bytes(bold=bold)), size=size)
@@ -34,14 +36,14 @@ def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
 
 def _draw_wrapped_text(
     draw: ImageDraw.ImageDraw,
-    position: tuple[int, int],
+    position: tuple[float, float],
     text: str,
     *,
-    font: ImageFont.ImageFont,
+    font: ImageFont.ImageFont | ImageFont.FreeTypeFont,
     fill: tuple[int, int, int],
     max_width: int,
     line_spacing: int = 8,
-) -> int:
+) -> float:
     """Draw wrapped text and return the next y coordinate."""
     x, y = position
     current_line = ""
@@ -242,7 +244,7 @@ def map_diagnostics_jpeg(
     )
     draw.text((105, 108), title, fill=text, font=title_font)
 
-    y = 170
+    y: float = 170
     for line in lines:
         if y > height - 140:
             draw.text((105, y), "...", fill=muted, font=body_font)

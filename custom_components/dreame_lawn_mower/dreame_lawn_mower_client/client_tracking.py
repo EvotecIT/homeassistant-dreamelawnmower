@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
+from .client_transport import _DreameLawnMowerClientTransport
 from .models import DreameLawnMowerStatusBlob
 
+if TYPE_CHECKING:
+    from .position_tracking import MowerPositionTracker
 
-class _DreameLawnMowerClientTrackingMixin:
+
+class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
+
+    _position_tracker: MowerPositionTracker
+    _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
+    _runtime_map_identity_expires_at: datetime | None
+    _runtime_live_track_segments: tuple[tuple[tuple[int, int], ...], ...]
+    _runtime_live_map_index: int | None
+    _runtime_live_task_id: int | None
+    _runtime_session_active: bool | None
+    _last_runtime_track_blob_hex: str | None
 
     @property
     def runtime_map_identity_expires_at(self) -> datetime | None:

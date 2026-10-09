@@ -8,9 +8,8 @@ from datetime import UTC, datetime
 
 from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .calendar import schedule_calendar_selection
@@ -23,18 +22,23 @@ from .entity import DreameLawnMowerEntity
 from .manual_control import maintenance_point_movement_block_reason
 from .mowing_command import async_run_mowing_command
 from .reporting import build_maintenance_point_diagnostics
+from .runtime_data import DreameLawnMowerConfigEntry
 from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
+
+# Command owners serialize writes; cancellation must remain available while a
+# diagnostic or movement-preparation service is running.
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower buttons."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerEndCurrentTaskButton(coordinator),

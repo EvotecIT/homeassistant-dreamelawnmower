@@ -29,12 +29,17 @@ class _FakeMaintenanceCloud:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         assert siid == 2
         assert aiid == 50
         self.calls.append(payload)
         command = payload.get("t")
         method = payload.get("m")
+        if method == "g":
+            assert retry_count == 2
+            assert timeout == 20
         if command == "CMS" and method == "g":
             if self.cms_error:
                 raise RuntimeError("CMS unavailable")

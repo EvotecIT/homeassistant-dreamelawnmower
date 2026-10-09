@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from dreame_lawn_mower_client import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     DreameLawnMowerDescriptor,
@@ -52,6 +55,39 @@ _A3_STANDBY_FRAME = (
     128,
     206,
 )
+
+
+@pytest.mark.parametrize("realtime", [True, False])
+@pytest.mark.parametrize("include_cloud", [True, False])
+def test_async_status_blob_preserves_realtime_precedence_and_cloud_timestamp(
+    realtime, include_cloud,
+):
+    key = MOWER_RAW_STATUS_PROPERTY_KEY
+    entry = {"value": list(_A3_STANDBY_FRAME), "last_seen": 123.0}
+    device = SimpleNamespace(
+        realtime_properties={key: entry} if realtime else {},
+        _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
+    )
+    client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
+    client.async_get_cloud_properties = AsyncMock(return_value=[
+        {"key": "unrelated", "value": []}, {"key": key, **entry},
+    ])
+    result = asyncio.run(client.async_get_status_blob(include_cloud=include_cloud))
+    if realtime or include_cloud:
+        assert result is not None
+        assert result.source == ("realtime" if realtime else "cloud")
+        assert result.received_at == "1970-01-01T00:02:03+00:00"
+    else:
+        assert result is None
+    if not realtime and include_cloud:
+        client.async_get_cloud_properties.assert_awaited_once_with(key)
+    else:
+        client.async_get_cloud_properties.assert_not_awaited()
 
 
 def _snapshot(
@@ -98,6 +134,7 @@ def test_fresh_legacy_task_does_not_reuse_retained_idle_heartbeat(task_code, act
     device = SimpleNamespace(
         _ready=True,
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         _protocol=SimpleNamespace(
             get_properties=Mock(
                 return_value=[
@@ -134,8 +171,13 @@ def test_fresh_legacy_task_does_not_reuse_retained_idle_heartbeat(task_code, act
         last_realtime_message=None,
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
     client._descriptor = _snapshot().descriptor
     client._latest_snapshot = None
+    device._request_properties_plan = device_type._request_properties_plan.__get__(
+        device
+    )
     with patch.object(client_core_module.time, "time", return_value=101.0):
         cached = client._snapshot_from_device(device)
         device_type._request_properties(device, list(values), require_fresh_state=True)
@@ -278,6 +320,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     first_heartbeat_received_at = 100.0
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
                 "value": list(_A3_STANDBY_FRAME),
@@ -286,13 +329,17 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
-    client._ensure_device = lambda: device
-    client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
+    client._task_control_gate = asyncio.Lock()
+    client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
-    client._sync_switch_current_map = Mock(
-        side_effect=lambda map_index: {"map_index": map_index}
+    client._async_call_mowing_task = AsyncMock(
+        side_effect=lambda action, **kwargs: {"map_index": action["d"]["idx"]}
     )
     client.async_get_current_app_map_index = AsyncMock(return_value=1)
 
@@ -313,7 +360,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
 
     assert first_snapshot.state == "paused"
     assert first_snapshot.activity == "paused"
-    client._sync_switch_current_map.assert_not_called()
+    client._async_call_mowing_task.assert_not_awaited()
 
     heartbeat_received_at = 102.0
     device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = (
@@ -352,7 +399,9 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     assert client._latest_snapshot.state == "idle"
     assert client._latest_snapshot.activity == "docked"
     assert switch_result == {"map_index": 1}
-    client._sync_switch_current_map.assert_called_once_with(1)
+    client._async_call_mowing_task.assert_awaited_once_with(
+        {"m": "a", "p": 0, "o": 200, "d": {"idx": 1}}, task_name="map switch"
+    )
     client.async_get_current_app_map_index.assert_awaited_once_with()
 
 
@@ -368,6 +417,7 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
     )
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         update=Mock(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
@@ -377,9 +427,12 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
-    client._ensure_device = Mock(return_value=device)
+    client._device = device
+    client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
 
     with (
@@ -414,8 +467,10 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
     assert reconciled.mowing_session_active is False
     assert reconciled.task_operation is None
     assert reconciled.task_region_ids is None
-    device.update.assert_called_with(force_request_properties=True)
-    assert device.update.call_count == 2
+    client._async_update_device.assert_awaited_with(
+        force_request_properties=True, deadline=None,
+    )
+    assert client._async_update_device.await_count == 2
 
 
 @pytest.mark.parametrize(
@@ -484,6 +539,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
     )
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         info=SimpleNamespace(raw={}, model=raw_snapshot.descriptor.model),
         name=raw_snapshot.descriptor.name,
         host=None,
@@ -497,11 +553,18 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
-    client._sync_update_device = lambda force=False: device  # noqa: ARG005
-    client._sync_get_status_blob = lambda include_cloud, refresh: status_blob  # noqa: ARG005
-    client._sync_get_cached_cloud_device_info = lambda: None
+    client._async_update_device = AsyncMock(return_value=device)
+    client.async_get_status_blob = AsyncMock(return_value=status_blob)
+    async def no_cloud_presence():
+        return None
+
+    client._async_get_cached_cloud_device_info = no_cloud_presence
 
     with (
         patch.object(
@@ -625,6 +688,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     )
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
                 "value": list(_A3_STANDBY_FRAME),
@@ -633,11 +697,15 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
-    client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    client._device = device
+    client._async_update_device = AsyncMock(return_value=device)
+    client._task_control_gate = asyncio.Lock()
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": time.time()}
-    client._sync_switch_current_map = Mock()
+    client._async_call_mowing_task = AsyncMock()
 
     with patch.object(
         client_core_module,
@@ -650,7 +718,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
         ):
             asyncio.run(client.async_switch_current_map(1))
 
-    client._sync_switch_current_map.assert_not_called()
+    client._async_call_mowing_task.assert_not_awaited()
 
 
 @pytest.mark.parametrize("age_seconds", [154.614, 300.013, 365.0])

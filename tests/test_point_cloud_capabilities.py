@@ -9,7 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.dreame_lawn_mower.camera import DreameLawnMowerMapCamera
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
@@ -24,6 +23,7 @@ from custom_components.dreame_lawn_mower.point_cloud_api import (
     DreameLawnMowerPointCloudAPI,
 )
 from custom_components.dreame_lawn_mower.reporting import build_coordinator_diagnostics
+from tests.runtime_fixtures import runtime_hass
 
 
 def _coordinator(download):
@@ -71,7 +71,7 @@ def test_validated_download_promotes_unknown_mower_across_map_and_diagnostics():
     )
     assert before["feature_capabilities"]["point_cloud"]["state"] == "unknown"
     api = DreameLawnMowerPointCloudAPI(
-        SimpleNamespace(data={DOMAIN: {"test-entry": coordinator}})
+        runtime_hass(coordinators={"test-entry": coordinator})
     )
     asyncio.run(api.async_get("test-entry", 0))
     after = _map_attributes(coordinator)
@@ -114,7 +114,7 @@ def test_failure_never_proves_unsupported_or_erases_previous_export_evidence():
         if observed:
             coordinator.record_feature_capability_observed("point_cloud")
         api = DreameLawnMowerPointCloudAPI(
-            SimpleNamespace(data={DOMAIN: {"test-entry": coordinator}})
+            runtime_hass(coordinators={"test-entry": coordinator})
         )
         with pytest.raises(DreameLawnMowerPointCloudError):
             asyncio.run(api.async_get("test-entry", 0))

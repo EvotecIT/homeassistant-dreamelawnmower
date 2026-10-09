@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 import voluptuous as vol
 from homeassistant.components import persistent_notification
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
@@ -29,6 +30,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .manual_control import remote_control_block_reason
+from .runtime_data import get_coordinator
 
 ATTR_ENTRY_ID = "entry_id"
 ATTR_CHUNK_SIZE = "chunk_size"
@@ -211,7 +213,7 @@ PLAN_MAINTENANCE_RESET_SCHEMA = vol.Schema(
     }
 )
 
-MOWING_PREFERENCE_CHANGE_FIELDS = {
+MOWING_PREFERENCE_CHANGE_FIELDS: dict[str | vol.Marker, Any] = {
     vol.Optional(ATTR_PREFERENCE_MODE): _preference_mode_validator,
     vol.Optional(ATTR_EFFICIENT_MODE): _int_range(
         name=ATTR_EFFICIENT_MODE,
@@ -436,48 +438,49 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     domain_data[_SERVICES_REGISTERED] = True
 
 
-async def async_unload_services(hass: HomeAssistant) -> None:
-    """Unregister domain services when the last entry unloads."""
-    domain_data = hass.data.get(DOMAIN, {})
-    if not domain_data.get(_SERVICES_REGISTERED):
-        return
-
-    hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STEP)
-    hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STOP)
-    hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_PLAN_ENABLED)
-    hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_TASK_START_TIME)
-    hass.services.async_remove(DOMAIN, SERVICE_PLAN_SCHEDULE_UPLOAD)
-    hass.services.async_remove(DOMAIN, SERVICE_PLAN_MOWING_PREFERENCE_UPDATE)
-    hass.services.async_remove(DOMAIN, SERVICE_PLAN_MAINTENANCE_RESET)
-    domain_data.pop(_SERVICES_REGISTERED, None)
-
-
-def _coordinator_values(hass: HomeAssistant) -> Iterable[DreameLawnMowerCoordinator]:
-    """Yield configured mower coordinators from domain data."""
-    for value in hass.data.get(DOMAIN, {}).values():
-        if isinstance(value, DreameLawnMowerCoordinator):
-            yield value
-
-
 def _coordinator_from_call(
     hass: HomeAssistant,
     call: ServiceCall,
 ) -> DreameLawnMowerCoordinator:
-    """Return the coordinator targeted by a service call."""
+    """Return a loaded mower owner without exposing retained cleanup runtime."""
     entry_id = call.data.get(ATTR_ENTRY_ID)
     if entry_id:
-        coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
-        if isinstance(coordinator, DreameLawnMowerCoordinator):
-            return coordinator
-        raise HomeAssistantError(f"No Dreame lawn mower entry found for {entry_id}.")
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            raise ServiceValidationError(
+                f"No Dreame lawn mower entry found for {entry_id}.",
+                translation_domain=DOMAIN,
+                translation_key="entry_not_found",
+                translation_placeholders={"entry_id": entry_id},
+            )
+        coordinator = get_coordinator(hass, entry_id)
+        if entry.state is not ConfigEntryState.LOADED or coordinator is None:
+            raise ServiceValidationError(
+                f"Dreame lawn mower entry {entry_id} is not loaded.",
+                translation_domain=DOMAIN,
+                translation_key="entry_not_loaded",
+                translation_placeholders={"entry_id": entry_id},
+            )
+        return coordinator
 
-    coordinators = list(_coordinator_values(hass))
+    coordinators = [
+        coordinator
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.state is ConfigEntryState.LOADED
+        and (coordinator := get_coordinator(hass, entry.entry_id)) is not None
+    ]
     if len(coordinators) == 1:
         return coordinators[0]
     if not coordinators:
-        raise HomeAssistantError("No Dreame lawn mower entries are loaded.")
-    raise HomeAssistantError(
-        "Multiple Dreame lawn mower entries are loaded; pass entry_id."
+        raise ServiceValidationError(
+            "No Dreame lawn mower entries are loaded.",
+            translation_domain=DOMAIN,
+            translation_key="no_loaded_entries",
+        )
+    raise ServiceValidationError(
+        "Multiple Dreame lawn mower entries are loaded; pass entry_id.",
+        translation_domain=DOMAIN,
+        translation_key="entry_id_required",
     )
 
 
@@ -504,7 +507,12 @@ def _guard_schedule_write_request(call: ServiceCall) -> None:
         )
 
 
-def _guard_preference_write_request(call: ServiceCall) -> None:
+class _PreferenceWriteRequest(Protocol):
+    @property
+    def data(self) -> Mapping[str, Any]: ...
+
+
+def _guard_preference_write_request(call: _PreferenceWriteRequest) -> None:
     """Block preference writes unless the HA service confirmation gate is set."""
     if call.data[ATTR_EXECUTE] and not call.data[ATTR_CONFIRM_PREFERENCE_WRITE]:
         raise HomeAssistantError(

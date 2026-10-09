@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+import pytest
+
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    map_manager as map_manager_module,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.const import (
     MAP_PARAMETER_CODE,
     MAP_PARAMETER_OUT,
@@ -14,6 +21,11 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_optimizer import (
     DreameMowerMapOptimizer,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapData,
+    MapDataPartial,
+    MapFrameType,
 )
 
 
@@ -65,3 +77,219 @@ def test_request_i_map_ignores_non_mapping_response() -> None:
     manager._request_map_from_cloud = lambda: False
 
     assert manager._request_i_map() is False
+
+
+def test_map_download_logs_do_not_disclose_signed_urls(caplog):
+    import logging
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    signed_url = "https://example.invalid/map?token=private-map-token"
+    cloud = SimpleNamespace(logged_in=True, get_file=Mock(return_value=b"map"))
+    protocol = SimpleNamespace(cloud=cloud, dreame_cloud=True)
+    manager = DreameMapMowerMapManager(protocol)
+    manager._get_file_url = Mock(return_value=signed_url)
+    caplog.set_level(logging.INFO)
+
+    assert manager._get_interim_file_data("map-object") == b"map"
+    cloud.get_file.assert_called_with(signed_url)
+    cloud.get_file.return_value = None
+    assert manager._get_interim_file_data("map-object") is None
+
+    manager._map_list = [1]
+    manager._saved_map_data[1] = SimpleNamespace(
+        recovery_map_list=[SimpleNamespace(object_name="recovery-object")],
+    )
+    cloud.get_file.return_value = b"recovery"
+    assert manager.get_recovery_map_file(1, 1) == (
+        b"recovery", signed_url, "recovery-object",
+    )
+    assert "Request map data" in caplog.text
+    assert "private-map-token" not in caplog.text
+    assert signed_url not in caplog.text
+
+
+def test_map_download_failure_logs_only_exception_type(caplog):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    secret = "https://example.invalid/map?token=private-map-token"
+    manager = DreameMapMowerMapManager(
+        SimpleNamespace(cloud=SimpleNamespace(logged_in=True)),
+    )
+    manager._map_list_object_name = "map-object"
+    manager._get_interim_file_data = Mock(side_effect=RuntimeError(secret))
+    manager.request_map_list()
+    assert "RuntimeError" in caplog.text
+    assert secret not in caplog.text
+    assert manager._need_map_list_request is None
+
+
+def test_partial_frame_waits_for_pending_initial_map():
+    """A delta arriving before the initial frame stays queued until its base exists."""
+    from unittest.mock import Mock
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_types
+
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._latest_map_id = 8
+    manager._map_request_time = 12000
+    manager._request_i_map = Mock()
+    partial = map_types.MapDataPartial()
+    partial.map_id = 8
+    partial.frame_id = 2
+    partial.frame_type = map_types.MapFrameType.P.value
+    partial.timestamp_ms = 13000
+
+    assert manager._add_map_data(partial) is True
+    assert manager._map_data_queue[8][2] is partial
+    assert manager._map_data is None
+    assert manager._current_frame_id is None
+    assert manager._map_request_time == 12000
+    manager._request_i_map.assert_not_called()
+
+
+def test_next_partial_frame_can_retry_after_transport_failure() -> None:
+    from unittest.mock import Mock
+
+    protocol = Mock()
+    protocol.action.side_effect = [OSError("connection lost"), {"code": 0, "out": []}]
+    manager = DreameMapMowerMapManager(protocol)
+
+    assert manager._request_next_p_map(1, 2) is False
+    assert manager._request_next_p_map(1, 2) is True
+    assert protocol.action.call_count == 2
+
+
+def test_next_partial_frame_can_retry_after_device_rejection() -> None:
+    from unittest.mock import Mock
+
+    protocol = Mock()
+    protocol.action.side_effect = [{"code": 1}, {"code": 0, "out": []}]
+    manager = DreameMapMowerMapManager(protocol)
+
+    assert manager._request_next_p_map(1, 2) is False
+    assert manager._request_next_p_map(1, 2) is True
+    assert protocol.action.call_count == 2
+
+
+def test_next_partial_frame_suppresses_duplicate_only_while_inflight() -> None:
+    from unittest.mock import Mock
+
+    protocol = Mock()
+    manager = DreameMapMowerMapManager(protocol)
+
+    def respond(*args):
+        assert manager._request_next_p_map(1, 2) is None
+        return {"code": 0, "out": []}
+
+    protocol.action.side_effect = respond
+    assert manager._request_next_p_map(1, 2) is True
+    assert manager._request_next_p_map(1, 2) is True
+    assert protocol.action.call_count == 2
+
+@pytest.mark.parametrize("queue_size,kind", [(1, "next"), (5, "missing"), (9, "full")])
+def test_partial_frame_collects_recovery_requests_without_network(queue_size, kind):
+    protocol = Mock()
+    protocol.dreame_cloud = True
+    manager = DreameMapMowerMapManager(protocol)
+    manager._latest_map_id = manager._current_map_id = 7
+    manager._latest_map_timestamp_ms = 1700000000000
+    manager._current_frame_id = 1
+    manager._map_data = MapData()
+    for frame_id in range(3, 3 + queue_size):
+        partial = MapDataPartial()
+        partial.map_id = 7
+        partial.frame_id = frame_id
+        partial.frame_type = MapFrameType.P.value
+        manager._queue_partial_map(partial)
+    pending = list(manager._add_map_data_plan(partial))
+
+    protocol.action.assert_not_called()
+    assert len(pending) == 1
+    assert pending[0].kind == kind
+    if kind == "next":
+        assert (pending[0].map_id, pending[0].frame_id) == (7, 2)
+
+
+@pytest.mark.parametrize("planned", [False, True])
+def test_queued_frames_notify_before_applying_the_next_frame(monkeypatch, planned):
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._latest_map_id = manager._current_map_id = 7
+    manager._current_frame_id = 1
+    manager._latest_map_timestamp_ms = 1000
+    manager._map_data = MapData()
+
+    def partial(frame_id):
+        frame = MapDataPartial()
+        frame.map_id, frame.frame_id = 7, frame_id
+        frame.frame_type = MapFrameType.P.value
+        return frame
+
+    def decode(frame, current, vslam):
+        result = MapData()
+        result.map_id, result.frame_id = frame.map_id, frame.frame_id
+        result.timestamp_ms = frame.frame_id * 1000
+        return result
+
+    monkeypatch.setattr(
+        map_manager_module.DreameMowerMapDecoder,
+        "decode_p_map_data_from_partial",
+        decode,
+    )
+    manager._queue_partial_map(partial(3))
+    notified = []
+    manager._change_callback = lambda: notified.append(manager._current_frame_id)
+
+    if planned:
+        plan = manager._add_map_data_plan(partial(2))
+        assert next(plan).kind == "changed"
+        assert manager._current_frame_id == 2
+        assert notified == []
+        assert next(plan).kind == "changed"
+        assert manager._current_frame_id == 3
+        with pytest.raises(StopIteration) as completed:
+            next(plan)
+        assert completed.value.value is True
+    else:
+        assert manager._add_map_data(partial(2)) is True
+        assert notified == [2, 3]
+
+
+def test_handle_properties_ignores_undecodable_frame_without_losing_object():
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._ready = True
+    manager.handle_properties([{"piid": 1, "value": "x"}])
+    assert manager._map_data is None
+    prepared = manager._prepare_map_properties([
+        {"piid": 1, "value": "x"}, {"piid": 3, "value": "valid-object"},
+    ])
+    assert prepared is not None
+    partials, name, timestamp = prepared
+    assert partials is None
+    assert name == "valid-object"
+    assert isinstance(timestamp, int)
+
+
+def test_empty_iframe_preserves_inflight_frame_reservation(monkeypatch):
+    manager = DreameMapMowerMapManager(Mock())
+    assert manager._prepare_next_p_map(7, 2) is not None
+    empty = MapData()
+    empty.empty_map = True
+    empty.map_id, empty.frame_id, empty.timestamp_ms = 7, 1, 1700000000000
+    partial = MapDataPartial()
+    partial.map_id, partial.frame_id, partial.timestamp_ms = 7, 1, empty.timestamp_ms
+    partial.frame_type = MapFrameType.I.value
+    manager._latest_map_id = 7
+    monkeypatch.setattr(
+        map_manager_module.DreameMowerMapDecoder,
+        "decode_map_data_from_partial", Mock(return_value=(empty, None)),
+    )
+    list(manager._add_map_data_plan(partial))
+    assert manager._map_data is empty
+    assert manager._prepare_next_p_map(7, 2) is None, (
+        "Map reset discarded an active request"
+    )
+    manager._finish_next_p_map(7, 2)
+    assert manager._prepare_next_p_map(7, 2) is not None
+    manager._finish_next_p_map(7, 2)

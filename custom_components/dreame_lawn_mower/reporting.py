@@ -118,11 +118,13 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
         ),
         "update_interval_seconds": (
             update_interval.total_seconds()
-            if hasattr(update_interval, "total_seconds")
+            if update_interval is not None and hasattr(update_interval, "total_seconds")
             else None
         ),
         "performance": (
-            performance.as_dict() if hasattr(performance, "as_dict") else None
+            performance.as_dict()
+            if performance is not None and hasattr(performance, "as_dict")
+            else None
         ),
         "maintenance_points": build_maintenance_point_diagnostics(coordinator),
         "mowing_preferences": _mowing_preference_diagnostics(coordinator),
@@ -137,9 +139,9 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
 def _mowing_preference_diagnostics(coordinator: object) -> dict[str, Any] | None:
     """Return preference alignment and schema evidence without setting values."""
     batch = getattr(coordinator, "batch_device_data", None)
-    preferences = (
-        batch.get("batch_mowing_preferences") if isinstance(batch, Mapping) else None
-    )
+    if not isinstance(batch, Mapping):
+        return None
+    preferences = batch.get("batch_mowing_preferences")
     if not isinstance(preferences, Mapping):
         return None
 
@@ -196,7 +198,7 @@ def _mowing_preference_diagnostics(coordinator: object) -> dict[str, Any] | None
             {
                 "confirmed_at": (
                     confirmed_at.isoformat()
-                    if hasattr(confirmed_at, "isoformat")
+                    if confirmed_at is not None and hasattr(confirmed_at, "isoformat")
                     else None
                 ),
                 "map_index": getattr(confirmation, "map_index", None),
@@ -205,7 +207,7 @@ def _mowing_preference_diagnostics(coordinator: object) -> dict[str, Any] | None
                 "versions": dict(getattr(confirmation, "version_values", {}) or {}),
             }
         )
-    result = {
+    result: dict[str, object] = {
         "captured_at": batch.get("captured_at"),
         "cache_source": batch.get("source"),
         "source": preferences.get("source"),
@@ -239,7 +241,7 @@ def _work_log_totals_diagnostics(coordinator: object) -> dict[str, Any] | None:
         "total_mowing_sessions": getattr(totals, "total_mowing_sessions", None),
         "refreshed_at": (
             refreshed_at.isoformat()
-            if hasattr(refreshed_at, "isoformat")
+            if refreshed_at is not None and hasattr(refreshed_at, "isoformat")
             else None
         ),
     }
@@ -315,6 +317,7 @@ def build_maintenance_point_diagnostics(
     )
     selected_point_ready = (
         bool(control_point_ids)
+        and control_point_ids is not None
         and (selected_point_id is None or selected_point_id in control_point_ids)
     )
     button_block_reason = (
@@ -372,7 +375,7 @@ def _maintenance_app_map_entries(value: object) -> list[dict[str, Any]]:
         record_validation = _maintenance_point_record_validation(
             summary.get("point_record_validation")
         )
-        entry = {
+        entry: dict[str, Any] = {
             "map_index": _map_index(item.get("idx")),
             "current": bool(item.get("current")),
             "available": bool(item.get("available")),

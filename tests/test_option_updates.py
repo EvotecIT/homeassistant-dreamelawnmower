@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.dreame_lawn_mower import _async_update_listener
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.option_updates import EntryUpdateSnapshot
+from tests.runtime_fixtures import runtime_hass
 
 
 def _entry(options=None):
@@ -28,8 +28,8 @@ def test_live_options_preserve_coordinator(options):
         applied_entry_update=EntryUpdateSnapshot.capture(entry),
         async_update_listeners=Mock(), update_interval=timedelta(seconds=60),
     )
-    hass = SimpleNamespace(
-        data={DOMAIN: {entry.entry_id: coordinator}},
+    hass = runtime_hass(
+        coordinators={entry.entry_id: coordinator},
         config_entries=SimpleNamespace(async_reload=AsyncMock()),
     )
     entry.options = options
@@ -49,8 +49,8 @@ def test_connection_and_unknown_options_still_reload(change):
         applied_entry_update=EntryUpdateSnapshot.capture(entry),
         async_update_listeners=Mock(),
     )
-    hass = SimpleNamespace(
-        data={DOMAIN: {entry.entry_id: coordinator}},
+    hass = runtime_hass(
+        coordinators={entry.entry_id: coordinator},
         config_entries=SimpleNamespace(async_reload=AsyncMock()),
     )
     if change == "connection":
@@ -73,8 +73,8 @@ def test_nested_rotations_are_copied_and_repeated_update_is_noop():
         applied_entry_update=EntryUpdateSnapshot.capture(entry),
         async_update_listeners=Mock(),
     )
-    hass = SimpleNamespace(
-        data={DOMAIN: {entry.entry_id: coordinator}},
+    hass = runtime_hass(
+        coordinators={entry.entry_id: coordinator},
         config_entries=SimpleNamespace(async_reload=AsyncMock()),
     )
     asyncio.run(_async_update_listener(hass, entry))

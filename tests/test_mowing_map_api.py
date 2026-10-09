@@ -8,11 +8,11 @@ import pytest
 from aiohttp import web
 
 from custom_components.dreame_lawn_mower import mowing_map_api as module
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_projection
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
     MowingMapScene,
 )
+from tests.runtime_fixtures import runtime_hass
 
 
 def scene():
@@ -47,8 +47,8 @@ def environment(load):
             ],
         },
     )
-    hass = SimpleNamespace(
-        data={DOMAIN: {"entry": coordinator}},
+    hass = runtime_hass(
+        coordinators={"entry": coordinator},
         async_create_task=lambda coro, name: asyncio.create_task(coro, name=name),
     )
     return hass, coordinator, module.MowingMapAPI(hass)
@@ -98,9 +98,10 @@ def test_inflight_scene_cannot_publish_after_context_change(change):
         elif change == "rotation":
             coordinator.entry.options["map_rotation"] = 90
         elif change == "replacement":
-            hass.data[DOMAIN]["entry"] = environment(load)[1]
+            entry = hass.config_entries.async_get_entry("entry")
+            entry.runtime_data = environment(load)[1]
         else:
-            hass.data[DOMAIN].pop("entry")
+            del hass.config_entries.async_get_entry("entry").runtime_data
         finish.set()
         with pytest.raises((web.HTTPConflict, web.HTTPNotFound)):
             await pending

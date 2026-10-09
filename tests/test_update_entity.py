@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
@@ -48,6 +49,7 @@ def test_firmware_update_entity_prefers_live_snapshot_state() -> None:
     assert entity.installed_version == "4.3.6_0447"
     assert entity.latest_version == "4.3.6_0550"
     assert entity.in_progress is True
+    assert entity.state_attributes["in_progress"] is True
     assert entity.release_summary is None
     assert entity.extra_state_attributes["cloud_check_update_available"] is True
     assert entity.extra_state_attributes["batch_ota_available"] is True
@@ -214,19 +216,27 @@ def test_firmware_update_entity_install_refreshes_after_success() -> None:
     assert entity.extra_state_attributes["install_target_version"] == "4.3.6_0447"
 
 
-def test_firmware_update_entity_clears_assumed_install_when_target_installed() -> None:
+@pytest.mark.parametrize(
+    "clear_reason", ["target_installed", "assumption_expired", "no_target"]
+)
+def test_firmware_update_entity_reconciles_install_metadata_on_first_read(
+    clear_reason: str,
+) -> None:
+    installed_version = (
+        "4.3.6_0550" if clear_reason == "target_installed" else "4.3.6_0447"
+    )
     entity = object.__new__(DreameLawnMowerFirmwareUpdateEntity)
     entity.coordinator = SimpleNamespace(
         last_update_success=True,
         data=SimpleNamespace(
-            firmware_version="4.3.6_0550",
+            firmware_version=installed_version,
             state_name="idle",
             activity="idle",
             task_status_name=None,
         ),
         firmware_update_support=SimpleNamespace(
-            current_version="4.3.6_0550",
-            latest_version="4.3.6_0550",
+            current_version=installed_version,
+            latest_version=None if clear_reason == "no_target" else "4.3.6_0550",
             update_state=None,
             release_summary=None,
             release_summary_available=False,
@@ -244,10 +254,18 @@ def test_firmware_update_entity_clears_assumed_install_when_target_installed() -
         ),
     )
     entity._install_requested_at = datetime.now(UTC)
-    entity._install_target_version = "4.3.6_0550"
+    if clear_reason == "assumption_expired":
+        entity._install_requested_at -= timedelta(days=2)
+    entity._install_target_version = (
+        None if clear_reason == "no_target" else "4.3.6_0550"
+    )
 
+    attributes = entity.extra_state_attributes
+    assert attributes["install_assumed_in_progress"] is False
+    assert attributes["install_requested_at"] is None
+    assert attributes["install_target_version"] is None
     assert entity.in_progress is False
-    assert entity.extra_state_attributes["install_assumed_in_progress"] is False
+    assert entity.state_attributes["in_progress"] is False
 
 
 def test_firmware_update_entity_keeps_assumed_install_after_cloud_clear() -> None:
@@ -286,6 +304,7 @@ def test_firmware_update_entity_keeps_assumed_install_after_cloud_clear() -> Non
     entity._install_target_version = "4.3.6_0550"
 
     assert entity.in_progress is True
+    assert entity.state_attributes["in_progress"] is True
     assert entity.extra_state_attributes["install_assumed_in_progress"] is True
 
 

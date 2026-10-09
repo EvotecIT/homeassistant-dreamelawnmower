@@ -36,6 +36,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
     DreameLawnMowerPointCloudMetadata,
 )
+from tests.runtime_fixtures import runtime_hass
 
 
 def _download(
@@ -87,12 +88,10 @@ def test_point_cloud_api_caches_recent_downloads() -> None:
         ),
         diagnostic_events=DreameLawnMowerDiagnosticEventStore(),
     )
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": coordinator
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -128,9 +127,8 @@ def test_point_cloud_api_does_not_use_stored_object_for_inactive_map() -> None:
         options.append(kwargs)
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -142,7 +140,6 @@ def test_point_cloud_api_does_not_use_stored_object_for_inactive_map() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -158,9 +155,8 @@ def test_point_cloud_api_reuses_only_indexed_stored_multi_map_object() -> None:
         options.append(kwargs)
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -172,7 +168,6 @@ def test_point_cloud_api_reuses_only_indexed_stored_multi_map_object() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -194,9 +189,8 @@ def test_point_cloud_api_does_not_use_stored_object_for_selected_inactive_map() 
         options.append(kwargs)
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -208,7 +202,6 @@ def test_point_cloud_api_does_not_use_stored_object_for_selected_inactive_map() 
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -224,9 +217,8 @@ def test_point_cloud_api_ignores_empty_trailing_map_slots() -> None:
         options.append(kwargs)
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -253,7 +245,6 @@ def test_point_cloud_api_ignores_empty_trailing_map_slots() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -269,9 +260,8 @@ def test_point_cloud_api_refresh_forces_fresh_generation() -> None:
         options.append(kwargs)
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -289,7 +279,6 @@ def test_point_cloud_api_refresh_forces_fresh_generation() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -306,16 +295,14 @@ def test_point_cloud_api_evicts_downloads_when_ttl_expires() -> None:
         calls += 1
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass, cache_ttl=0.01)
 
@@ -340,9 +327,9 @@ def test_point_cloud_cache_bounds_aggregate_content_bytes(budget, expected_calls
         calls += 1
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(data={DOMAIN: {"entry": SimpleNamespace(
+    hass = runtime_hass(coordinators={"entry": SimpleNamespace(
         client=SimpleNamespace(async_download_app_map_point_cloud=download)
-    )}})
+    )})
     api = DreameLawnMowerPointCloudAPI(hass, cache_max_bytes=budget)
 
     async def run():
@@ -369,16 +356,14 @@ def test_point_cloud_api_deduplicates_concurrent_refreshes() -> None:
         await release.wait()
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -408,9 +393,8 @@ def test_point_cloud_api_refresh_does_not_join_stored_capable_request() -> None:
             return _download(0, source="stored")
         return _download(1)
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -422,7 +406,6 @@ def test_point_cloud_api_refresh_does_not_join_stored_capable_request() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -458,9 +441,8 @@ def test_point_cloud_api_refresh_joins_stored_fallback_generation() -> None:
         await release_first.wait()
         return _download(0, source="generated")
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -472,7 +454,6 @@ def test_point_cloud_api_refresh_joins_stored_fallback_generation() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -506,9 +487,8 @@ def test_point_cloud_api_cancelled_refresh_keeps_stored_work_inflight() -> None:
         await release.wait()
         return _download(source="generated")
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     app_maps={
                         "current_map_index": 0,
@@ -520,7 +500,6 @@ def test_point_cloud_api_cancelled_refresh_keeps_stored_work_inflight() -> None:
                     ),
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -564,16 +543,14 @@ def test_point_cloud_api_keeps_generation_alive_after_waiter_cancellation() -> N
         await release.wait()
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -610,16 +587,14 @@ def test_point_cloud_api_limits_each_mower_to_one_generation() -> None:
         await release.wait()
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -660,16 +635,14 @@ def test_point_cloud_api_discards_inflight_result_after_entry_reload() -> None:
         new_calls += 1
         return new_result
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=old_download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -679,7 +652,7 @@ def test_point_cloud_api_discards_inflight_result_after_entry_reload() -> None:
         )
         await old_started.wait()
         api.purge_entry("entry-1")
-        hass.data[DOMAIN]["entry-1"] = SimpleNamespace(
+        hass.config_entries.async_get_entry("entry-1").runtime_data = SimpleNamespace(
             client=SimpleNamespace(
                 async_download_app_map_point_cloud=new_download,
             )
@@ -709,16 +682,14 @@ def test_point_cloud_api_purges_unloaded_entry() -> None:
         calls += 1
         return _download(kwargs["map_index"])
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -761,16 +732,14 @@ def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
             },
         )
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -813,16 +782,14 @@ def test_point_cloud_api_purge_clears_retryable_failure_backoff() -> None:
             retry_after_seconds=10,
         )
 
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
+    hass = runtime_hass(
+        coordinators={
                 "entry-1": SimpleNamespace(
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
                 )
             }
-        }
     )
     api = DreameLawnMowerPointCloudAPI(hass)
 
@@ -866,7 +833,7 @@ def test_point_cloud_api_records_safe_failure_and_timing() -> None:
         diagnostic_events=DreameLawnMowerDiagnosticEventStore(),
         performance=DreameLawnMowerPerformanceTracker(),
     )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    hass = runtime_hass(coordinators={"entry-1": coordinator})
     api = DreameLawnMowerPointCloudAPI(hass)
 
     async def run() -> None:
@@ -1156,7 +1123,7 @@ def test_point_cloud_api_records_safe_unexpected_exception_type(
         diagnostic_events=DreameLawnMowerDiagnosticEventStore(),
         performance=DreameLawnMowerPerformanceTracker(),
     )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    hass = runtime_hass(coordinators={"entry-1": coordinator})
     api = DreameLawnMowerPointCloudAPI(hass)
 
     with caplog.at_level(logging.WARNING):

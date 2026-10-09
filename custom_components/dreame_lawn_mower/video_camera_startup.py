@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from . import video_stream_helpers as _video_helpers
 from .const import (
@@ -17,13 +17,13 @@ from .const import (
 from .debug import (
     sanitize_debug_data as _sanitize_debug_data,
 )
-from .debug import sanitize_diagnostic_text as _sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event as _record_diagnostic_event
-from .dreame_lawn_mower_client.models import (
-    DreameLawnMowerCameraStreamRuntimeInputs,
+from .dreame_lawn_mower_client.lan_video import (
+    DreameLawnMowerLanVideoEndpoint,
+    async_discover_lan_video_endpoint,
 )
 from .dreame_lawn_mower_client.models import (
-    camera_stream_block_reason as _camera_stream_block_reason,
+    DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
@@ -34,9 +34,11 @@ from .dreame_lawn_mower_client.video_provisioning_status import (
 )
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerVideoRuntimeError,
+    DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
 )
 from .video_cached_xp2p import async_start_cached_xp2p as _async_start_cached_xp2p
+from .video_camera_runtime import _VideoCameraRuntime
 from .video_camera_types import (
     _DreameVideoRuntime,
     _facade_binding,
@@ -45,6 +47,7 @@ from .video_camera_types import (
 from .video_startup_timing import VideoStartupTiming
 
 _LOGGER = logging.getLogger(__name__)
+_LAN_DISCOVERY_STAGE_TIMEOUT = 5.0
 video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
 
 
@@ -53,12 +56,11 @@ def sanitize_debug_data(value: Any) -> Any:
     return _facade_binding("sanitize_debug_data", _sanitize_debug_data)(value)
 
 
-def sanitize_diagnostic_text(value: Any) -> str:
+def sanitize_diagnostic_text(value: object) -> str:
     """Route diagnostic text through the historical facade binding."""
-    return _facade_binding(
-        "sanitize_diagnostic_text",
-        _sanitize_diagnostic_text,
-    )(value)
+    from . import video_camera
+
+    return video_camera.sanitize_diagnostic_text(value)
 
 
 def record_diagnostic_event(*args: Any, **kwargs: Any) -> Any:
@@ -71,10 +73,9 @@ def record_diagnostic_event(*args: Any, **kwargs: Any) -> Any:
 
 def camera_stream_block_reason(snapshot: Any) -> str | None:
     """Route state gating through the historical facade binding."""
-    return _facade_binding(
-        "camera_stream_block_reason",
-        _camera_stream_block_reason,
-    )(snapshot)
+    from . import video_camera
+
+    return video_camera.camera_stream_block_reason(snapshot)
 
 
 async def async_start_cached_xp2p(*args: Any, **kwargs: Any) -> Any:
@@ -109,7 +110,7 @@ def _runtime_inputs_not_ready_message(
     )
 
 
-class DreameLawnMowerVideoStartupMixin:
+class DreameLawnMowerVideoStartupMixin(_VideoCameraRuntime):
     """Start and adopt LAN, cached XP2P, or cloud video sessions."""
 
     async def _async_start_stream(
@@ -420,10 +421,8 @@ class DreameLawnMowerVideoStartupMixin:
         session: DreameLawnMowerXp2pLiveStreamSession | None = None
         try:
             session = await self._async_start_lan_runtime_session(runtime, inputs)
-            stream_health = await self.hass.async_add_executor_job(
-                video_helpers.probe_stream_health_and_route,
-                runtime,
-                session,
+            stream_health = await video_helpers.async_probe_stream_health_and_route(
+                self.hass, runtime, session,
             )
         except asyncio.CancelledError:
             if session is not None:
@@ -554,10 +553,7 @@ class DreameLawnMowerVideoStartupMixin:
                     self._lan_cache_error,
                 )
         if inputs.ready:
-            await self.hass.async_add_executor_job(
-                self._provisioning_cache.stage_fresh_device_config,
-                inputs,
-            )
+            await self._provisioning_cache.async_stage_fresh_device_config(inputs)
         return inputs
 
     async def _async_cache_healthy_provisioning(
@@ -592,27 +588,48 @@ class DreameLawnMowerVideoStartupMixin:
             raise DreameLawnMowerVideoRuntimeError(
                 "The configured advanced XP2P runtime does not support same-LAN video."
             )
+        start_lan = cast(Callable[..., DreameLawnMowerXp2pLiveStreamSession], start_lan)
         cached_endpoint = self._lan_cache.endpoint
 
-        def _start() -> DreameLawnMowerXp2pLiveStreamSession:
-            if cached_endpoint is None:
-                return start_lan(inputs)
+        async def start_at_endpoint(
+            endpoint: DreameLawnMowerLanVideoEndpoint,
+        ) -> DreameLawnMowerXp2pLiveStreamSession:
+            start_job = self.hass.async_add_executor_job(
+                lambda: start_lan(inputs, endpoint=endpoint)
+            )
             try:
-                return start_lan(inputs, endpoint=cached_endpoint)
-            except DreameLawnMowerVideoRuntimeError:
-                return start_lan(
-                    inputs,
-                    preferred_address=cached_endpoint.address,
-                )
+                session = await asyncio.shield(start_job)
+                session.provisioning_source = inputs.source
+                session.camera_toggle_managed = False
+                return session
+            except asyncio.CancelledError:
+                self._schedule_late_start_cleanup(runtime, start_job)
+                raise
 
-        start_job = self.hass.async_add_executor_job(_start)
+        cached_error: str | None = None
+        if cached_endpoint is not None:
+            try:
+                return await start_at_endpoint(cached_endpoint)
+            except DreameLawnMowerVideoRuntimeError as err:
+                cached_error = sanitize_diagnostic_text(err)
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(inputs)
         try:
-            session = await asyncio.shield(start_job)
-            session.provisioning_source = inputs.source
-            session.camera_toggle_managed = False
-            return session
-        except asyncio.CancelledError:
-            self._schedule_late_start_cleanup(runtime, start_job)
+            endpoint = await async_discover_lan_video_endpoint(
+                request.product_id,
+                device_name=request.device_name,
+                client_token=inputs.lan_client_token,
+                timeout=_LAN_DISCOVERY_STAGE_TIMEOUT,
+                preferred_address=(
+                    cached_endpoint.address if cached_endpoint is not None else None
+                ),
+            )
+            return await start_at_endpoint(endpoint)
+        except Exception as err:
+            if cached_error is not None:
+                raise DreameLawnMowerVideoRuntimeError(
+                    f"Cached LAN endpoint failed: {cached_error}. "
+                    f"LAN rediscovery/start failed: {sanitize_diagnostic_text(err)}"
+                ) from None
             raise
 
     def _adopt_stream_session(
@@ -705,7 +722,9 @@ class DreameLawnMowerVideoStartupMixin:
 
     def _with_lan_failure(self, cloud_error: str) -> str:
         """Preserve Auto-mode failures without leaking runtime inputs."""
-        return video_helpers.format_video_start_failures(
+        from . import video_camera
+
+        return video_camera.video_helpers.format_video_start_failures(
             cloud_error,
             lan_error=self._last_lan_error,
             cached_xp2p_error=self._last_cached_xp2p_error,

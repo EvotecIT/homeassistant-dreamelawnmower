@@ -205,7 +205,9 @@ def _font_bytes(*, bold: bool) -> bytes:
 
 
 @lru_cache(maxsize=64)
-def map_font(size: int, *, bold: bool = True) -> ImageFont.ImageFont:
+def map_font(
+    size: int, *, bold: bool = True
+) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     """Load the bundled Unicode-capable map font in every HA environment."""
     try:
         return ImageFont.truetype(BytesIO(_font_bytes(bold=bold)), size=max(8, size))

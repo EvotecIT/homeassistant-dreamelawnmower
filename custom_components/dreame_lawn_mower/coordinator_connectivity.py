@@ -7,10 +7,14 @@ import logging
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from homeassistant.core import HomeAssistant
 
 from .api import DreameLawnMowerSnapshot
 from .const import DOMAIN
 from .debug import sanitize_diagnostic_text
+from .runtime_data import DreameLawnMowerConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +25,13 @@ CONNECTIVITY_SHUTDOWN_GRACE_SECONDS = 1.0
 
 class DreameLawnMowerConnectivityMixin:
     """Keep short mower disconnects from tearing down otherwise useful state."""
+
+    hass: HomeAssistant
+    entry: DreameLawnMowerConfigEntry
+
+    if TYPE_CHECKING:
+        # Supplied by DataUpdateCoordinator in the concrete coordinator's MRO.
+        async def async_request_refresh(self) -> None: ...
 
     def _initialize_connectivity_recovery(self) -> None:
         """Initialize state used by the bounded reconnect policy."""
@@ -112,7 +123,9 @@ class DreameLawnMowerConnectivityMixin:
         self._connectivity_retry_after_seconds = delay
         self._schedule_connectivity_retry(delay)
 
-        snapshot = getattr(self, "_connectivity_last_good_snapshot", None)
+        snapshot: DreameLawnMowerSnapshot | None = getattr(
+            self, "_connectivity_last_good_snapshot", None
+        )
         last_success = getattr(self, "_connectivity_last_success_monotonic", None)
         if snapshot is None or last_success is None:
             return None

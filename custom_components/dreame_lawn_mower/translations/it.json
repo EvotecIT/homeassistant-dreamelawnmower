@@ -35,6 +35,15 @@
           "password": "Password",
           "country": "Regione"
         }
+      },
+      "reconfigure": {
+        "title": "Modifica la connessione del tagliaerba",
+        "description": "Aggiorna le credenziali o la regione di questo tagliaerba. L’account deve ancora contenere il tagliaerba configurato; la sua voce e le sue entità in Home Assistant vengono mantenute.",
+        "data": {
+          "username": "Nome utente",
+          "password": "Password",
+          "country": "Regione"
+        }
       }
     },
     "error": {
@@ -46,6 +55,9 @@
       "no_devices": "Non sono stati trovati robot tagliaerba supportati per questo account. Controlla che la regione e il tipo di account corrispondano a quelli usati nell’app del produttore."
     },
     "abort": {
+      "wrong_device": "Il tagliaerba trovato non corrisponde a questa voce. Le impostazioni di connessione non sono state modificate.",
+      "reauth_successful": "Le credenziali del tagliaerba sono state aggiornate.",
+      "reconfigure_successful": "La connessione del tagliaerba è stata aggiornata.",
       "already_configured": "Tutti i robot tagliaerba supportati di questo account sono già configurati."
     }
   },
@@ -194,6 +206,20 @@
           "repositioning": "Riposizionamento"
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Nessuna voce del tosaerba Dreame trovata per {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "La voce del tosaerba Dreame {entry_id} non è caricata."
+    },
+    "no_loaded_entries": {
+      "message": "Nessuna voce del tosaerba Dreame è caricata."
+    },
+    "entry_id_required": {
+      "message": "Sono caricate più voci di tosaerba Dreame; specificare entry_id."
     }
   }
 }

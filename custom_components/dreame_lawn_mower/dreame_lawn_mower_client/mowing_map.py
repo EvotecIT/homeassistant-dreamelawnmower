@@ -7,7 +7,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from .map_projection import MapProjection, vector_map_projection
 from .map_visuals import MapRenderStyle
@@ -17,7 +17,12 @@ from .position_tracking import (
     MowerPosition,
     map_position_identity,
 )
-from .vector_map import DreameLawnMowerVectorMap, render_vector_map_png
+from .vector_map import (
+    DreameLawnMowerVectorMap,
+    DreameLawnMowerVectorPath,
+    DreameLawnMowerVectorZone,
+    render_vector_map_png,
+)
 
 MAX_SCENE_POINTS = 50_000
 MAX_BACKGROUND_BYTES = 4 * 1024 * 1024
@@ -57,7 +62,7 @@ def build_mowing_map_scene(
     boundary = vector_map.boundary
     if boundary is None:
         raise ValueError("The current map has no drawable boundary.")
-    shapes = (
+    shapes: tuple[DreameLawnMowerVectorZone | DreameLawnMowerVectorPath, ...] = (
         *vector_map.zones,
         *vector_map.paths,
         *vector_map.forbidden_areas,
@@ -174,14 +179,14 @@ def mowing_map_overlay(
         result["updated_at"] = updated.isoformat()
     x, y = blob.candidate_runtime_pose_x, blob.candidate_runtime_pose_y
     if retained_position is None and scene.contains(x, y):
-        px, py = scene.projection.point(x, y)
+        px, py = scene.projection.point(cast(float, x), cast(float, y))
         heading = blob.candidate_runtime_heading_deg
         result["position"] = {
             "x": px,
             "y": py,
             # The native X mirror reverses yaw. Screen angles are clockwise
             # from up, matching an upright SVG marker's rotation convention.
-            "heading": ((270 - heading + scene.projection.rotation) % 360)
+            "heading": ((270 - cast(float, heading) + scene.projection.rotation) % 360)
             if _finite(heading)
             else None,
         }

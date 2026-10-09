@@ -24,9 +24,6 @@ from custom_components.dreame_lawn_mower import (
 from custom_components.dreame_lawn_mower import (
     video_camera_types as video_camera_types_module,
 )
-from custom_components.dreame_lawn_mower import (
-    video_provisioning_cache as provisioning_cache_module,
-)
 from custom_components.dreame_lawn_mower.const import (
     CONF_VIDEO_RETENTION,
     CONF_VIDEO_TRANSPORT,
@@ -88,11 +85,11 @@ def _uninitialized_entity(*, snapshot: object | None = None):
             self.device_config = None
             self._staged = None
 
-        def stage_fresh_device_config(
+        async def async_stage_fresh_device_config(
             self,
             inputs: DreameLawnMowerCameraStreamRuntimeInputs,
         ) -> DreameLawnMowerXp2pDeviceConfig:
-            config = provisioning_cache_module.resolve_xp2p_device_config(inputs)
+            config = DreameLawnMowerXp2pDeviceConfig()
             self._staged = (inputs, config)
             return config
 
@@ -119,7 +116,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
         ) -> DreameLawnMowerXp2pDeviceConfig:
             config = self.resolve_device_config(inputs)
             if config is None:
-                config = self.stage_fresh_device_config(inputs)
+                raise RuntimeError("XP2P device configuration was not staged.")
             if not auto:
                 return config
             return DreameLawnMowerXp2pDeviceConfig(
@@ -352,6 +349,58 @@ def test_video_camera_facade_preserves_split_method_surface() -> None:
         video_camera_module._DreameVideoRuntime
         is video_camera_types_module._DreameVideoRuntime
     )
+
+
+@pytest.mark.parametrize("path", ["prepare", "start", "cleanup", "disable"])
+def test_video_failure_reporting_uses_facade_bindings(path: str) -> None:
+    """Keep injected redaction and event recording on moved failure paths."""
+    events: list[dict[str, object]] = []
+
+    def record_event(_coordinator: object, **event: object) -> None:
+        events.append(event)
+
+    async def fail(*_args: object) -> None:
+        raise RuntimeError("synthetic transport failure")
+
+    async def scenario() -> None:
+        entity = _uninitialized_entity()
+        entity.async_write_ha_state = lambda: None
+        entity._last_stream_cleanup_reason = "test_cleanup"
+        entity._async_create_runtime = fail
+        entity.coordinator.client = SimpleNamespace(
+            async_set_camera_stream_enabled=fail,
+        )
+        with (
+            patch.object(
+                video_camera_module,
+                "sanitize_diagnostic_text",
+                lambda _value: "replacement redaction",
+            ),
+            patch.object(video_camera_module, "record_diagnostic_event", record_event),
+        ):
+            if path == "prepare":
+                await entity._async_prepare_runtime()
+                assert entity._runtime_preparation_error == "replacement redaction"
+                assert not events
+            elif path == "start":
+                entity._set_stream_error("synthetic transport failure", stage="test")
+                assert entity._last_error == "replacement redaction"
+                assert events[0]["code"] == "video_test_failed"
+            elif path == "cleanup":
+                entity._record_stream_cleanup_error(
+                    "test", "synthetic transport failure"
+                )
+                assert entity._last_stream_cleanup_error == "replacement redaction"
+                assert events[0]["code"] == "video_test_failed"
+            else:
+                await entity._async_disable_camera_stream()
+                assert entity._last_stream_disable_error == "replacement redaction"
+                assert entity._last_stream_cleanup_error == "replacement redaction"
+                assert events[0]["code"] == "video_camera_stream_disable_failed"
+        if events:
+            assert events[0]["message"] == "replacement redaction"
+
+    asyncio.run(scenario())
 
 
 def test_split_startup_observes_historical_facade_monkeypatch() -> None:
@@ -646,12 +695,8 @@ def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> No
         cross=True,
     )
 
-    with patch.object(
-        provisioning_cache_module,
-        "resolve_xp2p_device_config",
-        return_value=fetched,
-    ):
-        config = entity._resolve_xp2p_config(inputs)
+    entity._provisioning_cache._staged = (inputs, fetched)
+    config = entity._resolve_xp2p_config(inputs)
 
     assert config.server == fetched.server
     assert config.ip == fetched.ip
@@ -3796,7 +3841,9 @@ def test_video_camera_caches_provisioning_only_after_relay_media_ready() -> None
                 self.staged_inputs = None
                 self.saves = 0
 
-            def stage_fresh_device_config(self, actual_inputs: object) -> object:
+            async def async_stage_fresh_device_config(
+                self, actual_inputs: object,
+            ) -> object:
                 self.staged_inputs = actual_inputs
                 return config
 
@@ -3984,6 +4031,48 @@ def test_video_camera_cloud_start_cancellation_cleans_late_session() -> None:
     )
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_lan_rediscovery_preserves_cached_failure_and_cancellation(cancel) -> None:
+    async def run():
+        entity = _uninitialized_entity()
+        endpoint = SimpleNamespace(address="192.0.2.20")
+        entity._lan_cache = SimpleNamespace(endpoint=endpoint)
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=lambda fn: asyncio.create_task(
+                asyncio.to_thread(fn),
+            ),
+        )
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="lan_video_cache", did="did-1",
+            product_id="product-1", device_name="device-1",
+        )
+
+        def start(_inputs, *, endpoint):
+            raise DreameLawnMowerVideoRuntimeError("cached endpoint unavailable")
+
+        async def discover(*args, **kwargs):
+            assert kwargs["timeout"] == 5.0
+            assert kwargs["preferred_address"] == endpoint.address
+            if cancel:
+                raise asyncio.CancelledError
+            raise DreameLawnMowerVideoRuntimeError("rediscovery unavailable")
+
+        with patch.object(
+            video_camera_startup_module, "async_discover_lan_video_endpoint", discover,
+        ):
+            with pytest.raises(
+                asyncio.CancelledError if cancel else DreameLawnMowerVideoRuntimeError,
+            ) as result:
+                await entity._async_start_lan_runtime_session(
+                    SimpleNamespace(start_lan_stream=start), inputs,
+                )
+            if not cancel:
+                assert "cached endpoint unavailable" in str(result.value)
+                assert "rediscovery unavailable" in str(result.value)
+
+    asyncio.run(run())
+
+
 def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
     async def _run() -> tuple[int, int, str | None]:
         entity = _uninitialized_entity()
@@ -4009,6 +4098,7 @@ def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
             def start_lan_stream(
                 self,
                 _inputs: object,
+                *, endpoint: object,
             ) -> DreameLawnMowerXp2pLiveStreamSession:
                 self.starts += 1
                 return DreameLawnMowerXp2pLiveStreamSession(
@@ -4032,8 +4122,12 @@ def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
             flv_header_present=True,
         )
         with patch.object(
+            video_camera_startup_module,
+            "async_discover_lan_video_endpoint",
+            return_value=object(),
+        ), patch.object(
             video_camera_module.video_helpers,
-            "probe_stream_health_and_route",
+            "async_probe_stream_health_and_route",
             return_value=health,
         ):
             with pytest.raises(DreameLawnMowerVideoRuntimeError):

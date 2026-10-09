@@ -18,7 +18,6 @@ from custom_components.dreame_lawn_mower.calendar import (
     schedule_calendar_events,
     schedule_calendar_selection,
 )
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.schedule_cache import (
     merge_app_schedule_payload,
 )
@@ -140,8 +139,10 @@ def test_map_calendars_discover_late_native_slots_once_and_unload_listener() -> 
             side_effect=lambda listener: listeners.append(listener) or "unsubscribe"
         ),
     )
-    entry = SimpleNamespace(entry_id="entry", async_on_unload=unloads.append)
-    hass = SimpleNamespace(data={DOMAIN: {"entry": coordinator}})
+    entry = SimpleNamespace(
+        runtime_data=coordinator, entry_id="entry", async_on_unload=unloads.append,
+    )
+    hass = SimpleNamespace(data={})
     asyncio.run(async_setup_entry(hass, entry, entities.extend))
     assert len(entities) == 2
     assert unloads == ["unsubscribe"]

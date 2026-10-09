@@ -23,9 +23,10 @@ from ctypes import (
 )
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast, overload
 from urllib.parse import quote
 
+from .deadline import DeadlineExceededError, run_with_deadline
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
 from .video_runner_diagnostics import (
     RUNNER_OUTPUT_PREVIEW_LIMIT,
@@ -226,7 +227,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return a JSON-safe request payload."""
-        payload = {
+        payload: dict[str, Any] = {
             "service_id": self.service_id,
             "delegate_id": self.delegate_id,
             "flv_channel_id": self.delegate_id,
@@ -502,14 +503,15 @@ class DreameLawnMowerXp2pProcessRunner:
                 name="dreame-xp2p-stderr",
                 tail=stderr_tail,
             )
-            _write_json_line(
-                process,
-                {
-                    "operation": "start",
-                    "request": request.as_dict(redact=False),
-                    "command_timeout_us": command_timeout_us,
-                },
-            )
+            def write_request() -> None:
+                _write_json_line(
+                    process,
+                    {
+                        "operation": "start",
+                        "request": request.as_dict(redact=False),
+                        "command_timeout_us": command_timeout_us,
+                    },
+                )
             sensitive_values = payload_sensitive_values(
                 {
                     "request": request.as_dict(redact=False),
@@ -518,6 +520,7 @@ class DreameLawnMowerXp2pProcessRunner:
             response = _read_json_line(
                 process,
                 timeout=self.timeout,
+                write_request=write_request,
                 sensitive_values=sensitive_values,
                 stderr_thread=stderr_thread,
                 stderr_tail=stderr_tail,
@@ -563,7 +566,8 @@ class DreameLawnMowerXp2pProcessRunner:
             _join_stream_drain_thread(session.runner_stdout_thread)
             _join_stream_drain_thread(session.runner_stderr_thread)
             return
-        try:
+
+        def stop_worker() -> None:
             _write_json_line(
                 process,
                 {
@@ -577,7 +581,17 @@ class DreameLawnMowerXp2pProcessRunner:
                 },
             )
             process.wait(timeout=self.shutdown_timeout)
-        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+
+        try:
+            run_with_deadline(
+                stop_worker, deadline=time.monotonic() + self.shutdown_timeout
+            )
+        except (
+            BrokenPipeError,
+            OSError,
+            subprocess.TimeoutExpired,
+            DeadlineExceededError,
+        ):
             _terminate_process(process)
         finally:
             _join_stream_drain_thread(session.runner_stdout_thread)
@@ -911,6 +925,26 @@ class DreameLawnMowerNativeXp2pRuntime:
             raise
         return stun_file
 
+    @overload
+    def _bind(
+        self,
+        name: str,
+        argtypes: list[Any],
+        restype: Any,
+        *,
+        required: Literal[True] = True,
+    ) -> _NativeCallable: ...
+
+    @overload
+    def _bind(
+        self,
+        name: str,
+        argtypes: list[Any],
+        restype: Any,
+        *,
+        required: Literal[False],
+    ) -> _NativeCallable | None: ...
+
     def _bind(
         self,
         name: str,
@@ -931,7 +965,7 @@ class DreameLawnMowerNativeXp2pRuntime:
             function.restype = restype
         except AttributeError:
             pass
-        return function
+        return cast(_NativeCallable, function)
 
 
 def _app_config_from_device_config(
@@ -962,6 +996,7 @@ def diagnose_native_xp2p_runtime(
 ) -> DreameLawnMowerXp2pRuntimeDiagnostics:
     """Return load/symbol readiness for a native XP2P runtime library."""
     path = str(library_path)
+    error: str | None
     inspection = _inspect_native_library_file(Path(path)) if library is None else {}
     try:
         loaded_library = library if library is not None else CDLL(path)
@@ -1125,18 +1160,29 @@ def _read_json_line(
     sensitive_values: Sequence[str] = (),
     stderr_thread: threading.Thread | None = None,
     stderr_tail: Sequence[str] = (),
+    write_request: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
+    """Bound request delivery and response reading before terminating a stall."""
     if process.stdout is None:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P process runner stdout is not available."
         )
 
     result: dict[str, str | None] = {"line": None}
+    read_error: Exception | None = None
 
     def _readline() -> None:
-        result["line"] = process.stdout.readline()
+        nonlocal read_error
+        try:
+            if write_request is not None:
+                write_request()
+            result["line"] = process.stdout.readline()
+        except Exception as error:
+            read_error = error
 
-    thread = threading.Thread(target=_readline, daemon=True)
+    thread = threading.Thread(
+        target=_readline, name="dreame-xp2p-response", daemon=True,
+    )
     thread.start()
     thread.join(timeout=max(timeout, 0.1))
     if thread.is_alive():
@@ -1148,6 +1194,8 @@ def _read_json_line(
             + output_preview("stdout", result["line"], sensitive_values)
             + output_preview("stderr", _stream_tail_text(stderr_tail), sensitive_values)
         )
+    if read_error is not None:
+        raise read_error
     line = result["line"]
     if not line:
         _join_stream_drain_thread(stderr_thread)
@@ -1286,7 +1334,7 @@ def _decode_device_status_code(response: bytes | None) -> int | None:
     if isinstance(status, bool):
         return None
     try:
-        return int(status)
+        return int(cast(Any, status))
     except (TypeError, ValueError):
         return None
 

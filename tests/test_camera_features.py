@@ -109,6 +109,15 @@ class _FakeCameraDevice:
         self.status.stream_status = DreameMowerStreamStatus.VIDEO
         return {"code": 0, "result": "started"}
 
+    def _handle_properties_plan(self, properties):
+        """Expose the native response boundary for this camera protocol fake."""
+        yield from ()
+        return self._handle_properties(properties)
+
+    def _finish_update_plan(self):
+        yield from ()
+        self._finish_update()
+
     def _handle_properties(self, properties: list[dict[str, object]]) -> bool:
         for item in properties:
             did = item.get("did")

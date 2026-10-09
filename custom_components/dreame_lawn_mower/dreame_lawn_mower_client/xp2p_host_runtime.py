@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import queue
 import struct
@@ -12,7 +13,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import IO, Any
 
 from .lan_video import (
     DEFAULT_LAN_DISCOVERY_TIMEOUT,
@@ -369,12 +370,18 @@ class DreameLawnMowerXp2pHostRuntime:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P host worker stdin is unavailable."
                 )
-            startup_stage = "request_write"
-            process.stdin.write(payload)
-            process.stdin.flush()
-            startup_stage = "response_wait"
+            request_stream = process.stdin
+
+            def write_request() -> None:
+                nonlocal startup_stage
+                startup_stage = "request_write"
+                request_stream.write(payload)
+                request_stream.flush()
+                startup_stage = "response_wait"
+
             worker_status, response = _read_response(
                 process.stdout,
+                write_request=write_request,
                 timeout=_startup_response_timeout(
                     command_timeout_us=command_timeout_us,
                     device_status_attempts=device_status_attempts,
@@ -450,7 +457,7 @@ class DreameLawnMowerXp2pHostRuntime:
             )
             if native_detail:
                 details.append(f"native={native_detail}")
-            failure = {
+            failure: dict[str, Any] = {
                 "stage": startup_stage,
                 "exception": type(err).__name__,
             }
@@ -514,7 +521,10 @@ class DreameLawnMowerXp2pHostRuntime:
         retry_interval: float = 0.2,
         timeout: float = 2.0,
     ) -> int | None:
-        """Ask the live worker whether media is direct (62) or relayed (63)."""
+        """Ask for route mode with one timeout budget for reads and retries."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Route refresh timeout must be finite and positive")
+        deadline = time.monotonic() + timeout
         process = session.runner_process
         if (
             process is None
@@ -524,10 +534,13 @@ class DreameLawnMowerXp2pHostRuntime:
         ):
             return session.stream_link_mode
         for attempt in range(max(int(attempts), 1)):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return session.stream_link_mode
             try:
                 process.stdin.write(b"Q")
                 process.stdin.flush()
-                status, response = _read_response(process.stdout, timeout=timeout)
+                status, response = _read_response(process.stdout, timeout=remaining)
             except (BrokenPipeError, OSError, DreameLawnMowerVideoRuntimeError):
                 return session.stream_link_mode
             if status == 0:
@@ -536,7 +549,10 @@ class DreameLawnMowerXp2pHostRuntime:
                     session.stream_link_mode = int(value)
                     return session.stream_link_mode
             if attempt + 1 < attempts:
-                time.sleep(max(float(retry_interval), 0.0))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return session.stream_link_mode
+                time.sleep(min(max(float(retry_interval), 0.0), remaining))
         return session.stream_link_mode
 
 
@@ -606,10 +622,16 @@ def _encode_request(
 
 
 def _read_response(
-    stream: BinaryIO | None,
+    stream: IO[bytes] | None,
     *,
     timeout: float,
+    write_request: Callable[[], None] | None = None,
 ) -> tuple[int, bytes]:
+    """Bound request delivery and response reading within one worker lifetime.
+
+    On timeout the process owner terminates the child, releasing blocked pipe
+    operations. Control queries that have no startup request use the same reader.
+    """
     if stream is None:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P host worker stdout is unavailable."
@@ -618,6 +640,8 @@ def _read_response(
 
     def _read() -> None:
         try:
+            if write_request is not None:
+                write_request()
             header = _read_exact(stream, 12)
             if header[:4] != _RESPONSE_MAGIC:
                 raise DreameLawnMowerVideoRuntimeError(
@@ -650,7 +674,7 @@ def _read_response(
     return value
 
 
-def _read_exact(stream: BinaryIO, length: int) -> bytes:
+def _read_exact(stream: IO[bytes], length: int) -> bytes:
     result = bytearray()
     while len(result) < length:
         chunk = stream.read(length - len(result))
@@ -692,7 +716,7 @@ def _stun_servers(config: DreameLawnMowerXp2pDeviceConfig) -> tuple[str, ...]:
 
 
 def _start_binary_drain_thread(
-    stream: BinaryIO | None,
+    stream: IO[bytes] | None,
     *,
     name: str,
     tail: list[bytes] | None = None,

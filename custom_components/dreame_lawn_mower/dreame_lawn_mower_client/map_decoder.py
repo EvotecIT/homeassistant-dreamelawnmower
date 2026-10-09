@@ -9,10 +9,9 @@ import json
 import logging
 import math
 import re
-import traceback
 import zlib
 from functools import cmp_to_key
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from cryptography.hazmat.backends import default_backend
@@ -73,7 +72,7 @@ class DreameMowerMapDecoder:
         )
 
     @staticmethod
-    def _compare_segment_neighbors(r1: Segment, r2: Segment) -> bool:
+    def _compare_segment_neighbors(r1: Segment, r2: Segment) -> int:
         alen = 0
         blen = 0
         if r1.neighbors:
@@ -87,13 +86,13 @@ class DreameMowerMapDecoder:
         return blen - alen
 
     @staticmethod
-    def _compare_colors(c1: list[int], c2: list[int]) -> bool:
+    def _compare_colors(c1: list[int], c2: list[int]) -> int:
         return c1[1] - c2[1] if c1[1] != c2[1] else c1[0] - c2[0]
 
     @staticmethod
     def _get_pixel_type(
-        map_data: MapData, pixel, vslam_map: bool = False
-    ) -> MapPixelType:
+        map_data: MapData, pixel: int, vslam_map: bool = False
+    ) -> int:
         if map_data.frame_map:
             segment_id = pixel >> 2
 
@@ -147,22 +146,31 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def _get_segment_center(
-        map_data, segment_id: int, center: int, vertical: bool
+        map_data: MapData, segment_id: int, center: int, vertical: bool
     ) -> int | None:
         # Find center point implemented as on the app
-        lines = []
+        dimensions = map_data.dimensions
+        data = map_data.data
+        if (
+            dimensions is None
+            or data is None
+            or len(data) < dimensions.width * dimensions.height
+            or not 0 <= center < (dimensions.width if vertical else dimensions.height)
+        ):
+            return None
+        lines: list[list[int]] = []
         zero_pixels = -1
         segment_pixel = 0
         line = None
 
         for k in range(
-            map_data.dimensions.height if vertical else map_data.dimensions.width
+            dimensions.height if vertical else dimensions.width
         ):
             pixel_type = (
-                map_data.data[
-                    (k * map_data.dimensions.width + center)
+                data[
+                    (k * dimensions.width + center)
                     if vertical
-                    else (center * map_data.dimensions.width + k)
+                    else (center * dimensions.width + k)
                 ]
                 & 0x3F
             )
@@ -199,8 +207,32 @@ class DreameMowerMapDecoder:
         return None
 
     @staticmethod
-    def decode_map_partial(raw_map, iv=None, key=None) -> MapDataPartial | None:
-        _LOGGER.debug("raw_map: %s", raw_map)
+    def _read_dimensions(raw: bytes | None) -> MapImageDimensions | None:
+        """Read a complete raster header before allocating or indexing pixels."""
+        if raw is None or len(raw) < DreameMowerMapDecoder.HEADER_SIZE:
+            return None
+        grid = DreameMowerMapDecoder._read_int_16_le(raw, 17)
+        width = DreameMowerMapDecoder._read_int_16_le(raw, 19)
+        height = DreameMowerMapDecoder._read_int_16_le(raw, 21)
+        if (
+            width < 0
+            or height < 0
+            or (width * height > 0 and grid <= 0)
+            or len(raw) < DreameMowerMapDecoder.HEADER_SIZE + width * height
+        ):
+            return None
+        return MapImageDimensions(
+            DreameMowerMapDecoder._read_int_16_le(raw, 25),
+            DreameMowerMapDecoder._read_int_16_le(raw, 23),
+            height,
+            width,
+            grid,
+        )
+
+    @staticmethod
+    def decode_map_partial(
+        raw_map: str, iv: str | None = None, key: str | None = None
+    ) -> MapDataPartial | None:
         raw_map = raw_map.replace("_", "/").replace("-", "+")
 
         if len(raw_map) < 3:
@@ -212,7 +244,7 @@ class DreameMowerMapDecoder:
             raw_map = values[0]
 
         try:
-            raw_map = base64.decodebytes(raw_map.encode("utf8"))
+            raw = base64.decodebytes(raw_map.encode("utf8"))
         except ValueError:
             _LOGGER.error("Map data encoding is invalid")
             return None
@@ -229,7 +261,7 @@ class DreameMowerMapDecoder:
                     backend=default_backend(),
                 )
                 decryptor = cipher.decryptor()
-                raw_map = decryptor.update(raw_map) + decryptor.finalize()
+                raw = decryptor.update(raw) + decryptor.finalize()
             except Exception as ex:
                 _LOGGER.error(
                     "Map data decryption failed: %s. Private key might be missing. "
@@ -239,42 +271,48 @@ class DreameMowerMapDecoder:
                 return None
 
         try:
-            raw_map = zlib.decompress(raw_map)
-            if not raw_map or len(raw_map) < DreameMowerMapDecoder.HEADER_SIZE:
+            raw = zlib.decompress(raw)
+            if not raw or len(raw) < DreameMowerMapDecoder.HEADER_SIZE:
                 _LOGGER.error("Wrong header size for map")
                 return None
         except Exception as ex:
             _LOGGER.error("Map data decompression failed: %s", ex)
             return None
 
+        dimensions = DreameMowerMapDecoder._read_dimensions(raw)
+        if dimensions is None:
+            _LOGGER.error("Map raster header or pixel buffer is invalid")
+            return None
         partial_map = MapDataPartial()
-        partial_map.map_id = DreameMowerMapDecoder._read_int_16_le(raw_map)
-        partial_map.frame_id = DreameMowerMapDecoder._read_int_16_le(raw_map, 2)
-        partial_map.frame_type = DreameMowerMapDecoder._read_int_8(raw_map, 4)
-        partial_map.raw = raw_map
-        image_size = DreameMowerMapDecoder.HEADER_SIZE + (
-            DreameMowerMapDecoder._read_int_16_le(raw_map, 19)
-            * DreameMowerMapDecoder._read_int_16_le(raw_map, 21)
+        partial_map.map_id = DreameMowerMapDecoder._read_int_16_le(raw)
+        partial_map.frame_id = DreameMowerMapDecoder._read_int_16_le(raw, 2)
+        partial_map.frame_type = DreameMowerMapDecoder._read_int_8(raw, 4)
+        partial_map.raw = raw
+        image_size = (
+            DreameMowerMapDecoder.HEADER_SIZE + dimensions.width * dimensions.height
         )
-        if len(raw_map) >= image_size:
+        if len(raw) > image_size:
             try:
-                data_json = json.loads(raw_map[image_size:].decode("utf8"))
+                data_json = json.loads(raw[image_size:].decode("utf8"))
+                if not isinstance(data_json, dict):
+                    return None
                 if data_json.get("timestamp_ms"):
                     partial_map.timestamp_ms = int(data_json["timestamp_ms"])
 
                 partial_map.data_json = data_json
-            except Exception:
-                pass
+            except Exception as ex:
+                _LOGGER.error("Map metadata is invalid (%s)", type(ex).__name__)
+                return None
         return partial_map
 
     @staticmethod
     def decode_map(
         raw_map: str,
         vslam_map: bool,
-        rotation: int = 0,
-        iv: str = None,
-        key: str = None,
-    ) -> tuple[MapData, MapData | None]:
+        rotation: int | None = 0,
+        iv: str | None = None,
+        key: str | None = None,
+    ) -> tuple[MapData | None, MapData | None]:
         return DreameMowerMapDecoder.decode_map_data_from_partial(
             DreameMowerMapDecoder.decode_map_partial(raw_map, iv, key),
             vslam_map,
@@ -283,17 +321,21 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def decode_saved_map(
-        raw_map: str, vslam_map: bool, rotation: int = 0, iv: str = None
+        raw_map: str, vslam_map: bool, rotation: int | None = 0, iv: str | None = None
     ) -> MapData | None:
         decoded = DreameMowerMapDecoder.decode_map(raw_map, vslam_map, rotation, iv)
         return decoded[0] if decoded is not None else None
 
     @staticmethod
     def decode_map_data_from_partial(
-        partial_map: MapDataPartial, vslam_map: bool, rotation: int = 0
-    ) -> MapData | None:
-        if partial_map is None:
-            return
+        partial_map: MapDataPartial | None, vslam_map: bool, rotation: int | None = 0
+    ) -> tuple[MapData | None, MapData | None]:
+        if partial_map is None or partial_map.raw is None:
+            return None, None
+        raw = partial_map.raw
+        dimensions = DreameMowerMapDecoder._read_dimensions(raw)
+        if dimensions is None:
+            return None, None
 
         map_data = MapData()
         map_data.map_id = partial_map.map_id
@@ -301,7 +343,6 @@ class DreameMowerMapDecoder:
         map_data.frame_type = partial_map.frame_type
         map_data.timestamp_ms = partial_map.timestamp_ms
 
-        raw = partial_map.raw
         map_data.robot_position = Point(
             DreameMowerMapDecoder._read_int_16_le(raw, 5),
             DreameMowerMapDecoder._read_int_16_le(raw, 7),
@@ -313,18 +354,15 @@ class DreameMowerMapDecoder:
             DreameMowerMapDecoder._read_int_16_le(raw, 15),
         )
 
-        grid_size = DreameMowerMapDecoder._read_int_16_le(raw, 17)
-        width = DreameMowerMapDecoder._read_int_16_le(raw, 19)
-        height = DreameMowerMapDecoder._read_int_16_le(raw, 21)
-        left = DreameMowerMapDecoder._read_int_16_le(raw, 23)
-        top = DreameMowerMapDecoder._read_int_16_le(raw, 25)
+        grid_size = dimensions.grid_size
+        width, height = dimensions.width, dimensions.height
+        left, top = dimensions.left, dimensions.top
 
         image_size = DreameMowerMapDecoder.HEADER_SIZE + width * height
-        data_json = partial_map.data_json
-        if data_json is None:
-            data_json = {}
-
-        _LOGGER.debug("Map Data Json: %s", data_json)
+        # Wire metadata contains vendor-specific nested JSON. Dynamic values stay
+        # at this decoding boundary; the resulting map model has typed fields.
+        data_json = cast(dict[str, Any], partial_map.data_json or {})
+        saved_map_data: MapData | None = None
 
         try:
             if (
@@ -332,8 +370,15 @@ class DreameMowerMapDecoder:
                 and data_json["origin"]
                 and len(data_json["origin"]) > 1
             ):
-                left = data_json["origin"][0]
-                top = data_json["origin"][1]
+                origin_x, origin_y = data_json["origin"][:2]
+                if (
+                    not isinstance(origin_x, (int, float))
+                    or not isinstance(origin_y, (int, float))
+                    or not math.isfinite(origin_x)
+                    or not math.isfinite(origin_y)
+                ):
+                    raise ValueError("Invalid map origin coordinates")
+                left, top = origin_x, origin_y
 
             map_data.dimensions = MapImageDimensions(
                 top, left, height, width, grid_size
@@ -416,9 +461,6 @@ class DreameMowerMapDecoder:
                 ) or map_data.robot_position.a == 32767:
                     map_data.robot_position = None
 
-                if not map_data.saved_map and not map_data.recovery_map:
-                    map_data.index = 0
-
                 if data_json.get("tr"):
                     matches = [
                         m.groupdict()
@@ -426,7 +468,7 @@ class DreameMowerMapDecoder:
                             r"(?P<operator>[MWSLl])(?P<x>-?\d+),(?P<y>-?\d+)"
                         ).finditer(data_json["tr"])
                     ]
-                    current_position = Point(0, 0)
+                    current_position: Point = Point(0, 0)
                     map_data.path = []
                     for match in matches:
                         operator = match["operator"]
@@ -507,15 +549,17 @@ class DreameMowerMapDecoder:
                 if not map_data.empty_map:
                     map_data.empty_map = True
                     if map_data.frame_type == MapFrameType.W.value:
-                        try:
-                            for y in range(height):
-                                for x in range(width):
-                                    pixel = map_data.data[(width * y) + x] & 15
-                                    if pixel > 0:
-                                        map_data.empty_map = False
-                                        map_data.pixel_type[x, y] = MapPixelType(pixel)
-                        except Exception:
-                            pass
+                        for y in range(height):
+                            for x in range(width):
+                                pixel = map_data.data[(width * y) + x] & 15
+                                # Unknown signal codes have no defined color;
+                                # keep that cell outside and visit the remainder.
+                                if (
+                                    pixel > 0
+                                    and pixel in MapPixelType._value2member_map_
+                                ):
+                                    map_data.empty_map = False
+                                    map_data.pixel_type[x, y] = MapPixelType(pixel)
                     elif map_data.frame_type == MapFrameType.I.value:
                         if map_data.frame_map:
                             for y in range(height):
@@ -651,7 +695,6 @@ class DreameMowerMapDecoder:
                 map_data.data = None
                 return map_data, None
 
-            saved_map_data = None
             restored_map = map_data.restored_map
 
             if "whmp" in data_json:
@@ -711,7 +754,15 @@ class DreameMowerMapDecoder:
                                 saved_map_data.hidden_segments
                             )
 
-                        if map_data.saved_map_status == 2 and not map_data.frame_map:
+                        if (
+                            map_data.saved_map_status == 2
+                            and not map_data.frame_map
+                            and saved_map_data.dimensions is not None
+                            and saved_map_data.dimensions.grid_size > 0
+                            and saved_map_data.data is not None
+                            and map_data.pixel_type is not None
+                            and map_data.dimensions.grid_size > 0
+                        ):
                             left = min(
                                 map_data.dimensions.left, saved_map_data.dimensions.left
                             )
@@ -966,7 +1017,7 @@ class DreameMowerMapDecoder:
                                 start_y0 = center_y
                                 rect_width = 0
                                 rect_height = 0
-                                angle = 0
+                                angle = 0.0
                                 scale = 1.0
                                 if size >= 8:
                                     start_x0 = int(furniture[4])
@@ -1005,36 +1056,41 @@ class DreameMowerMapDecoder:
                         obstacle_type = int(obstacle[2])
                         index = index + 1
                         if obstacle_type in ObstacleType._value2member_map_:
-                            id = int(obstacle[4])
-                            x = float(obstacle[0])
-                            y = float(obstacle[1])
-                            possibility = int(float(obstacle[3]) * 100)
+                            object_id = int(obstacle[4]) if size > 4 else None
+                            obstacle_x = float(obstacle[0])
+                            obstacle_y = float(obstacle[1])
+                            possibility: int | None = int(float(obstacle[3]) * 100)
                             if size >= 7 and (
-                                id >= 1000
+                                (object_id is not None and object_id >= 1000)
                                 or obstacle_type == ObstacleType.NEGLECTED_ZONE.value
                             ):
-                                if size >= 8:
+                                if size >= 11:
                                     if (
                                         obstacle_type
                                         == ObstacleType.NEGLECTED_ZONE.value
                                     ):
-                                        segment_id = int(x)
-                                        x = 0
-                                        y = 0
+                                        segment_id = int(obstacle_x)
+                                        obstacle_x = 0
+                                        obstacle_y = 0
                                         possibility = None
                                         if (
                                             map_data.segments
                                             and segment_id in map_data.segments
                                         ):
-                                            x = map_data.segments[segment_id].x
-                                            y = map_data.segments[segment_id].y
+                                            segment = map_data.segments[segment_id]
+                                            if (
+                                                segment.x is not None
+                                                and segment.y is not None
+                                            ):
+                                                obstacle_x = segment.x
+                                                obstacle_y = segment.y
 
                                     map_data.obstacles[str(index)] = Obstacle(
-                                        x,
-                                        y,
+                                        obstacle_x,
+                                        obstacle_y,
                                         ObstacleType(obstacle_type),
                                         possibility,
-                                        id,
+                                        object_id,
                                         obstacle[5],
                                         obstacle[6],
                                         float(obstacle[7]) * 100,
@@ -1052,20 +1108,22 @@ class DreameMowerMapDecoder:
                                             else 0
                                         ),
                                     )
-                                else:
+                                elif size == 7:
                                     map_data.obstacles[str(index)] = Obstacle(
-                                        x,
-                                        y,
+                                        obstacle_x,
+                                        obstacle_y,
                                         ObstacleType(obstacle_type),
                                         possibility,
-                                        id,
+                                        object_id,
                                         obstacle[6],
                                         obstacle[5],
                                     )
+                                else:
+                                    raise ValueError("Incomplete obstacle photo record")
                             else:
                                 map_data.obstacles[str(index)] = Obstacle(
-                                    x,
-                                    y,
+                                    obstacle_x,
+                                    obstacle_y,
                                     ObstacleType(obstacle_type),
                                     possibility,
                                 )
@@ -1180,16 +1238,18 @@ class DreameMowerMapDecoder:
 
             if vslam_map and not map_data.saved_map:
                 map_data.need_optimization = not restored_map
-        except Exception:
-            _LOGGER.error("Map Parse Failed: %s", traceback.format_exc())
+        except Exception as ex:
+            # Exception arguments can contain private metadata from the wire.
+            _LOGGER.error("Map Parse Failed (%s)", type(ex).__name__)
+            return None, None
 
         return map_data, saved_map_data
 
     @staticmethod
     def decode_p_map_data_from_partial(
-        partial_map: MapDataPartial, current_map_data: MapData, vslam_map: bool
+        partial_map: MapDataPartial | None, current_map_data: MapData, vslam_map: bool
     ) -> MapData | None:
-        if partial_map.frame_type != MapFrameType.P.value:
+        if partial_map is None or partial_map.frame_type != MapFrameType.P.value:
             return None
 
         map_data, saved_map_data = DreameMowerMapDecoder.decode_map_data_from_partial(
@@ -1199,37 +1259,34 @@ class DreameMowerMapDecoder:
         if map_data is None:
             return None
 
-        current_map_data.frame_id = map_data.frame_id
-        current_map_data.robot_position = map_data.robot_position
-        current_map_data.timestamp_ms = map_data.timestamp_ms
-        current_map_data.docked = map_data.docked
-        current_map_data.line_to_robot = map_data.line_to_robot
-        current_map_data.temporary_map = map_data.temporary_map
-        current_map_data.saved_map = False
-        current_map_data.empty_map = False
-        current_map_data.restored_map = False
-        current_map_data.recovery_map = False
-        current_map_data.clean_log = False
-
-        if map_data.docked is not None:
-            current_map_data.docked = map_data.docked
-
-        if map_data.charger_position is not None and (
-            not vslam_map or current_map_data.saved_map_status != 2
+        current_dimensions = current_map_data.dimensions
+        current_raw = current_map_data.data
+        current_pixels = current_map_data.pixel_type
+        if (
+            current_dimensions is None
+            or current_raw is None
+            or current_pixels is None
+            or current_dimensions.width <= 0
+            or current_dimensions.height <= 0
+            or current_dimensions.grid_size <= 0
+            or len(current_raw)
+            < current_dimensions.width * current_dimensions.height
+            or current_pixels.shape
+            != (current_dimensions.width, current_dimensions.height)
+            or (current_map_data.empty_map and not map_data.data)
         ):
-            current_map_data.charger_position = map_data.charger_position
-
-        if map_data.obstacles is not None:
-            current_map_data.obstacles = map_data.obstacles
-
-        if map_data.active_cruise_points is not None:
-            current_map_data.active_cruise_points = map_data.active_cruise_points
+            return None
 
         # P map only returns difference between its previous frame.
-        # Resize the map and update the buffer at the received data offset.
+        # Stage the complete raster before changing the previous frame's state.
+        empty_map = current_map_data.empty_map
         if map_data.data:
-            current_dimensions = current_map_data.dimensions
             new_dimensions = map_data.dimensions
+            if (
+                new_dimensions is None
+                or new_dimensions.grid_size != current_dimensions.grid_size
+            ):
+                return None
 
             # Find max image size
             grid_size = new_dimensions.grid_size
@@ -1268,10 +1325,10 @@ class DreameMowerMapDecoder:
             for y in range(current_dimensions.height):
                 for x in range(current_dimensions.width):
                     data[(width * (top_offset + y)) + left_offset + x] = (
-                        current_map_data.data[(current_dimensions.width * y) + x]
+                        current_raw[(current_dimensions.width * y) + x]
                     )
                     pixel_type[left_offset + x, top_offset + y] = (
-                        current_map_data.pixel_type[x, y]
+                        current_pixels[x, y]
                     )
 
             # Calculate new image offset
@@ -1285,7 +1342,9 @@ class DreameMowerMapDecoder:
                     if map_data.data[current_index]:
                         new_index = (width * (top_offset + y)) + left_offset + x
                         # Combine the current and received buffer values.
-                        data[new_index] = data[new_index] + map_data.data[current_index]
+                        data[new_index] = (
+                            int(data[new_index]) + map_data.data[current_index]
+                        ) & 0xFF
                         # Calculate the new pixel type from updated buffer value
                         pixel_type[left_offset + x, top_offset + y] = (
                             DreameMowerMapDecoder._get_pixel_type(
@@ -1301,9 +1360,33 @@ class DreameMowerMapDecoder:
             current_map_data.dimensions = MapImageDimensions(
                 top, left, height, width, grid_size
             )
+            empty_map = not np.any(pixel_type)
 
             if vslam_map:
                 current_map_data.need_optimization = True
+
+        current_map_data.frame_id = map_data.frame_id
+        current_map_data.robot_position = map_data.robot_position
+        current_map_data.timestamp_ms = map_data.timestamp_ms
+        current_map_data.docked = map_data.docked
+        current_map_data.line_to_robot = map_data.line_to_robot
+        current_map_data.temporary_map = map_data.temporary_map
+        current_map_data.saved_map = False
+        current_map_data.empty_map = empty_map
+        current_map_data.restored_map = False
+        current_map_data.recovery_map = False
+        current_map_data.clean_log = False
+
+        if map_data.charger_position is not None and (
+            not vslam_map or current_map_data.saved_map_status != 2
+        ):
+            current_map_data.charger_position = map_data.charger_position
+
+        if map_data.obstacles is not None:
+            current_map_data.obstacles = map_data.obstacles
+
+        if map_data.active_cruise_points is not None:
+            current_map_data.active_cruise_points = map_data.active_cruise_points
 
         if map_data.path:
             # Append new paths received with P frame
@@ -1320,14 +1403,20 @@ class DreameMowerMapDecoder:
         return current_map_data
 
     @staticmethod
-    def decode_cleaning_map_data(map_data, cleaning_map_str):
+    def decode_cleaning_map_data(
+        map_data: MapData, cleaning_map_str: str | None
+    ) -> MapData | None:
+        dimensions = map_data.dimensions
+        pixels = map_data.pixel_type
+        if dimensions is None or pixels is None or dimensions.grid_size <= 0:
+            return None
         partial_cleaning_map = None
         if cleaning_map_str and len(cleaning_map_str) > 1:
             partial_cleaning_map = DreameMowerMapDecoder.decode_map_partial(
                 cleaning_map_str
             )
             if partial_cleaning_map is None:
-                return
+                return None
 
         cleaning_map = MapData()
         if partial_cleaning_map:
@@ -1335,9 +1424,8 @@ class DreameMowerMapDecoder:
             cleaning_map.frame_id = partial_cleaning_map.frame_id
             cleaning_map.frame_type = partial_cleaning_map.frame_type
             cleaning_map.timestamp_ms = partial_cleaning_map.timestamp_ms
-            cleaning_map.cleaned_segments = partial_cleaning_map.data_json.get(
-                "CleanArea"
-            )
+            metadata = cast(dict[str, Any], partial_cleaning_map.data_json or {})
+            cleaning_map.cleaned_segments = metadata.get("CleanArea")
         else:
             cleaning_map.map_id = map_data.map_id
             cleaning_map.frame_id = map_data.frame_id
@@ -1348,7 +1436,8 @@ class DreameMowerMapDecoder:
         cleaning_map.charger_position = map_data.charger_position
         cleaning_map.robot_position = map_data.robot_position
         cleaning_map.segments = map_data.segments
-        cleaning_map.pixel_type = map_data.pixel_type.copy()
+        cleaning_pixels = pixels.copy()
+        cleaning_map.pixel_type = cleaning_pixels
         cleaning_map.rotation = map_data.rotation
         cleaning_map.saved_map_status = map_data.saved_map_status
         cleaning_map.docked = map_data.docked
@@ -1364,15 +1453,15 @@ class DreameMowerMapDecoder:
 
         cleaning_map.multiple_cleaning_time = map_data.multiple_cleaning_time
         if partial_cleaning_map:
-            grid_size = DreameMowerMapDecoder._read_int_16_le(
-                partial_cleaning_map.raw, 17
-            )
-            width = DreameMowerMapDecoder._read_int_16_le(partial_cleaning_map.raw, 19)
-            height = DreameMowerMapDecoder._read_int_16_le(partial_cleaning_map.raw, 21)
-            left = DreameMowerMapDecoder._read_int_16_le(partial_cleaning_map.raw, 23)
-            top = DreameMowerMapDecoder._read_int_16_le(partial_cleaning_map.raw, 25)
+            raw = partial_cleaning_map.raw
+            overlay_dimensions = DreameMowerMapDecoder._read_dimensions(raw)
+            if raw is None or overlay_dimensions is None:
+                return None
+            grid_size = overlay_dimensions.grid_size
+            width, height = overlay_dimensions.width, overlay_dimensions.height
+            left, top = overlay_dimensions.left, overlay_dimensions.top
 
-            data = partial_cleaning_map.raw[
+            data = raw[
                 DreameMowerMapDecoder.HEADER_SIZE : DreameMowerMapDecoder.HEADER_SIZE
                 + width * height
             ]
@@ -1381,63 +1470,62 @@ class DreameMowerMapDecoder:
                 for x in range(width):
                     value = data[int(y * width + x)] & 3
                     if value > 0:
-                        xx = int(
-                            ((left + (x * grid_size)) - map_data.dimensions.left)
-                            / map_data.dimensions.grid_size
+                        xx = math.floor(
+                            ((left + (x * grid_size)) - dimensions.left)
+                            / dimensions.grid_size
                         )
-                        yy = int(
-                            ((top + (y * grid_size)) - map_data.dimensions.top)
-                            / map_data.dimensions.grid_size
+                        yy = math.floor(
+                            ((top + (y * grid_size)) - dimensions.top)
+                            / dimensions.grid_size
                         )
                         if cleaning_map.check_point(xx, yy, True):
-                            cleaning_map.pixel_type[xx, yy] = 249 - value
+                            cleaning_pixels[xx, yy] = 249 - value
 
         cleaning_map.has_dirty_area = bool(
-            MapPixelType.DIRTY_AREA.value in cleaning_map.pixel_type
+            MapPixelType.DIRTY_AREA.value in cleaning_pixels
         )
         cleaning_map.has_cleaned_area = bool(
-            MapPixelType.CLEAN_AREA.value in cleaning_map.pixel_type
+            MapPixelType.CLEAN_AREA.value in cleaning_pixels
         )
 
         return cleaning_map
 
     @staticmethod
-    def get_segments(map_data: MapData, vslam_map: bool) -> dict[str, Any]:
-        segments = {}
-        for y in range(map_data.dimensions.height):
-            for x in range(map_data.dimensions.width):
-                segment_id = int(map_data.pixel_type[x, y])
+    def get_segments(map_data: MapData, vslam_map: bool) -> dict[int, Segment]:
+        dimensions, pixels = map_data.dimensions, map_data.pixel_type
+        if dimensions is None or pixels is None:
+            return {}
+        bounds: dict[int, list[int]] = {}
+        for y in range(dimensions.height):
+            for x in range(dimensions.width):
+                segment_id = int(pixels[x, y])
                 if segment_id > 0 and segment_id < 64:
-                    if segment_id not in segments:
-                        segments[segment_id] = Segment(segment_id, x, y, x, y)
+                    if segment_id not in bounds:
+                        bounds[segment_id] = [x, y, x, y]
                         continue
+                    box = bounds[segment_id]
+                    box[0], box[2] = min(box[0], x), max(box[2], x)
+                    box[1], box[3] = min(box[1], y), max(box[3], y)
 
-                    if x < segments[segment_id].x0:
-                        segments[segment_id].x0 = x
-                    elif x > segments[segment_id].x1:
-                        segments[segment_id].x1 = x
-
-                    if y < segments[segment_id].y0:
-                        segments[segment_id].y0 = y
-                    elif y > segments[segment_id].y1:
-                        segments[segment_id].y1 = y
-
-        if segments:
-            for k, v in segments.items():
-                x = int(math.ceil((v.x1 - v.x0) / 2 + v.x0))
-                y = int(math.ceil((v.y1 - v.y0) / 2 + v.y0))
+        segments: dict[int, Segment] = {}
+        if bounds:
+            for k, (x0, y0, x1, y1) in bounds.items():
+                segment = Segment(k, x0, y0, x1, y1)
+                segments[k] = segment
+                x = int(math.ceil((x1 - x0) / 2 + x0))
+                y = int(math.ceil((y1 - y0) / 2 + y0))
 
                 if map_data.saved_map:
                     if vslam_map:
-                        if map_data.pixel_type[x, y] != k:
+                        if pixels[x, y] != k:
                             startI = -1
                             endI = -1
-                            for i in range(map_data.dimensions.width):
-                                value = map_data.pixel_type[i, y]
+                            for i in range(dimensions.width):
+                                value = pixels[i, y]
                                 if startI == -1:
                                     if value == k:
                                         startI = i
-                                elif value != k or i == (map_data.dimensions.width - 1):
+                                elif value != k or i == (dimensions.width - 1):
                                     endI = i - 1
                                     break
 
@@ -1455,55 +1543,44 @@ class DreameMowerMapDecoder:
                                 x = center_x
                                 y = center_y
 
-                segments[k].x0 = int(
-                    map_data.dimensions.left + (v.x0 * map_data.dimensions.grid_size)
-                )
-                segments[k].y0 = int(
-                    map_data.dimensions.top
-                    + (v.y0 * map_data.dimensions.grid_size)
-                    - map_data.dimensions.grid_size
-                )
-                segments[k].x1 = int(
-                    map_data.dimensions.left
-                    + (v.x1 * map_data.dimensions.grid_size)
-                    + map_data.dimensions.grid_size
-                )
-                segments[k].y1 = int(
-                    map_data.dimensions.top + (v.y1 * map_data.dimensions.grid_size)
-                )
-                segments[k].x = int(
-                    map_data.dimensions.left + (x * map_data.dimensions.grid_size)
-                )
-                segments[k].y = int(
-                    map_data.dimensions.top + (y * map_data.dimensions.grid_size)
-                )
-                segments[k].set_name()
+                segment.x0 = int(dimensions.left + x0 * dimensions.grid_size)
+                segment.y0 = int(dimensions.top + (y0 - 1) * dimensions.grid_size)
+                segment.x1 = int(dimensions.left + (x1 + 1) * dimensions.grid_size)
+                segment.y1 = int(dimensions.top + y1 * dimensions.grid_size)
+                segment.x = int(dimensions.left + x * dimensions.grid_size)
+                segment.y = int(dimensions.top + y * dimensions.grid_size)
+                segment.set_name()
         return segments
 
     @staticmethod
     def set_robot_segment(map_data: MapData) -> None:
+        dimensions, pixels = map_data.dimensions, map_data.pixel_type
         if (
             map_data.segments
             and map_data.saved_map_status == 2
             and map_data.robot_position is not None
+            and dimensions is not None
+            and dimensions.grid_size > 0
+            and pixels is not None
         ):
-            map_data.robot_segment = map_data.pixel_type[
-                int(
-                    (map_data.robot_position.x - map_data.dimensions.left)
-                    / map_data.dimensions.grid_size
-                ),
-                int(
-                    (map_data.robot_position.y - map_data.dimensions.top)
-                    / map_data.dimensions.grid_size
-                ),
-            ]
+            x = math.floor(
+                (map_data.robot_position.x - dimensions.left) / dimensions.grid_size
+            )
+            y = math.floor(
+                (map_data.robot_position.y - dimensions.top) / dimensions.grid_size
+            )
+            map_data.robot_segment = (
+                int(pixels[x, y])
+                if 0 <= x < dimensions.width and 0 <= y < dimensions.height
+                else 0
+            )
             if map_data.robot_segment not in map_data.segments:
                 map_data.robot_segment = 0
                 for k, v in map_data.segments.items():
                     if v.check_point(
                         map_data.robot_position.x,
                         map_data.robot_position.y,
-                        map_data.dimensions.grid_size * 4,
+                        dimensions.grid_size * 4,
                     ):
                         map_data.robot_segment = k
                         break
@@ -1513,8 +1590,8 @@ class DreameMowerMapDecoder:
     @staticmethod
     def set_segment_cleanset(
         map_data: MapData,
-        cleanset: dict[str, list[int]],
-        capability: DreameMowerDeviceCapability = None,
+        cleanset: dict[str, list[int]] | None,
+        capability: DreameMowerDeviceCapability | None = None,
     ) -> None:
         if map_data is not None and map_data.segments is not None:
             # Restored maps can omit cleanset values even though the mower
@@ -1553,7 +1630,7 @@ class DreameMowerMapDecoder:
 
             for k, _segment in map_data.segments.items():
                 map_data.segments[k].cleanset_type = cleanset_type
-                if cleanset_type != CleansetType.NONE:
+                if cleanset is not None and cleanset_type != CleansetType.NONE:
                     segment_id = str(k)
                     if segment_id not in cleanset:
                         cleanset[segment_id] = default_cleanset.copy()
@@ -1574,7 +1651,9 @@ class DreameMowerMapDecoder:
     @staticmethod
     def set_segment_color_index(map_data: MapData) -> None:
         """Find segment color index as implemented on the app"""
-        area_color_index = {}
+        if not map_data.segments:
+            return
+        area_color_index: dict[int, int] = {}
         sorted_segments = sorted(
             map_data.segments.values(),
             key=cmp_to_key(DreameMowerMapDecoder._compare_segment_neighbors),
@@ -1593,12 +1672,12 @@ class DreameMowerMapDecoder:
             for _segment_id, j in area_color_index.items():
                 area_color_num[j][1] = area_color_num[j][1] + 1
 
-            area_color_num = sorted(
+            sorted_colors = sorted(
                 area_color_num.values(),
                 key=cmp_to_key(DreameMowerMapDecoder._compare_colors),
             )
 
-            for area_color in area_color_num:
+            for area_color in sorted_colors:
                 color = area_color[0]
                 if color not in used_ids:
                     area_color_index[segment.segment_id] = color
@@ -1612,51 +1691,42 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def set_segment_floor_material(
-        map_data: MapData, segment_id: int, floor_material
+        map_data: MapData, segment_id: int, floor_material: dict[int, int] | None
     ) -> None:
         if (
             floor_material is not None
             and map_data.segments
             and segment_id in map_data.segments
         ):
-            if map_data.segments[segment_id].floor_material is not None:
-                if map_data.segments[segment_id].floor_material_direction is not None:
-                    map_data.segments[segment_id].floor_material_rotated_direction = (
-                        map_data.segments[segment_id].floor_material_direction
+            segment = map_data.segments[segment_id]
+            material = segment.floor_material
+            if material is not None:
+                if segment.floor_material_direction is not None:
+                    segment.floor_material_rotated_direction = (
+                        segment.floor_material_direction
                         if map_data.rotation == 0 or map_data.rotation == 180
                         else 90
-                        if map_data.segments[segment_id].floor_material_direction == 0
+                        if segment.floor_material_direction == 0
                         else 0
                     )
-
-                floor_material[segment_id] = (
-                    0
-                    if map_data.segments[segment_id].floor_material <= 0
-                    or map_data.segments[segment_id].floor_material > 2
-                    else (
-                        3
-                        if map_data.segments[segment_id].floor_material == 2
-                        else (
-                            2
-                            if map_data.segments[segment_id].floor_material_direction
-                            == 90
-                            or (
-                                map_data.segments[segment_id].x1
-                                - map_data.segments[segment_id].x0
-                            )
-                            <= (
-                                map_data.segments[segment_id].y1
-                                - map_data.segments[segment_id].y0
-                            )
-                            else 1
-                        )
+                if material <= 0 or material > 2:
+                    floor_material[segment_id] = 0
+                elif material == 2:
+                    floor_material[segment_id] = 3
+                elif segment.floor_material_direction == 90:
+                    floor_material[segment_id] = 2
+                elif (
+                    segment.x0 is not None and segment.x1 is not None
+                    and segment.y0 is not None and segment.y1 is not None
+                ):
+                    floor_material[segment_id] = (
+                        2 if segment.x1 - segment.x0 <= segment.y1 - segment.y0 else 1
                     )
-                )
 
     @staticmethod
     def set_floor_material(map_data: MapData) -> None:
         if map_data.segments:
-            floor_material = {}
+            floor_material: dict[int, int] = {}
             for k in map_data.segments.keys():
                 DreameMowerMapDecoder.set_segment_floor_material(
                     map_data, k, floor_material

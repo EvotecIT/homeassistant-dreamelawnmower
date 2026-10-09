@@ -40,7 +40,7 @@ class DreameLawnMowerCommandRejectedError(DreameLawnMowerConnectionError):
 _WRITE_ATTEMPTED_FIELDS_ATTRIBUTE = "_dreame_write_attempted_fields"
 
 
-def mark_write_attempted(error: Exception, *, fields: Sequence[str]) -> None:
+def mark_write_attempted(error: BaseException, *, fields: Sequence[str]) -> None:
     """Record that a state-changing request may have reached the mower."""
     attempted_fields = dict.fromkeys((*attempted_write_fields(error), *fields))
     setattr(error, _WRITE_ATTEMPTED_FIELDS_ATTRIBUTE, tuple(attempted_fields))

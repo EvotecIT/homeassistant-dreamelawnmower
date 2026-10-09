@@ -368,9 +368,9 @@ def render_vector_map_png(
     for zone in vector_map.zones:
         if len(zone.points) < 3 or not zone.name:
             continue
-        px, py = polygon_label_point([to_pixel(x, y) for x, y in zone.points])
+        label_x, label_y = polygon_label_point([to_pixel(x, y) for x, y in zone.points])
         draw.text(
-            (px, py), zone.name, fill=style.label, font=font, anchor="mm",
+            (label_x, label_y), zone.name, fill=style.label, font=font, anchor="mm",
             stroke_width=label_halo_width, stroke_fill=style.label_halo,
         )
 

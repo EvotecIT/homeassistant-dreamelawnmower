@@ -3,31 +3,34 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
     UpdateEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
+from .runtime_data import DreameLawnMowerConfigEntry
+
+# Limit firmware approval and refresh operations through HA's request owner.
+PARALLEL_UPDATES = 1
 
 FIRMWARE_INSTALL_ASSUMED_IN_PROGRESS = timedelta(hours=24)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower firmware update entities."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities([DreameLawnMowerFirmwareUpdateEntity(coordinator)])
 
 
@@ -39,7 +42,9 @@ class DreameLawnMowerFirmwareUpdateEntity(
 
     _attr_name = "Firmware"
     _attr_device_class = UpdateDeviceClass.FIRMWARE
-    _attr_supported_features = UpdateEntityFeature.INSTALL
+    _attr_supported_features = (
+        UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
+    )
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
@@ -82,7 +87,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
         return self.installed_version
 
     @property
-    def in_progress(self) -> bool | int | None:
+    def in_progress(self) -> bool | None:
         """Return whether the mower reports an update in progress."""
         live_in_progress = _snapshot_update_in_progress(self.coordinator)
         if live_in_progress is True:
@@ -131,7 +136,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
             "release_summary_available": support.release_summary_available,
             "install_assumed_in_progress": self._assumed_install_in_progress(),
             "install_requested_at": (
-                getattr(self, "_install_requested_at", None).isoformat()
+                cast(datetime, getattr(self, "_install_requested_at", None)).isoformat()
                 if getattr(self, "_install_requested_at", None) is not None
                 else None
             ),
@@ -144,7 +149,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
         self,
         version: str | None,
         backup: bool,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Trigger the cloud firmware approval step."""
         support = self.coordinator.firmware_update_support

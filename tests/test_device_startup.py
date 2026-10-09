@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -10,8 +11,16 @@ import pytest
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
+    DreameMowerDeviceInfo,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
+    DirtyData,
+    DreameMowerProperty,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DeviceUpdateFailedException,
@@ -21,7 +30,8 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_manager im
 )
 
 
-def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
+@pytest.mark.parametrize("mqtt_connected", [False, True])
+def test_connect_device_defers_initial_map_request(monkeypatch, mqtt_connected) -> None:
     """The first state snapshot must not wait for cloud map acquisition."""
     monkeypatch.setattr(
         device_module,
@@ -58,14 +68,65 @@ def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
         capability=SimpleNamespace(),
     )
 
-    DreameMowerDevice.connect_device(mower)
+    state = vars(mower)
+    mower = object.__new__(DreameMowerDevice)
+    mower.__dict__.update(state)
+    monkeypatch.setattr(
+        DreameMowerDevice, "device_connected", property(lambda _: mqtt_connected),
+    )
+    monkeypatch.setattr(DreameMowerDevice, "cloud_connected", property(lambda _: False))
+    monkeypatch.setattr(
+        DreameMowerDevice, "_map_update_interval", property(lambda _: 10),
+    )
+    mower.connect_device()
 
     mower._request_properties.assert_called_once_with()
     map_manager.set_update_interval.assert_called_once_with(10)
+    map_manager.set_capability.assert_called_once_with(mower.capability)
     map_manager.schedule_update.assert_not_called()
     map_manager.update.assert_not_called()
     assert mower.available is True
     assert mower._ready is True
+
+
+@pytest.mark.parametrize("model", [None, 42])
+def test_map_initialization_preserves_missing_model_metadata(model) -> None:
+    class InitializingDevice(DreameMowerDevice):
+        _map_update_interval = 10
+
+    map_manager = Mock()
+    mower = object.__new__(InitializingDevice)
+    mower.__dict__.update(
+        info=DreameMowerDeviceInfo({"model": model}),
+        _protocol=SimpleNamespace(cloud=SimpleNamespace(connected=False)),
+        _map_manager=map_manager,
+        _ready=False,
+        available=False,
+        status=SimpleNamespace(
+            running=False, docked=True, started=False, current_map=None,
+        ),
+        capability=SimpleNamespace(),
+    )
+
+    mower._finish_device_initialization(refresh_privacy=False)
+
+    assert mower.available is True
+    assert mower._ready is True
+    map_manager.set_aes_iv.assert_not_called()
+    map_manager.set_update_interval.assert_called_once_with(10)
+
+
+def test_docked_map_state_defers_request_to_maintenance() -> None:
+    """Startup and charging callbacks must not dispatch map RPC synchronously."""
+    protocol = Mock()
+    manager = DreameMapMowerMapManager(protocol)
+    manager.schedule_update = Mock()
+
+    manager.set_device_running(False, True)
+
+    protocol.action.assert_not_called()
+    assert manager._need_map_request is True
+    manager.schedule_update.assert_called_once_with(2)
 
 
 def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
@@ -84,6 +145,10 @@ def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
         _map_manager=None,
         _protocol=SimpleNamespace(dreame_cloud=True),
         _request_properties=Mock(side_effect=readback_error),
+    )
+
+    mower._select_update_properties = lambda: (
+        DreameMowerDevice._select_update_properties(mower)
     )
 
     with pytest.raises(
@@ -135,6 +200,8 @@ def test_disconnect_quiesces_map_before_protocol_teardown() -> None:
     order: list[str] = []
     mower = SimpleNamespace(
         disconnected=False,
+        _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         schedule_update=Mock(side_effect=lambda _wait: order.append("device")),
         _map_manager=SimpleNamespace(
             disconnect=Mock(side_effect=lambda: order.append("map")),
@@ -149,3 +216,89 @@ def test_disconnect_quiesces_map_before_protocol_teardown() -> None:
 
     assert mower.disconnected is True
     assert order == ["device", "map", "protocol", "property"]
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_poll_selection_preserves_settings_and_idle_map_cadence(monkeypatch, running):
+    """Frequent state polls must not repeatedly request settings or idle map lists."""
+    now = 100.0
+    monkeypatch.setattr(device_module.time, "time", lambda: now)
+    mower = SimpleNamespace(
+        capability=SimpleNamespace(backup_map=False, dnd_task=False),
+        status=SimpleNamespace(active=running, running=running),
+        _consumable_change=False,
+        _last_settings_request=90.0,
+        _last_map_list_request=39.0,
+        _map_manager=object(),
+        _read_write_properties=[DreameMowerProperty.VOLUME],
+    )
+
+    first = DreameMowerDevice._select_update_properties(mower)
+    assert DreameMowerProperty.STATE in first
+    assert DreameMowerProperty.VOLUME in first
+    assert DreameMowerProperty.DND in first
+    assert (DreameMowerProperty.CLEANING_TIME in first) is running
+    assert (DreameMowerProperty.MAP_LIST in first) is (not running)
+    assert mower._last_settings_request == 100.0
+    assert mower._last_map_list_request == (39.0 if running else 100.0)
+
+    now = 105.0
+    second = DreameMowerDevice._select_update_properties(mower)
+    assert DreameMowerProperty.STATE in second
+    assert DreameMowerProperty.VOLUME not in second
+    assert DreameMowerProperty.DND not in second
+    assert DreameMowerProperty.MAP_LIST not in second
+    assert mower._last_settings_request == 100.0
+
+
+def test_poll_completion_preserves_new_device_values(monkeypatch):
+    """Unconfirmed writes expire, but newer device values and pending writes survive."""
+    monkeypatch.setattr(device_module.time, "time", lambda: 100.0)
+    observed = []
+    map_manager = Mock()
+    class PollingDevice(DreameMowerDevice):
+        _map_update_interval = 10
+
+    mower = object.__new__(PollingDevice)
+    mower.__dict__.update(
+        _dirty_data={
+            1: DirtyData(value=20, previous_value=10, update_time=80.0),
+            2: DirtyData(value=30, previous_value=15, update_time=80.0),
+            3: DirtyData(value=40, previous_value=25, update_time=99.0),
+        },
+        data={1: 20, 2: 35, 3: 40},
+        _restore_timeout=10,
+        _property_name=str,
+        _property_update_callback={1: [observed.append]},
+        _property_changed=Mock(),
+        schedule_update=Mock(),
+        _dirty_auto_switch_data={},
+        _dirty_ai_data={},
+        _consumable_change=True,
+        _map_manager=map_manager,
+        _map_update_interval=10,
+        status=SimpleNamespace(running=False, docked=True, started=False),
+        _update_running=True,
+    )
+
+    DreameMowerDevice._finish_update(mower)
+
+    assert mower.data == {1: 10, 2: 35, 3: 40}
+    assert set(mower._dirty_data) == {3}
+    assert observed == [10]
+    mower._property_changed.assert_called_once_with()
+    mower.schedule_update.assert_called_once_with(1, True)
+    assert mower._consumable_change is False
+    assert mower._update_running is False
+    map_manager.set_update_interval.assert_called_once_with(10)
+    map_manager.set_device_running.assert_called_once_with(False, True)
+
+
+@pytest.mark.parametrize("connected", [None, False, True])
+def test_cloud_connection_state_is_boolean(connected: bool | None) -> None:
+    """Local-only and disconnected devices expose false rather than null."""
+    mower = object.__new__(DreameMowerDevice)
+    cloud = None if connected is None else SimpleNamespace(connected=connected)
+    mower._protocol = SimpleNamespace(cloud=cloud)
+
+    assert mower.cloud_connected is bool(connected)
