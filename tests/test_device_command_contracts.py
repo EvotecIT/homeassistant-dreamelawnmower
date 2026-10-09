@@ -185,6 +185,116 @@ def test_generic_language_setter_dispatches_the_existing_string_enum(mower, lang
     )
 
 
+@pytest.mark.parametrize("name,value,prop", [
+    ("DND", False, DreameMowerProperty.DND),
+    ("DND_START", "22:00", DreameMowerProperty.DND_START),
+    ("DND_END", "08:00", DreameMowerProperty.DND_END),
+])
+def test_generic_quiet_hours_dispatches_supported_legacy_settings(
+    mower, name, value, prop,
+):
+    mower.capability.dnd = True
+    mower.capability.dnd_task = False
+    mower.data[DreameMowerProperty.DND.value] = 1
+    mower.data[DreameMowerProperty.DND_START.value] = "21:00"
+    mower.data[DreameMowerProperty.DND_END.value] = "07:00"
+    mower._protocol.set_property.return_value = [{"code": 0}]
+
+    assert mower.set_property_value(name, value) is True
+
+    mapping = mower.property_mapping[prop]
+    mower._protocol.set_property.assert_called_once_with(
+        mapping["siid"], mapping["piid"], value,
+    )
+    assert mower.get_property(prop) == value
+
+
+@pytest.mark.parametrize("name,key,value", [
+    ("off_peak_charging_start", "startTime", "22:00"),
+    ("OFF_PEAK_CHARGING_END", "endTime", "08:00"),
+])
+def test_generic_charging_window_dispatches_supported_times(mower, name, key, value):
+    mower.capability.off_peak_charging = True
+    original = {"enable": True, "startTime": "21:00", "endTime": "07:00"}
+    mower.status.off_peak_charging_config = original
+    prop = DreameMowerProperty.OFF_PEAK_CHARGING
+    mower.data[prop.value] = json.dumps(original, separators=(",", ":"))
+    mower._protocol.set_property.return_value = [{"code": 0}]
+
+    assert mower.set_property_value(name, value) is True
+
+    expected = {**original, key: value}
+    payload = json.dumps(expected, separators=(",", ":"))
+    mapping = mower.property_mapping[prop]
+    mower._protocol.set_property.assert_called_once_with(
+        mapping["siid"], mapping["piid"], payload,
+    )
+    assert json.loads(mower.get_property(prop)) == expected
+
+
+@pytest.mark.parametrize("name", ["DND_START", "off_peak_charging_end"])
+@pytest.mark.parametrize("value", ["24:00", "22:99", 1])
+def test_generic_time_setting_rejects_invalid_time_before_transport(mower, name, value):
+    mower.capability.dnd = True
+    mower.capability.dnd_task = False
+    mower.data[DreameMowerProperty.DND.value] = 1
+    mower.data[DreameMowerProperty.DND_START.value] = "21:00"
+    mower.capability.off_peak_charging = True
+    mower.status.off_peak_charging_config = {
+        "enable": True, "startTime": "21:00", "endTime": "07:00",
+    }
+
+    with pytest.raises(InvalidActionException, match="Invalid value"):
+        mower.set_property_value(name, value)
+
+    mower._protocol.set_property.assert_not_called()
+
+
+@pytest.mark.parametrize("name", [
+    "DND_START", "DND_END", "OFF_PEAK_CHARGING_START", "off_peak_charging_end",
+])
+def test_generic_time_setting_rejects_change_when_disabled(mower, name):
+    mower.capability.dnd = True
+    mower.capability.dnd_task = False
+    mower.data[DreameMowerProperty.DND.value] = 0
+    mower.capability.off_peak_charging = True
+    mower.status.off_peak_charging_config = {
+        "enable": False, "startTime": "21:00", "endTime": "07:00",
+    }
+
+    with pytest.raises(InvalidActionException, match="Property unavailable"):
+        mower.set_property_value(name, "22:00")
+
+    mower._protocol.set_property.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["DND_START", "OFF_PEAK_CHARGING_END"])
+def test_generic_time_setting_rejects_disconnected_device(mower, monkeypatch, name):
+    mower.capability.dnd = True
+    mower.data[DreameMowerProperty.DND.value] = 1
+    mower.capability.off_peak_charging = True
+    mower.status.off_peak_charging_config = {
+        "enable": True, "startTime": "21:00", "endTime": "07:00",
+    }
+    monkeypatch.setattr(
+        DreameMowerDevice, "device_connected", property(lambda self: False),
+    )
+
+    with pytest.raises(InvalidActionException, match="Device unavailable"):
+        mower.set_property_value(name, "22:00")
+
+    mower._protocol.set_property.assert_not_called()
+
+
+def test_generic_setting_rejects_read_only_property_without_dedicated_setter(mower):
+    mower.data[DreameMowerProperty.BATTERY_LEVEL.value] = 80
+
+    with pytest.raises(InvalidActionException, match="Invalid property"):
+        mower.set_property_value("battery_level", 1)
+
+    mower._protocol.set_property.assert_not_called()
+
+
 @pytest.mark.parametrize("operation", ["set", "action"])
 def test_generic_dispatch_rejects_noncallable_members(mower, operation):
     with pytest.raises(InvalidActionException):

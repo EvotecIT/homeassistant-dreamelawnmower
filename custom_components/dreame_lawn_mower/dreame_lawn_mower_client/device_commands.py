@@ -232,7 +232,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             prop = prop.upper()
             if prop in DreameMowerProperty.__members__:
                 resolved_prop = DreameMowerProperty[prop]
-                if resolved_prop not in self._read_write_properties:
+                if set_fn is None and resolved_prop not in self._read_write_properties:
                     raise InvalidActionException("Invalid property")
             elif prop in DreameMowerAutoSwitchProperty.__members__:
                 resolved_prop = DreameMowerAutoSwitchProperty[prop]
@@ -250,6 +250,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                     raise InvalidActionException("Invalid property")
 
             prop_name = resolved_prop.name if isinstance(resolved_prop, Enum) else resolved_prop.lower()
+            availability_key = prop_name if prop_name in PROPERTY_AVAILABILITY else prop_name.lower()
 
             if (
                 (
@@ -259,10 +260,22 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                         or resolved_prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE
                     )
                 )
-                and prop_name in PROPERTY_AVAILABILITY
-                and not PROPERTY_AVAILABILITY[prop_name](self)
+                and availability_key in PROPERTY_AVAILABILITY
+                and not PROPERTY_AVAILABILITY[availability_key](self)
             ):
                 raise InvalidActionException("Property unavailable")
+
+            if resolved_prop in (
+                DreameMowerProperty.DND_START, DreameMowerProperty.DND_END,
+                "OFF_PEAK_CHARGING_START", "OFF_PEAK_CHARGING_END",
+            ):
+                if not isinstance(value, str) or re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value) is None:
+                    raise InvalidActionException("Invalid value")
+                if not self.device_connected:
+                    raise InvalidActionException("Device unavailable")
+                if set_fn is None:
+                    raise InvalidActionException("Invalid property")
+                return set_fn(value)
 
             if resolved_prop is DreameMowerProperty.VOICE_ASSISTANT_LANGUAGE:
                 if not isinstance(value, str):
