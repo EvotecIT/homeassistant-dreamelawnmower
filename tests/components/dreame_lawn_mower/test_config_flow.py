@@ -513,14 +513,24 @@ def test_options_flow_replaces_unknown_notification_mode_default() -> None:
     assert validated[CONF_NOTIFICATION_MODE] == DEFAULT_NOTIFICATION_MODE
 
 
-async def test_opt_out_removes_saved_preview_without_loaded_coordinator(hass):
-    from custom_components.dreame_lawn_mower.map_preview import preview_store
+@pytest.mark.parametrize("loaded", [False, True], ids=["unloaded", "loaded"])
+async def test_opt_out_removes_saved_preview(hass, loaded):
+    from custom_components.dreame_lawn_mower.map_preview import (
+        RestartMapPreview,
+        preview_store,
+    )
 
     rotations = {"7": 180}
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={
         "map_restart_preview": True, CONF_MAP_ROTATIONS: rotations,
-    })
+    }, state=(
+        config_entries.ConfigEntryState.LOADED if loaded
+        else config_entries.ConfigEntryState.NOT_LOADED
+    ))
     entry.add_to_hass(hass)
+    if loaded:
+        preview = RestartMapPreview(hass, entry.entry_id)
+        entry.runtime_data = SimpleNamespace(map_restart_preview=preview)
     hass.config.components.add("stream")
     await preview_store(hass, entry.entry_id).async_save({"jpeg": "private-map"})
     initial = await hass.config_entries.options.async_init(entry.entry_id)
@@ -537,6 +547,9 @@ async def test_opt_out_removes_saved_preview_without_loaded_coordinator(hass):
     assert entry.options[CONF_MAP_ROTATION] == 90
     assert entry.options[CONF_MAP_ROTATIONS] == rotations
     assert await preview_store(hass, entry.entry_id).async_load() is None
+    if loaded:
+        await preview.async_save(b"\xff\xd8\xfflate-preview", "test-scope")
+        assert await preview_store(hass, entry.entry_id).async_load() is None
 
 
 async def test_discovery_receives_home_assistant_shared_session(hass, monkeypatch):
