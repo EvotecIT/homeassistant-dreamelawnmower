@@ -28,11 +28,14 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
     CONF_DID,
+    CONF_HOST,
+    CONF_MAC,
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
     CONF_MAP_MOWING_PATH_STYLE,
     CONF_MAP_ROTATION,
+    CONF_MAP_ROTATIONS,
     CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
@@ -41,6 +44,7 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_NOTIFICATION_MODE,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
+    CONF_TOKEN,
     CONF_USERNAME,
     CONF_VIDEO_RETENTION,
     CONF_VIDEO_TRANSPORT,
@@ -512,15 +516,26 @@ def test_options_flow_replaces_unknown_notification_mode_default() -> None:
 async def test_opt_out_removes_saved_preview_without_loaded_coordinator(hass):
     from custom_components.dreame_lawn_mower.map_preview import preview_store
 
-    entry = MockConfigEntry(
-        domain=DOMAIN, data={}, options={"map_restart_preview": True}
-    )
+    rotations = {"7": 180}
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={
+        "map_restart_preview": True, CONF_MAP_ROTATIONS: rotations,
+    })
     entry.add_to_hass(hass)
+    hass.config.components.add("stream")
     await preview_store(hass, entry.entry_id).async_save({"jpeg": "private-map"})
-    flow = DreameLawnMowerOptionsFlow(entry)
-    flow.hass = hass
-    result = await flow.async_step_init({"map_restart_preview": False})
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    assert initial["type"] is FlowResultType.FORM
+    result = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        initial["data_schema"]({
+            "map_restart_preview": False, CONF_MAP_ROTATION: "90",
+        }),
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"]["map_restart_preview"] is False
+    assert entry.options["map_restart_preview"] is False
+    assert entry.options[CONF_MAP_ROTATION] == 90
+    assert entry.options[CONF_MAP_ROTATIONS] == rotations
     assert await preview_store(hass, entry.entry_id).async_load() is None
 
 
@@ -542,9 +557,9 @@ async def test_discovery_receives_home_assistant_shared_session(hass, monkeypatc
 
 
 @pytest.mark.parametrize("source", ["user", "reauth"])
-@pytest.mark.parametrize("authentication", [False, True])
+@pytest.mark.parametrize("failure_kind", ["connection", "authentication", "two-factor"])
 async def test_native_discovery_failure_preserves_saved_entry(
-    hass, monkeypatch, source, authentication,
+    hass, monkeypatch, source, failure_kind,
 ):
     from unittest.mock import AsyncMock
 
@@ -552,14 +567,19 @@ async def test_native_discovery_failure_preserves_saved_entry(
         DreameLawnMowerAuthError,
         DreameLawnMowerClient,
         DreameLawnMowerConnectionError,
+        DreameLawnMowerTwoFactorRequiredError,
     )
 
     hass.config.components.add("stream")
 
-    failure = (
-        DreameLawnMowerAuthError("Cloud authentication failed: HTTP 403")
-        if authentication else DreameLawnMowerConnectionError("Cloud timed out")
-    )
+    failures = {
+        "authentication": DreameLawnMowerAuthError(
+            "Cloud authentication failed: HTTP 403"
+        ),
+        "connection": DreameLawnMowerConnectionError("Cloud timed out"),
+        "two-factor": DreameLawnMowerTwoFactorRequiredError("https://example.invalid/2fa"),
+    }
+    failure = failures[failure_kind]
     discover = AsyncMock(side_effect=failure)
     monkeypatch.setattr(DreameLawnMowerClient, "async_discover_devices", discover)
     original = {
@@ -582,6 +602,91 @@ async def test_native_discovery_failure_preserves_saved_entry(
              CONF_USERNAME: "replacement@example.invalid"},
         )
     assert result["type"] is FlowResultType.FORM
-    expected = "cannot_auth" if authentication else "cannot_connect"
+    expected = {
+        "authentication": "cannot_auth", "connection": "cannot_connect",
+        "two-factor": "2fa_required",
+    }[failure_kind]
     assert result["errors"] == {"base": expected}
     assert entry.data == original
+    reload_entry = AsyncMock(return_value=True)
+    monkeypatch.setattr(hass.config_entries, "async_reload", reload_entry)
+    discover.side_effect = None
+    discover.return_value = [_FakeDevice()]
+    verified = {
+        CONF_USERNAME: "verified@example.invalid", CONF_PASSWORD: "verified",
+        CONF_COUNTRY: "eu",
+    }
+    if source == "user":
+        verified[CONF_ACCOUNT_TYPE] = ACCOUNT_TYPE_DREAME
+    recovered = await hass.config_entries.flow.async_configure(
+        result["flow_id"], verified,
+    )
+    await hass.async_block_till_done()
+    if source == "user":
+        assert recovered["type"] is FlowResultType.CREATE_ENTRY
+        assert recovered["data"][CONF_PASSWORD] == "verified"
+        reload_entry.assert_not_awaited()
+    else:
+        assert recovered["type"] is FlowResultType.ABORT
+        assert recovered["reason"] == "reauth_successful"
+        assert entry.data[CONF_PASSWORD] == "verified"
+        reload_entry.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reauth_recovers_when_original_mower_returns_and_refreshes_only_its_entry(
+    hass, monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from custom_components.dreame_lawn_mower.api import DreameLawnMowerClient
+
+    hass.config.components.add("stream")
+    original = {
+        CONF_ACCOUNT_TYPE: ACCOUNT_TYPE_DREAME, CONF_COUNTRY: "eu",
+        CONF_PASSWORD: "saved", CONF_USERNAME: "saved@example.invalid",
+        CONF_DID: "device-1", CONF_HOST: "old.example.invalid",
+    }
+    entry = MockConfigEntry(domain=DOMAIN, data=original, unique_id="device-1")
+    entry.add_to_hass(hass)
+    other = MockConfigEntry(
+        domain=DOMAIN, data={**original, CONF_DID: "device-2"}, unique_id="device-2",
+    )
+    other.add_to_hass(hass)
+    other_original = dict(other.data)
+    selected = _FakeDevice(name="Updated mower")
+    selected.host, selected.token = "updated.example.invalid", "updated-token"
+    selected.country = "us"
+    discover = AsyncMock(side_effect=[
+        [_FakeDevice(did="device-2")],
+        [_FakeDevice(did="device-2"), selected],
+    ])
+    monkeypatch.setattr(DreameLawnMowerClient, "async_discover_devices", discover)
+    reload_entry = AsyncMock(return_value=True)
+    monkeypatch.setattr(hass.config_entries, "async_reload", reload_entry)
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_REAUTH,
+                         "entry_id": entry.entry_id}, data=original,
+    )
+    credentials = {
+        CONF_USERNAME: "updated@example.invalid", CONF_PASSWORD: "updated",
+        CONF_COUNTRY: "us",
+    }
+    missing = initial
+    assert missing["type"] is FlowResultType.FORM
+    assert missing["errors"] == {"base": "no_devices"}
+    assert entry.data == original
+    reload_entry.assert_not_awaited()
+    result = await hass.config_entries.flow.async_configure(
+        missing["flow_id"], credentials,
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert dict(entry.data) == {
+        **original, **credentials, CONF_HOST: selected.host, CONF_MAC: selected.mac,
+        CONF_MODEL: selected.model, CONF_NAME: selected.name,
+        CONF_TOKEN: selected.token,
+    }
+    assert entry.unique_id == "device-1"
+    assert other.data == other_original
+    reload_entry.assert_awaited_once_with(entry.entry_id)
