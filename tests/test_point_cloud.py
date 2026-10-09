@@ -33,6 +33,26 @@ _internal_point_cloud_module = load_internal_module("point_cloud")
 _internal_protocol_module = load_internal_module("protocol_cloud")
 
 
+@pytest.fixture
+def cpu_plan_driver(monkeypatch):
+    """Exercise public timeout/trace ownership with an explicit CPU-only plan."""
+    native = load_internal_module("client_point_cloud_async")
+    refresh = load_internal_module("client_refresh")
+
+    async def run(client, **options):
+        cancelled = threading.Event()
+        return await refresh._run_state_worker(
+            lambda: client._sync_download_app_map_point_cloud(
+                options["map_index"], options["timeout"], options["poll_interval"],
+                options["download_timeout"], options["max_bytes"], options["deadline"],
+                options["allow_stored"], options["allow_unscoped_stored"],
+            ), cancelled,
+        )
+
+    monkeypatch.setattr(native, "async_generate_point_cloud", run)
+    return run
+
+
 def _binary_pcd(*points: tuple[float, float, float, int]) -> bytes:
     header = (
         "# .PCD v0.7\n"
@@ -3743,6 +3763,7 @@ def test_deadline_slot_is_released_when_worker_thread_cannot_start(
     )
 
 
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_point_cloud_generation_deadline_includes_executor_queue_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3787,6 +3808,7 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
     asyncio.run(run())
 
 
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_async_point_cloud_normalizes_requests_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3813,51 +3835,6 @@ def test_async_point_cloud_normalizes_requests_timeout(
     asyncio.run(run())
 
 
-def test_public_point_cloud_generation_remains_singleflight_after_cancel() -> None:
-    client = _client()
-    started = threading.Event()
-    release = threading.Event()
-    calls: list[int] = []
-
-    def download(
-        map_index: int,
-        *args: Any,
-        **kwargs: Any,
-    ) -> SimpleNamespace:
-        del args, kwargs
-        calls.append(map_index)
-        if len(calls) == 1:
-            started.set()
-            assert release.wait(2)
-        return SimpleNamespace(content=b"pcd")
-
-    client._sync_download_app_map_point_cloud = download
-
-    async def run() -> None:
-        first = asyncio.create_task(
-            client.async_download_app_map_point_cloud(map_index=0)
-        )
-        assert await asyncio.to_thread(started.wait, 1)
-        first.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await first
-
-        with pytest.raises(DreameLawnMowerPointCloudError) as concurrent:
-            await client.async_download_app_map_point_cloud(map_index=1)
-        assert concurrent.value.code == "point_cloud_generation_in_progress"
-        assert concurrent.value.stage == "queue"
-
-        release.set()
-        while client._point_cloud_generation_lock.locked():
-            await asyncio.sleep(0)
-        result = await client.async_download_app_map_point_cloud(map_index=1)
-        assert result.content == b"pcd"
-
-    asyncio.run(run())
-
-    assert calls == [0, 1]
-
-
 @pytest.mark.parametrize(
     ("allow_stored", "expected_operation_timeout"),
     [(False, 52.0), (True, 62.0)],
@@ -3870,15 +3847,14 @@ def test_point_cloud_preflight_has_a_separate_time_budget(
     client = _client()
     captured: dict[str, Any] = {}
 
-    async def capture_to_thread(function: Any, *args: Any) -> Any:
-        captured["function"] = function
-        captured["args"] = args
+    async def capture_download(client: Any, **options: Any) -> Any:
+        captured.update(options)
         return SimpleNamespace(content=b"pcd")
 
     monkeypatch.setattr(
-        _internal_client_facade_module.asyncio,
-        "to_thread",
-        capture_to_thread,
+        load_internal_module("client_point_cloud_async"),
+        "async_generate_point_cloud",
+        capture_download,
     )
 
     async def run() -> None:
@@ -3891,17 +3867,12 @@ def test_point_cloud_preflight_has_a_separate_time_budget(
     started = time.monotonic()
     asyncio.run(run())
 
-    assert (
-        captured["function"]
-        == client._sync_download_app_map_point_cloud_singleflight
-    )
-    assert captured["args"][-3] is allow_stored
-    assert captured["args"][-2] is allow_stored
-    assert captured["args"][-4] - started == pytest.approx(
+    assert captured["allow_stored"] is allow_stored
+    assert captured["allow_unscoped_stored"] is allow_stored
+    assert captured["deadline"] - started == pytest.approx(
         expected_operation_timeout,
         abs=0.25,
     )
-    assert isinstance(captured["args"][-1], threading.Event)
 
 
 def test_stored_point_cloud_fallback_receives_full_generation_window(
@@ -4556,3 +4527,99 @@ def test_download_point_cloud_classifies_invalid_request_values(
     assert captured.value.code == "point_cloud_invalid_request"
     assert captured.value.stage == "request"
     assert captured.value.retryable is False
+
+
+@pytest.mark.parametrize("cancel_request", [False, True])
+@pytest.mark.parametrize("worker_fails", [False, True])
+@pytest.mark.usefixtures("cpu_plan_driver")
+def test_point_cloud_shutdown_drains_started_worker(
+    cancel_request: bool, worker_fails: bool,
+) -> None:
+    client = _client()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def download(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        started.set()
+        assert release.wait(3)
+        finished.set()
+        if worker_fails:
+            raise RuntimeError("worker failed after cancellation")
+        return SimpleNamespace(content=b"pcd")
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        request = asyncio.create_task(client.async_download_app_map_point_cloud())
+        assert await asyncio.to_thread(started.wait, 1)
+        if cancel_request:
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+        closing = asyncio.create_task(client.async_close())
+        try:
+            await asyncio.sleep(0.02)
+            assert not closing.done(), "Shutdown returned before the worker finished"
+        finally:
+            release.set()
+            await closing
+            await asyncio.gather(request, return_exceptions=True)
+        assert finished.is_set()
+        assert not client._cloud_read_tasks
+
+    asyncio.run(run())
+
+
+@pytest.mark.usefixtures("cpu_plan_driver")
+def test_point_cloud_request_after_close_does_not_start_worker() -> None:
+    client = _client()
+    calls: list[bool] = []
+
+    def download(*args: Any, **kwargs: Any) -> None:
+        calls.append(True)
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        await client.async_close()
+        with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+            await client.async_download_app_map_point_cloud()
+        assert captured.value.code == "point_cloud_failed"
+        assert not calls
+        assert not client._cloud_read_tasks
+
+    asyncio.run(run())
+
+
+@pytest.mark.usefixtures("cpu_plan_driver")
+def test_point_cloud_shutdown_cancels_queued_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[bool] = []
+
+    def download(*args: Any, **kwargs: Any) -> None:
+        calls.append(True)
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        queued = asyncio.Event()
+
+        async def wait_in_queue(function: Any, *args: Any) -> None:
+            queued.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            _internal_client_facade_module.asyncio, "to_thread", wait_in_queue,
+        )
+        request = asyncio.create_task(client.async_download_app_map_point_cloud())
+        await queued.wait()
+        await asyncio.wait_for(client.async_close(), 1)
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert not calls
+        assert not client._cloud_read_tasks
+
+    asyncio.run(run())

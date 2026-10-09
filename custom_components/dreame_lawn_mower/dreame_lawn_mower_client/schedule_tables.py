@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .exceptions import DreameLawnMowerConnectionError
 from .schedule import SCHEDULE_TASK_TYPE_NAMES, SCHEDULE_WEEKDAY_NAMES, minute_text
 
 SCHEDULE_TABLE_SLOTS = 2
@@ -124,7 +125,7 @@ def decode_schedule_table_task(
 
 
 def combine_schedule_table_weeks(
-    tasks: list[list[Mapping[str, Any]]],
+    tasks: Sequence[Sequence[Mapping[str, Any]]],
 ) -> list[dict[str, Any]]:
     """Combine task reads into the existing calendar's per-weekday structure."""
     weeks: dict[int, dict[str, Any]] = {}
@@ -156,3 +157,16 @@ def _flag(value: Any, field: str) -> bool:
     if parsed not in (0, 1):
         raise ValueError(f"Schedule {field} must be 0 or 1.")
     return parsed == 1
+
+
+def schedule_table_data(response: Any) -> Any:
+    """Require an explicit success code; a failure value is not an empty list."""
+    if (
+        not isinstance(response, Mapping)
+        or response.get("r") != 0
+        or isinstance(response.get("r"), bool)
+    ):
+        raise DreameLawnMowerConnectionError(
+            "Schedule table read was not acknowledged."
+        )
+    return response.get("d")

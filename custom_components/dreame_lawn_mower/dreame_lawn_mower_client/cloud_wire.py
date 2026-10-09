@@ -1,0 +1,151 @@
+"""Shared Dreame/MOVA authentication and HTTP request formatting."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import zlib
+from collections.abc import Sequence
+from typing import Any, Literal
+
+from .const import DREAME_STRINGS, MOVA_STRINGS
+from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
+
+DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
+DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
+FIRMWARE_APPROVAL_PATH = "/dreame-user-iot/iotuserbind/manualFirmwareUpdate"
+APP_PLUGIN_PATH = "/dreame-product/upgrades/appplugin"
+type DeviceMetadataKind = Literal["features", "otc", "firmware"]
+DEVICE_METADATA_PATHS: dict[DeviceMetadataKind, str] = {
+    "features": "/dreame-user-iot/iotuserbind/queryDevicePermit",
+    "otc": "/dreame-user-iot/iotstatus/devOTCInfo",
+    "firmware": "/dreame-user-iot/iotuserbind/checkDeviceVersion",
+}
+
+
+def cloud_plugin_params(
+    model: str | None, app_version_code: int, os: int,
+) -> dict[str, str | int]:
+    """Encode the app plugin query without serializing absent model values."""
+    params: dict[str, str | int] = {"appVer": app_version_code, "os": os}
+    if model:
+        params["model"] = model
+    return params
+
+
+def cloud_rpc_path(strings: Sequence[str], host: str | None) -> str:
+    """Route a device RPC through its vendor-assigned host prefix."""
+    suffix = f"-{host.split('.')[0]}" if host else ""
+    return f"{strings[37]}{suffix}/{strings[27]}/{strings[38]}"
+
+
+def cloud_rpc_params(
+    did: str | None, request_id: int, method: str, parameters: object,
+) -> dict[str, object]:
+    """Preserve matching outer and inner identities in the device RPC envelope."""
+    return {
+        "did": str(did), "id": request_id,
+        "data": {
+            "did": str(did), "id": request_id,
+            "method": method, "params": parameters,
+        },
+    }
+
+
+def cloud_batch_data_params(
+    strings: Sequence[str], did: str | None, properties: Sequence[str],
+) -> dict[str, object]:
+    """Preserve the vendor's batch-property field and device identity."""
+    return {"did": did, strings[35]: list(properties)}
+
+
+def cloud_properties_params(did: str | None, keys: str) -> dict[str, str]:
+    """Share device identity and normalized keys between both transports."""
+    return {"did": str(did), "keys": keys}
+
+
+def cloud_device_info_data(did: str | None, language: str | None) -> str:
+    """Encode device identity and optional language for both cloud transports."""
+    params = {"did": did}
+    if language:
+        params["lang"] = language
+    return json.dumps(params, separators=(",", ":"))
+
+
+def cloud_device_list_data(
+    current: int,
+    size: int,
+    language: str | None,
+    master: bool | None,
+    shared_status: int | None,
+) -> str:
+    """Encode account-page filters for both cloud transports."""
+    params: dict[str, int | str | bool] = {"current": current, "size": size}
+    if language:
+        params["lang"] = language
+    if master is not None:
+        params["master"] = master
+    if shared_status is not None:
+        params["sharedStatus"] = shared_status
+    return json.dumps(params, separators=(",", ":"))
+
+
+def cloud_strings(account_type: str) -> tuple[str, ...]:
+    """Decode the existing account-specific protocol constants."""
+    if account_type not in {"dreame", "mova"}:
+        raise DreameLawnMowerAuthError(f"Unsupported account type: {account_type}")
+    encoded = DREAME_STRINGS if account_type == "dreame" else MOVA_STRINGS
+    values = json.loads(zlib.decompress(base64.b64decode(encoded), zlib.MAX_WBITS | 32))
+    if not isinstance(values, list) or not all(
+        isinstance(item, str) for item in values
+    ):
+        raise ValueError("Invalid cloud protocol constants")
+    return tuple(values)
+
+
+def cloud_headers(
+    strings: Sequence[str],
+    country: str | None,
+    tenant: str | None,
+) -> dict[str, str]:
+    """Format shared headers without retaining account credentials."""
+    headers = {
+        "Accept": "*/*",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept-Language": "en-US;q=0.8",
+        "Accept-Encoding": "gzip, deflate",
+        strings[47]: strings[3],
+        strings[49]: strings[5],
+        strings[50]: tenant or strings[6],
+    }
+    if country == "cn":
+        headers[strings[48]] = strings[4]
+    return headers
+
+
+def cloud_login_data(
+    strings: Sequence[str],
+    username: str | None,
+    password: str | None,
+    refresh_token: str | None,
+) -> str:
+    """Preserve the vendor's credential and refresh-token wire encoding."""
+    if refresh_token:
+        return f"{strings[12]}{strings[13]}{refresh_token}"
+    if username is None or password is None:
+        raise ValueError("Cloud login credentials are missing")
+    digest = hashlib.md5((password + strings[2]).encode("utf-8")).hexdigest()
+    return f"{strings[12]}{strings[14]}{username}{strings[15]}{digest}{strings[16]}"
+
+
+def cloud_device_list_page(result: Any) -> dict[str, Any] | None:
+    """Decode a device page identically for synchronous and async transports."""
+    if result is None:
+        return None
+    if not isinstance(result, dict):
+        raise DreameLawnMowerConnectionError("Cloud device page is invalid")
+    page = result.get("page", result)
+    if not isinstance(page, dict):
+        raise DreameLawnMowerConnectionError("Cloud device page is invalid")
+    return page

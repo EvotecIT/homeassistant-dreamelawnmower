@@ -22,6 +22,45 @@ Then import the public package:
 from dreame_lawn_mower_client import DreameLawnMowerClient
 ```
 
+## HTTP Sessions
+
+Account discovery uses native async HTTP through aiohttp. Supply an existing
+session with `DreameLawnMowerClient.async_discover_devices(..., session=session)`
+to share its connection pool. The caller owns that session; discovery never
+closes it. Supply a session without `base_url` or a default `Authorization`
+header; incompatible sessions raise `ValueError` before any request. Discovery
+sets vendor authentication per request, overriding a session's default `auth`
+without changing the borrowed session. It also controls status handling and
+decompression so authentication failures and decoded response limits remain
+consistent.
+
+When the session is omitted, discovery opens and closes a temporary session
+that honors environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`).
+Borrowed sessions retain their own proxy policy. Environment credentials cannot
+override vendor authentication.
+
+Home Assistant supplies its shared session during setup and credential repair.
+Login and inventory responses have a one MiB decoded-body limit, a total
+operation deadline, cancellation cleanup, and no automatic redirect following.
+Only read-only inventory requests retry transport failures.
+
+The client constructor accepts `session=session` for native account reads,
+device polling, supported mower commands, schedules, maps and camera discovery.
+Without an injected session, the first native operation opens a reusable session.
+Home Assistant lends its shared session to each client. Existing payload builders,
+authentication rules, command confirmation and device routing remain shared with
+the synchronous protocol owner.
+
+Always call `await client.async_close()` when finished. Closing cancels outstanding
+native operations, drains started HTTP and state work, and closes only a session
+the client created. Borrowed sessions remain open; a closed client rejects further
+operations. Page filters and pagination retain the synchronous wire format, while
+malformed pages and rejected requests raise `DreameLawnMowerConnectionError`.
+
+MQTT external-loop delivery, remaining native map callbacks, managed video assets
+and signed Tencent configuration requests have separate follow-up owners. Native
+HTTP alone does not establish complete async or hardware qualification.
+
 ## Minimal Example
 
 Credentials should come from environment variables or another secret store. Do

@@ -84,7 +84,7 @@ class DreameLawnMowerNotificationManager:
             self._dismiss(kind, force=True)
 
     def _mode(self) -> str:
-        mode = self._coordinator.entry.options.get(
+        mode: str = self._coordinator.entry.options.get(
             CONF_NOTIFICATION_MODE,
             DEFAULT_NOTIFICATION_MODE,
         )

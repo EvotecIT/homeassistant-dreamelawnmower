@@ -14,10 +14,17 @@ _CONTENT_RANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+)")
 
 
 class _HttpResponse(Protocol):
-    status_code: int
-    content: bytes
-    headers: Mapping[str, str]
-    url: str
+    @property
+    def status_code(self) -> int: ...
+
+    @property
+    def content(self) -> bytes: ...
+
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+    @property
+    def url(self) -> str: ...
 
 
 class _HttpClient(Protocol):

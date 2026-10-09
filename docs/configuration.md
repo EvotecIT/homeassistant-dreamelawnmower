@@ -15,6 +15,24 @@ account can see the mower in the app.
 Credentials belong in the Home Assistant setup flow, never in repository files,
 automation YAML, or issue attachments.
 
+## Update login details or region
+
+Open **Settings → Devices & services → Dreame Lawn Mower**, open the configured
+mower entry's menu, and select **Reconfigure**. Enter the username, password,
+and region used in the Dreamehome or MOVAhome app. The saved password is not
+prefilled; the account type stays the same.
+
+The integration checks that the account still contains the configured mower
+before saving the new connection settings and reloading the entry. The entry,
+device and entity IDs, custom entry title, and integration options are kept,
+so existing dashboards and automations keep their references.
+
+If login fails, the cloud cannot be reached, or the original mower is missing,
+the saved settings remain unchanged. Complete any two-factor challenge in the
+vendor app or website, then retry. To add a different mower, use **Add
+integration** instead. Home Assistant also opens the credential-repair flow
+when authentication expires.
+
 ## Find the everyday controls
 
 Open the mower's device page to see the `lawn_mower` entity and supported

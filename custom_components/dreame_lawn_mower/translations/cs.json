@@ -35,6 +35,15 @@
           "password": "Heslo",
           "country": "Oblast"
         }
+      },
+      "reconfigure": {
+        "title": "Změnit připojení sekačky",
+        "description": "Aktualizujte přihlašovací údaje nebo region této sekačky. Účet musí stále obsahovat nastavenou sekačku; její záznam a entity v Home Assistant zůstanou zachovány.",
+        "data": {
+          "username": "Uživatelské jméno",
+          "password": "Heslo",
+          "country": "Oblast"
+        }
       }
     },
     "error": {
@@ -46,6 +55,9 @@
       "no_devices": "Pro tento účet nebyly nalezeny žádné podporované robotické sekačky. Zkontrolujte, zda vybraná oblast a typ účtu odpovídají aplikaci výrobce."
     },
     "abort": {
+      "wrong_device": "Nalezená sekačka neodpovídá tomuto záznamu. Nastavení připojení nebylo změněno.",
+      "reauth_successful": "Přihlašovací údaje sekačky byly aktualizovány.",
+      "reconfigure_successful": "Připojení sekačky bylo aktualizováno.",
       "already_configured": "Všechny podporované sekačky tohoto účtu jsou již nakonfigurovány."
     }
   },
@@ -195,6 +207,20 @@
           "repositioning": "Opětovné určení polohy"
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Položka sekačky Dreame s identifikátorem {entry_id} nebyla nalezena."
+    },
+    "entry_not_loaded": {
+      "message": "Položka sekačky Dreame {entry_id} není načtena."
+    },
+    "no_loaded_entries": {
+      "message": "Žádná položka sekačky Dreame není načtena."
+    },
+    "entry_id_required": {
+      "message": "Je načteno více položek sekaček Dreame; zadejte entry_id."
     }
   }
 }

@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorStateClass,
+    SensorEntityDescription,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .control_options import (  # noqa: F401
     MOWING_ACTION_EDGE,
     MOWING_ACTION_SPOT,
@@ -34,10 +31,8 @@ from .control_options import (  # noqa: F401
 from .control_options import (
     current_map_index as selected_current_map_index,  # noqa: F401
 )
-from .coordinator import (
-    DreameLawnMowerCoordinator,
-    runtime_tracking_active,  # noqa: F401
-)
+from .coordinator import DreameLawnMowerCoordinator
+from .coordinator_refresh import runtime_tracking_active as runtime_tracking_active
 from .dreame_lawn_mower_client.const import STATE_CODE_TO_STATE
 from .dreame_lawn_mower_client.maintenance import (  # noqa: F401
     MAINTENANCE_ITEMS,
@@ -51,6 +46,7 @@ from .manual_control import remote_control_block_reason
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache as DreameLawnMowerRuntimeTelemetryCache,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .sensor_compatibility import DreameLawnMowerCompatibilitySensor
 from .sensor_conditions import DreameLawnMowerConditionSensor
 
@@ -224,28 +220,15 @@ from .task_status_probe import (  # noqa: F401
     task_status_probe_state,
 )
 
+# Coordinator state is shared; entities do not poll the device independently.
+PARALLEL_UPDATES = 0
 
-@dataclass(frozen=True, slots=True)
-class DreameSensorDescription:
-    key: str
-    name: str
+
+@dataclass(frozen=True, kw_only=True)
+class DreameSensorDescription(SensorEntityDescription):
+    name: str = field()
     value_fn: Callable[[Any], Any]
     exists_fn: Callable[[Any], bool] = lambda _: True
-    entity_registry_enabled_default: bool = True
-    entity_registry_visible_default: bool = True
-    translation_key: str | None = None
-    translation_placeholders: dict[str, str] | None = None
-    force_update: bool = False
-    device_class: SensorDeviceClass | None = None
-    unit_of_measurement: str | None = None
-    native_unit_of_measurement: str | None = None
-    suggested_unit_of_measurement: str | None = None
-    suggested_display_precision: int | None = None
-    state_class: SensorStateClass | str | None = None
-    last_reset: datetime | None = None
-    options: list[str] | None = None
-    icon: str | None = None
-    entity_category: EntityCategory | None = None
 
 
 def _raw_attribute(snapshot: Any, key: str) -> Any:
@@ -444,11 +427,11 @@ _SPECIALIZED_SENSOR_KEYS = frozenset({"current_cleaned_area", "current_zone"})
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower sensors."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerSensor(coordinator, description)
@@ -547,6 +530,8 @@ async def async_setup_entry(
 class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
     """Simple coordinator-backed mower sensor."""
 
+    entity_description: DreameSensorDescription
+
     def __init__(
         self,
         coordinator: DreameLawnMowerCoordinator,
@@ -555,11 +540,10 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{self._descriptor.unique_id}_{description.key}"
-        self._attr_name = description.name
         self._attr_device_class = description.device_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_translation_key = description.translation_key
-        self._attr_translation_placeholders = description.translation_placeholders
+        self._attr_translation_placeholders = description.translation_placeholders or {}
         self._attr_options = description.options
         self._attr_icon = description.icon
         self._attr_entity_category = description.entity_category

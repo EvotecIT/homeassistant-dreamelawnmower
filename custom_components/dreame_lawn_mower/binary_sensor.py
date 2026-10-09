@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
+    BinarySensorEntityDescription,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -20,37 +20,32 @@ from .const import (
     ACTIVITY_MOWING,
     ACTIVITY_PAUSED,
     ACTIVITY_RETURNING,
-    DOMAIN,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.maintenance import maintenance_status_attributes
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
-from .sensor import (
-    _current_vector_map_summary,
+from .runtime_data import DreameLawnMowerConfigEntry
+from .sensor_diagnostics import (
     batch_ota_attributes,
-    current_vector_map_attributes,
     weather_probe_result_attributes,
 )
+from .sensor_map_data import (
+    _current_vector_map_summary,
+    current_vector_map_attributes,
+)
+
+# Coordinator state is shared; entities do not poll the device independently.
+PARALLEL_UPDATES = 0
 
 
-@dataclass(frozen=True, slots=True)
-class DreameBinarySensorDescription:
-    """Simple metadata for a mower binary sensor."""
+@dataclass(frozen=True, kw_only=True)
+class DreameBinarySensorDescription(BinarySensorEntityDescription):
+    """Metadata and value callbacks for a mower binary sensor."""
 
-    key: str
-    name: str
+    name: str = field()
     value_fn: Callable[[Any], bool | None]
     exists_fn: Callable[[Any], bool] = lambda _: True
-    entity_registry_enabled_default: bool = True
-    entity_registry_visible_default: bool = True
-    translation_key: str | None = None
-    translation_placeholders: dict[str, str] | None = None
-    force_update: bool = False
-    device_class: BinarySensorDeviceClass | None = None
-    unit_of_measurement: str | None = None
-    icon: str | None = None
-    entity_category: EntityCategory | None = None
 
 
 def _raw_flag(snapshot: Any, key: str) -> bool | None:
@@ -265,11 +260,11 @@ BINARY_SENSORS = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower binary sensors."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerBinarySensor(coordinator, description)
@@ -288,6 +283,8 @@ async def async_setup_entry(
 
 class DreameLawnMowerBinarySensor(DreameLawnMowerEntity, BinarySensorEntity):
     """Coordinator-backed binary sensor."""
+
+    entity_description: DreameBinarySensorDescription
 
     def __init__(
         self,

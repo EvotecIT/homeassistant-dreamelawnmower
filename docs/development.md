@@ -22,6 +22,19 @@ small and the reverse-engineering notes in docs or ignored local captures.
 - `docs`
   User guides, open development work, and protocol research.
 
+## Integration Runtime Ownership
+
+Each configured mower owns its coordinator in typed `ConfigEntry.runtime_data`.
+Platforms and diagnostics use that entry directly. Shared map APIs and actions
+resolve runtime data through `runtime_data.py`, which rejects entries belonging
+to another integration.
+
+Setup assigns the coordinator after the first refresh. A setup failure clears
+that assignment and shuts down the coordinator. A failed platform unload retains
+ownership; successful unloading removes API access, purges per-entry map caches,
+and shuts down the coordinator. Integration-wide API instances and the action
+registration marker remain in `hass.data`.
+
 ## Client Package Layout
 
 This repo follows the same shape as the sister Home Assistant repositories:
@@ -64,8 +77,20 @@ Run the main local checks:
 
 ```bash
 python -m compileall dreame_lawn_mower_client custom_components tests examples
+python -m mypy --strict custom_components/dreame_lawn_mower
 pytest
 ```
+
+Strict typing covers the integration and its bundled client. The test extra
+installs the pinned checker; HACS and normal client installation do not require
+it. CI runs the same command in each supported Home Assistant test lane.
+
+The minimum HA lane uses Requests 2.32 and Paho MQTT 1.6 without type markers.
+`pyproject.toml` limits missing-type exemptions to their named import modules;
+typed installations remain checked. Requests exception definitions are inferred
+separately. No integration or bundled-client module is excluded from strict
+checking. The two inline exceptions identify Home Assistant's unannotated
+storage callback and the native QuickJS import, which supplies no type stubs.
 
 The Home Assistant config-flow tests may require a fuller HA test environment.
 When using the lighter local setup, the common broad suite is:

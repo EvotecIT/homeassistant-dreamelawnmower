@@ -6,6 +6,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
     DreameMowerDeviceStatus,
@@ -34,9 +37,11 @@ def _device(model="mova.mower.g2529b", state=DreameMowerState.MOWING):
     device.realtime_properties = {}
     device.last_realtime_message = None
     device._state_lock = RLock()
+    device._plan_cleanup = device_plan_cleanup._DevicePlanCleanup()
     device._dirty_data = {}
     device._property_update_callback = {}
     device._ready = True
+    device._native_message_receiver = None
     device._last_change = 0
     device._default_properties = [DreameMowerProperty.ERROR, DreameMowerProperty.STATE]
     device._map_manager = None

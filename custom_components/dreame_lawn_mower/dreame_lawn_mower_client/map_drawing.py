@@ -8,11 +8,17 @@ from math import hypot
 
 from PIL import Image, ImageDraw
 
+from .map_types import MapImageDimensions, Wall
 from .map_visuals import MapRenderStyle, line_width, map_render_style
 
 
 def render_legacy_navigation_paths(
-    paths, color, layer_size, dimensions, stroke_scale, scale
+    paths: Sequence[Wall],
+    color: tuple[int, int, int, int],
+    layer_size: tuple[int, int],
+    dimensions: MapImageDimensions,
+    stroke_scale: float,
+    scale: float,
 ) -> Image.Image:
     """Adapt legacy line records to the shared road painter in output pixels."""
     image = Image.new("RGBA", layer_size, (0, 0, 0, 0))
@@ -70,7 +76,7 @@ def draw_lawn_polygon(
 
 def draw_navigation_path(
     image: Image.Image,
-    points: Sequence[tuple[int, int]],
+    points: Sequence[tuple[float, float]],
     style: MapRenderStyle,
 ) -> None:
     """Draw a schematic road, not a measured corridor or a cut-coverage mask.

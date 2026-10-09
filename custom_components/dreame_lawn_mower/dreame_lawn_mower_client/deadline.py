@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Callable
 from typing import Any
+from typing import cast as _cast
 
 _MAX_ABANDONED_OPERATIONS = 4
 _operation_slots = threading.BoundedSemaphore(_MAX_ABANDONED_OPERATIONS)
@@ -93,4 +94,6 @@ def run_with_deadline[ResultT](
         error = state.get("error")
         if error is not None:
             raise error
-        return state["value"]
+        # Only operation() publishes this value; completion and the lock protect
+        # the handoff, so the dynamic state retains the operation's result type.
+        return _cast(ResultT, state["value"])

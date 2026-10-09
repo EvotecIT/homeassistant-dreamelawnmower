@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
+import json
+import math
 import time
 import uuid
 from collections.abc import Mapping
@@ -12,8 +15,11 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import requests
+from aiohttp import ClientError, ClientSession, ClientTimeout, DummyCookieJar
 
+from .http_response import HttpResponseError, async_read_bounded_response
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
+from .public_download import _environment_proxy
 
 TENCENT_XP2P_APP_API = "https://iot.cloud.tencent.com/api/exploreropen/appapi"
 TENCENT_XP2P_CONFIG_ACTION = "AppDescribeConfigureDeviceP2P"
@@ -76,32 +82,7 @@ def fetch_xp2p_device_config(
     request_id: str | None = None,
 ) -> DreameLawnMowerXp2pDeviceConfig:
     """Reproduce the app's signed read-only device-config request."""
-    missing = [
-        name
-        for name in ("app_id", "app_secret", "product_id", "device_name")
-        if not getattr(inputs, name)
-    ]
-    if missing:
-        raise DreameLawnMowerXp2pConfigError(
-            "Cannot fetch XP2P device configuration; missing "
-            + ", ".join(missing)
-            + "."
-        )
-
-    now_milliseconds = int(time.time() * 1000)
-    parameters: dict[str, Any] = {
-        "Action": TENCENT_XP2P_CONFIG_ACTION,
-        "Timestamp": int(timestamp if timestamp is not None else time.time()),
-        "Nonce": int(nonce if nonce is not None else now_milliseconds),
-        "AppKey": inputs.app_id,
-        "ProductId": inputs.product_id,
-        "DeviceName": inputs.device_name,
-        "RequestId": request_id or str(uuid.uuid4()),
-    }
-    parameters["Signature"] = sign_xp2p_app_request(
-        parameters,
-        str(inputs.app_secret),
-    )
+    parameters = _request_parameters(inputs, timestamp, nonce, request_id)
     http_client = client or requests
     try:
         response = http_client.post(
@@ -124,23 +105,7 @@ def fetch_xp2p_device_config(
         raise DreameLawnMowerXp2pConfigError(
             "Tencent XP2P device-configuration response was not JSON."
         ) from err
-    if not isinstance(payload, Mapping):
-        raise DreameLawnMowerXp2pConfigError(
-            "Tencent XP2P device-configuration response was malformed."
-        )
-    code = _as_int(payload.get("code"))
-    if code != 0:
-        raise DreameLawnMowerXp2pConfigError(
-            "Tencent XP2P device-configuration request was rejected"
-            + (f" with code {code}." if code is not None else ".")
-        )
-    data = payload.get("data")
-    config = data.get("Config") if isinstance(data, Mapping) else None
-    if not isinstance(config, Mapping):
-        raise DreameLawnMowerXp2pConfigError(
-            "Tencent XP2P device-configuration response omitted Config."
-        )
-    return normalize_xp2p_device_config(config)
+    return _parse_config(payload)
 
 
 def resolve_xp2p_device_config(
@@ -208,3 +173,135 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _request_parameters(
+    inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    timestamp: int | None,
+    nonce: int | None,
+    request_id: str | None,
+) -> dict[str, Any]:
+    missing = [
+        name
+        for name in ("app_id", "app_secret", "product_id", "device_name")
+        if not getattr(inputs, name)
+    ]
+    if missing:
+        raise DreameLawnMowerXp2pConfigError(
+            "Cannot fetch XP2P device configuration; missing "
+            + ", ".join(missing)
+            + "."
+        )
+
+    now_milliseconds = int(time.time() * 1000)
+    parameters: dict[str, Any] = {
+        "Action": TENCENT_XP2P_CONFIG_ACTION,
+        "Timestamp": int(timestamp if timestamp is not None else time.time()),
+        "Nonce": int(nonce if nonce is not None else now_milliseconds),
+        "AppKey": inputs.app_id,
+        "ProductId": inputs.product_id,
+        "DeviceName": inputs.device_name,
+        "RequestId": request_id or str(uuid.uuid4()),
+    }
+    parameters["Signature"] = sign_xp2p_app_request(
+        parameters,
+        str(inputs.app_secret),
+    )
+    return parameters
+
+
+def _parse_config(payload: Any) -> DreameLawnMowerXp2pDeviceConfig:
+    if not isinstance(payload, Mapping):
+        raise DreameLawnMowerXp2pConfigError(
+            "Tencent XP2P device-configuration response was malformed."
+        )
+    code = _as_int(payload.get("code"))
+    if code != 0:
+        raise DreameLawnMowerXp2pConfigError(
+            "Tencent XP2P device-configuration request was rejected"
+            + (f" with code {code}." if code is not None else ".")
+        )
+    data = payload.get("data")
+    config = data.get("Config") if isinstance(data, Mapping) else None
+    if not isinstance(config, Mapping):
+        raise DreameLawnMowerXp2pConfigError(
+            "Tencent XP2P device-configuration response omitted Config."
+        )
+    return normalize_xp2p_device_config(config)
+
+
+async def async_fetch_xp2p_device_config(
+    inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    *,
+    session: ClientSession,
+    timeout: float = 10.0,
+    timestamp: int | None = None,
+    nonce: int | None = None,
+    request_id: str | None = None,
+) -> DreameLawnMowerXp2pDeviceConfig:
+    """Fetch signed configuration using the caller's borrowed connection pool.
+
+    Isolate Tencent request metadata from the caller's default credentials and
+    cookies. Closing this request session never closes the borrowed connector.
+    """
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("XP2P timeout must be finite and positive.")
+    parameters = _request_parameters(inputs, timestamp, nonce, request_id)
+    if session.closed or session.connector is None:
+        raise DreameLawnMowerXp2pConfigError("XP2P HTTP session is closed.")
+    try:
+        async with asyncio.timeout(timeout), ClientSession(
+            connector=session.connector,
+            connector_owner=False,
+            cookie_jar=DummyCookieJar(),
+            timeout=ClientTimeout(total=timeout),
+        ) as request_session:
+            proxy, proxy_auth = (
+                await asyncio.to_thread(_environment_proxy, TENCENT_XP2P_APP_API)
+                if session.trust_env
+                else (None, None)
+            )
+            async with request_session.post(
+                TENCENT_XP2P_APP_API,
+                json=parameters,
+                proxy=proxy,
+                proxy_auth=proxy_auth,
+                allow_redirects=False,
+                auto_decompress=False,
+                headers={"Accept-Encoding": "gzip, deflate"},
+            ) as response:
+                if response.status != 200:
+                    raise DreameLawnMowerXp2pConfigError(
+                        "Tencent XP2P device-configuration request returned HTTP "
+                        f"{response.status}."
+                    )
+                body = await async_read_bounded_response(
+                    response, max_bytes=1024 * 1024,
+                )
+        payload = json.loads(body)
+    except (ClientError, TimeoutError, HttpResponseError) as err:
+        raise DreameLawnMowerXp2pConfigError(
+            "Tencent XP2P device-configuration request failed."
+        ) from err
+    except (ValueError, UnicodeError) as err:
+        raise DreameLawnMowerXp2pConfigError(
+            "Tencent XP2P device-configuration response was not JSON."
+        ) from err
+    return _parse_config(payload)
+
+
+async def async_resolve_xp2p_device_config(
+    inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    *,
+    session: ClientSession,
+    timeout: float = 10.0,
+) -> DreameLawnMowerXp2pDeviceConfig:
+    """Keep SDK fallback behavior while allowing request cancellation to escape."""
+    if inputs.app_credential_state != "complete":
+        return DreameLawnMowerXp2pDeviceConfig()
+    try:
+        return await async_fetch_xp2p_device_config(
+            inputs, session=session, timeout=timeout,
+        )
+    except DreameLawnMowerXp2pConfigError:
+        return DreameLawnMowerXp2pDeviceConfig()

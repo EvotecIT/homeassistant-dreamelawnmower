@@ -302,3 +302,30 @@ def test_framed_tasks_preserve_cyclic_flag_and_complete_contour_pairs():
     task = decode_schedule_week_payload(base64.b64encode(block).decode())[0]["tasks"][0]
     assert task["cyclic"] is True and task["type_name"] == "edge_mowing"
     assert task["regions"] == [[1, 2], [3, 4]]
+
+
+def test_schedule_document_reader_retains_only_validated_bytes():
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        schedule_document,
+    )
+
+    reader = schedule_document.ScheduleDocumentReader(
+        size=7, version=42, chunk_size=5, document_version=3,
+    )
+    reader.append_response({"r": 0, "d": {"d": "ż", "l": 2, "s": 0, "v": 42}})
+    assert reader.request() == {
+        "m": "g", "t": "SCHDDV3", "d": {"s": 2, "l": 5, "v": 42},
+    }
+    with pytest.raises(
+        schedule_document.DreameLawnMowerConnectionError, match="incomplete",
+    ):
+        reader.result()
+    with pytest.raises(
+        schedule_document.DreameLawnMowerConnectionError, match="chunk identity",
+    ):
+        reader.append_response({"r": 0, "d": {"d": "ółw", "s": 0, "v": 42}})
+    assert reader.offset == 2
+    assert reader.chunk_count == 1
+    reader.append_response({"r": 0, "d": {"d": "ółw", "l": 5, "s": 2, "v": 42}})
+    assert reader.complete
+    assert reader.result() == ("żółw", 2, 7)

@@ -5,20 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.mowing_height_capabilities import (
+    mowing_height_adjustment_supported,
+)
 from .entity import DreameLawnMowerEntity
 from .mowing_height import (
     MOWING_HEIGHT_MAX_CM,
     MOWING_HEIGHT_MIN_CM,
     MOWING_HEIGHT_STEP_CM,
-    mowing_height_adjustment_supported,
     mowing_height_limits,
 )
 from .mowing_preference_control import (
@@ -33,17 +33,21 @@ from .mowing_preference_control import (
     selected_zone_mowing_height,
     selected_zone_preference_attributes,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
+
+# Limit concurrent platform actions and resource refreshes to one.
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Dreame mower number entities."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     descriptor = coordinator.client.descriptor
-    entities = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
+    entities: list[NumberEntity] = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
     if mowing_height_adjustment_supported(
         descriptor.model, getattr(descriptor, "display_model", None)
     ):

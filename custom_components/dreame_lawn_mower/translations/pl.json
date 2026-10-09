@@ -35,6 +35,15 @@
           "password": "Hasło",
           "country": "Region"
         }
+      },
+      "reconfigure": {
+        "title": "Zmień połączenie kosiarki",
+        "description": "Zaktualizuj dane logowania lub region tej kosiarki. Konto musi nadal zawierać skonfigurowaną kosiarkę; jej wpis i encje w Home Assistant zostaną zachowane.",
+        "data": {
+          "username": "Nazwa użytkownika",
+          "password": "Hasło",
+          "country": "Region"
+        }
       }
     },
     "error": {
@@ -46,6 +55,9 @@
       "no_devices": "Na tym koncie nie znaleziono obsługiwanych kosiarek. Sprawdź, czy wybrany region i typ konta są zgodne z ustawieniami w aplikacji producenta."
     },
     "abort": {
+      "wrong_device": "Wykryta kosiarka nie pasuje do tego wpisu. Ustawienia połączenia nie zostały zmienione.",
+      "reauth_successful": "Dane logowania kosiarki zostały zaktualizowane.",
+      "reconfigure_successful": "Połączenie kosiarki zostało zaktualizowane.",
       "already_configured": "Wszystkie obsługiwane kosiarki z tego konta są już skonfigurowane."
     }
   },
@@ -194,6 +206,20 @@
           "repositioning": "Ponowne ustalanie pozycji"
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Nie znaleziono wpisu kosiarki Dreame o identyfikatorze {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Wpis kosiarki Dreame {entry_id} nie jest załadowany."
+    },
+    "no_loaded_entries": {
+      "message": "Żaden wpis kosiarki Dreame nie jest załadowany."
+    },
+    "entry_id_required": {
+      "message": "Załadowano kilka wpisów kosiarek Dreame; podaj entry_id."
     }
   }
 }

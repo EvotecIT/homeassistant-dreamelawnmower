@@ -38,6 +38,8 @@ class _FakePreferenceCloud:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         assert siid == 2
         assert aiid == 50
@@ -316,6 +318,8 @@ def test_get_mowing_preferences_reports_invalid_prei_area_identity(
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if payload.get("t") == "PREI" and payload.get("m") == "g":
@@ -353,6 +357,8 @@ def test_get_mowing_preferences_rejects_malformed_prei_inventory(
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if payload.get("t") == "PREI" and payload.get("m") == "g":
@@ -384,6 +390,8 @@ def test_get_mowing_preferences_rejects_stale_pre_version() -> None:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if (
@@ -419,6 +427,8 @@ def test_get_mowing_preferences_rejects_missing_pre_version(
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if (
@@ -456,6 +466,8 @@ def test_get_mowing_preferences_rejects_truncated_pre_payload() -> None:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if (
@@ -489,6 +501,8 @@ def test_get_mowing_preferences_rejects_null_mandatory_pre_value(
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if (
@@ -526,6 +540,8 @@ def test_get_mowing_preferences_rejects_mismatched_payload_identity(
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
         if payload.get("t") == "PREI" and payload.get("m") == "g":
@@ -558,6 +574,8 @@ def test_get_mowing_preferences_preserves_unaffected_areas() -> None:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         if (
             payload.get("m") == "g"
@@ -1049,6 +1067,8 @@ def test_preference_write_ignores_unrelated_area_readback_failure() -> None:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         if (
             payload.get("m") == "g"
@@ -1087,6 +1107,8 @@ def test_preference_write_fails_closed_when_target_area_readback_fails() -> None
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         nonlocal write_started
         if payload.get("m") == "s" and payload.get("t") == "PRE":

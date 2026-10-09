@@ -4,7 +4,16 @@
     "step": {
       "user": {"title": "Dreame-Mähroboter verbinden", "description": "Melde dich mit deinem Dreamehome- oder MOVAhome-Konto an, um Mähroboter zu finden.", "data": {"account_type": "Kontotyp", "username": "Benutzername", "password": "Passwort", "country": "Region"}},
       "device": {"title": "Mähroboter auswählen", "description": "Wähle einen Mähroboter zum Hinzufügen aus. Starte die Einrichtung erneut, um einen weiteren Mähroboter desselben Kontos hinzuzufügen.", "data": {"device": "Gefundener Mähroboter"}},
-      "reauth": {"title": "Konto erneut verbinden", "description": "Aktualisiere deine Dreamehome- oder MOVAhome-Zugangsdaten.", "data": {"username": "Benutzername", "password": "Passwort", "country": "Region"}}
+      "reauth": {"title": "Konto erneut verbinden", "description": "Aktualisiere deine Dreamehome- oder MOVAhome-Zugangsdaten.", "data": {"username": "Benutzername", "password": "Passwort", "country": "Region"}},
+      "reconfigure": {
+        "title": "Verbindung des Mähers ändern",
+        "description": "Aktualisieren Sie die Anmeldedaten oder die Region dieses Mähers. Das Konto muss weiterhin den eingerichteten Mäher enthalten; sein Eintrag und seine Entitäten in Home Assistant bleiben erhalten.",
+        "data": {
+          "username": "Benutzername",
+          "password": "Passwort",
+          "country": "Region"
+        }
+      }
     },
     "error": {
       "2fa_required": "Die Zwei-Faktor-Authentifizierung muss in der Hersteller-App oder auf der Hersteller-Website abgeschlossen werden, bevor die Einrichtung fortgesetzt werden kann.",
@@ -14,7 +23,12 @@
       "invalid_region": "Die ausgewählte Region wurde von der Cloud abgelehnt. Prüfe die in der Hersteller-App verwendete Kontoregion.",
       "no_devices": "Für dieses Konto wurden keine unterstützten Mähroboter gefunden. Prüfe, ob Region und Kontotyp mit der Hersteller-App übereinstimmen."
     },
-    "abort": {"already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."}
+    "abort": {
+      "wrong_device": "Der gefundene Mäher stimmt nicht mit diesem Eintrag überein. Die Verbindungseinstellungen wurden nicht geändert.",
+      "reauth_successful": "Die Zugangsdaten des Mähers wurden aktualisiert.",
+      "reconfigure_successful": "Die Verbindung des Mähers wurde aktualisiert.",
+      "already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."
+    }
   },
   "options": {"step": {"init": {
     "title": "Optionen für Dreame-Mähroboter",
@@ -52,5 +66,19 @@
       "person_detection": {
         "name": "Personenerkennung"
       }
-    },"sensor": {"state_name": {"name": "Status", "state": {"unknown": "Unbekannt", "mowing": "Mähen", "idle": "Inaktiv", "paused": "Pausiert", "error": "Fehler", "returning": "Rückkehr zur Ladestation", "charging": "Wird geladen", "building": "Kartierung", "charging_completed": "Ladevorgang abgeschlossen", "upgrading": "Wird aktualisiert", "mow_summon": "Mähen auf Abruf", "station_reset": "Station wird zurückgesetzt", "remote_control": "Fernsteuerung", "smart_charging": "Intelligentes Laden", "second_mowing": "Zweiter Mähdurchgang", "human_following": "Folgt einer Person", "spot_mowing": "Punktuelles Mähen", "waiting_for_task": "Wartet auf Aufgabe", "station_cleaning": "Stationsreinigung", "shortcut": "Verknüpfung", "monitoring": "Überwachung", "monitoring_paused": "Überwachung pausiert", "charging_paused_high_temperature": "Laden pausiert: Batterietemperatur zu hoch", "charging_paused_low_temperature": "Laden pausiert: Batterietemperatur zu niedrig", "repositioning": "Neupositionierung"}}}}
+    },"sensor": {"state_name": {"name": "Status", "state": {"unknown": "Unbekannt", "mowing": "Mähen", "idle": "Inaktiv", "paused": "Pausiert", "error": "Fehler", "returning": "Rückkehr zur Ladestation", "charging": "Wird geladen", "building": "Kartierung", "charging_completed": "Ladevorgang abgeschlossen", "upgrading": "Wird aktualisiert", "mow_summon": "Mähen auf Abruf", "station_reset": "Station wird zurückgesetzt", "remote_control": "Fernsteuerung", "smart_charging": "Intelligentes Laden", "second_mowing": "Zweiter Mähdurchgang", "human_following": "Folgt einer Person", "spot_mowing": "Punktuelles Mähen", "waiting_for_task": "Wartet auf Aufgabe", "station_cleaning": "Stationsreinigung", "shortcut": "Verknüpfung", "monitoring": "Überwachung", "monitoring_paused": "Überwachung pausiert", "charging_paused_high_temperature": "Laden pausiert: Batterietemperatur zu hoch", "charging_paused_low_temperature": "Laden pausiert: Batterietemperatur zu niedrig", "repositioning": "Neupositionierung"}}}},
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Kein Dreame-Rasenmähereintrag für {entry_id} gefunden."
+    },
+    "entry_not_loaded": {
+      "message": "Der Dreame-Rasenmähereintrag {entry_id} ist nicht geladen."
+    },
+    "no_loaded_entries": {
+      "message": "Es sind keine Dreame-Rasenmähereinträge geladen."
+    },
+    "entry_id_required": {
+      "message": "Mehrere Dreame-Rasenmähereinträge sind geladen; geben Sie entry_id an."
+    }
+  }
 }

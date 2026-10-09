@@ -217,13 +217,13 @@ def normalize_mowing_preference_mode(value: Any) -> int:
         raise ValueError(f"{MOWING_PREFERENCE_MODE_FIELD} must be an integer or label.")
     if isinstance(value, str):
         normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
-        for mode, label in MOWING_PREFERENCE_MODE_NAMES.items():
+        for supported_mode, label in MOWING_PREFERENCE_MODE_NAMES.items():
             if normalized == label:
-                return mode
+                return supported_mode
         if normalized.isdigit():
             value = normalized
     mode = _to_int(value)
-    if mode not in MOWING_PREFERENCE_MODE_NAMES:
+    if mode is None or mode not in MOWING_PREFERENCE_MODE_NAMES:
         supported = ", ".join(MOWING_PREFERENCE_MODE_NAMES.values())
         raise ValueError(
             f"{MOWING_PREFERENCE_MODE_FIELD} supports only {supported}, 0, or 1."

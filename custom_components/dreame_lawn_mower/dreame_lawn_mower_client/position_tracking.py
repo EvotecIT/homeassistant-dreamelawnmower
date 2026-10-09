@@ -176,7 +176,12 @@ class MowerPositionTracker:
             getattr(blob, "candidate_runtime_pose_x", None),
             getattr(blob, "candidate_runtime_pose_y", None),
         )
-        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (x, y)):
+        if (
+            not isinstance(x, int)
+            or isinstance(x, bool)
+            or not isinstance(y, int)
+            or isinstance(y, bool)
+        ):
             return
         with self._lock:
             if self._last_event is not None and observed <= self._last_event:

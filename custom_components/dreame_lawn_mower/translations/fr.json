@@ -35,6 +35,15 @@
           "password": "Mot de passe",
           "country": "Région"
         }
+      },
+      "reconfigure": {
+        "title": "Modifier la connexion de la tondeuse",
+        "description": "Mettez à jour les identifiants ou la région de cette tondeuse. Le compte doit toujours contenir la tondeuse configurée ; son entrée et ses entités dans Home Assistant sont conservées.",
+        "data": {
+          "username": "Nom d’utilisateur",
+          "password": "Mot de passe",
+          "country": "Région"
+        }
       }
     },
     "error": {
@@ -46,6 +55,9 @@
       "no_devices": "Aucun robot tondeuse compatible n’a été trouvé pour ce compte. Vérifiez que la région et le type de compte sélectionnés correspondent à ceux de l’application du fabricant."
     },
     "abort": {
+      "wrong_device": "La tondeuse trouvée ne correspond pas à cette entrée. Les paramètres de connexion n’ont pas été modifiés.",
+      "reauth_successful": "Les identifiants de la tondeuse ont été mis à jour.",
+      "reconfigure_successful": "La connexion de la tondeuse a été mise à jour.",
       "already_configured": "Tous les robots tondeuses compatibles de ce compte sont déjà configurés."
     }
   },
@@ -194,6 +206,20 @@
           "repositioning": "Repositionnement"
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Aucune entrée de tondeuse Dreame trouvée pour {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "L’entrée de tondeuse Dreame {entry_id} n’est pas chargée."
+    },
+    "no_loaded_entries": {
+      "message": "Aucune entrée de tondeuse Dreame n’est chargée."
+    },
+    "entry_id_required": {
+      "message": "Plusieurs entrées de tondeuses Dreame sont chargées ; indiquez entry_id."
     }
   }
 }

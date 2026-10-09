@@ -12,7 +12,10 @@ import traceback
 from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
+
+if TYPE_CHECKING:
+    from .device_context import _DreameMowerDeviceContext
 
 from .app_protocol import mower_realtime_property_name, mower_state_override
 from .device_code_semantics import (
@@ -39,6 +42,7 @@ from .device_types import (
     _MODEL_SPECIFIC_MOWER_STATE_VALUES,
     DreameMowerStatus,
     DreameMowerRelocationStatus,
+    SegmentNeglectReason,
     DreameMowerCleaningMode,
     DreameMowerStreamStatus,
     DreameMowerVoiceAssistantLanguage,
@@ -71,6 +75,7 @@ from .map_types import (
     Path,
     Segment,
 )
+from .models import _optional_int_from_raw
 from .const import (
     STATE_UNKNOWN,
     STATE_UNAVAILABLE,
@@ -182,14 +187,14 @@ class DreameMowerDeviceStatus:
     Almost of the rules are extracted from mobile app that has a similar class with same purpose.
     """
 
-    def __init__(self, device):
-        self._device: DreameMowerDevice = device
-        self._cleaning_history = None
-        self._cleaning_history_attrs = None
-        self._last_cleaning_time = None
-        self._cruising_history = None
-        self._cruising_history_attrs = None
-        self._last_cruising_time = None
+    def __init__(self, device: _DreameMowerDeviceContext) -> None:
+        self._device = device
+        self._cleaning_history: list[CleaningHistory] | None = None
+        self._cleaning_history_attrs: dict[str, Any] | None = None
+        self._last_cleaning_time: datetime | None = None
+        self._cruising_history: list[CleaningHistory] | None = None
+        self._cruising_history_attrs: dict[str, Any] | None = None
+        self._last_cruising_time: datetime | None = None
         self._history_map_data: dict[str, MapData] = {}
         self._previous_cleaning_sequence: dict[int, list[int]] = {}
 
@@ -202,22 +207,25 @@ class DreameMowerDeviceStatus:
         self.floor_material_direction_list = {v: k for k, v in FLOOR_MATERIAL_DIRECTION_CODE_TO_NAME.items()}
         self.visibility_list = {v: k for k, v in SEGMENT_VISIBILITY_CODE_TO_NAME.items()}
         self.voice_assistant_language_list = {v: k for k, v in VOICE_ASSISTANT_LANGUAGE_TO_NAME.items()}
-        self.segment_cleaning_mode_list = {}
-        self.segment_cleaning_route_list = {}
-        self.cleaning_mode = None
+        self.segment_cleaning_mode_list: dict[str, DreameMowerCleaningMode] = {}
+        self.segment_cleaning_route_list: dict[str, DreameMowerCleaningRoute] = {}
+        self.cleaning_mode: DreameMowerCleaningMode | None = None
         self.ai_policy_accepted = False
-        self.go_to_zone: GoToZoneSettings = None
+        self.go_to_zone: GoToZoneSettings | Literal[False] | None = None
         self.cleanup_completed: bool = False
         self.cleanup_started: bool = False
 
-        self.stream_status = None
-        self.stream_session = None
+        self.stream_status: DreameMowerStreamStatus | None = None
+        self.stream_session: str | None = None
 
-        self.dnd_tasks = None
-        self.off_peak_charging_config = None
-        self.shortcuts = None
+        self.dnd_tasks: list[dict[str, Any]] | None = None
+        self.off_peak_charging_config: dict[str, Any] | None = None
+        self.shortcuts: dict[int, Shortcut] | None = None
 
-    def _get_property(self, prop: DreameMowerProperty) -> Any:
+    def _get_property(
+        self,
+        prop: DreameMowerProperty | DreameMowerAutoSwitchProperty | DreameMowerStrAIProperty | DreameMowerAIProperty,
+    ) -> Any:
         """Helper function for accessing a property from device"""
         _LOGGER.debug("Getting property: %s", prop)
         result = self._device.get_property(prop)
@@ -240,14 +248,14 @@ class DreameMowerDeviceStatus:
         return self._device.device_connected
 
     @property
-    def battery_level(self) -> int:
+    def battery_level(self) -> int | None:
         """Return battery level of the device."""
-        return self._get_property(DreameMowerProperty.BATTERY_LEVEL)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.BATTERY_LEVEL))
 
     @property
     def cleaning_mode_name(self) -> str:
         """Return cleaning mode as string for translation."""
-        return CLEANING_MODE_CODE_TO_NAME.get(self.cleaning_mode, STATE_UNKNOWN)
+        return CLEANING_MODE_CODE_TO_NAME.get(self.cleaning_mode, STATE_UNKNOWN) if self.cleaning_mode is not None else STATE_UNKNOWN
 
     @property
     def status(self) -> DreameMowerStatus:
@@ -375,7 +383,7 @@ class DreameMowerDeviceStatus:
     @property
     def stream_status_name(self) -> str:
         """Return camera stream status as string for translation."""
-        return STREAM_STATUS_TO_NAME.get(self.stream_status, STATE_UNKNOWN)
+        return STREAM_STATUS_TO_NAME.get(self.stream_status, STATE_UNKNOWN) if self.stream_status is not None else STATE_UNKNOWN
 
     @property
     def wider_corner_coverage(self) -> DreameMowerWiderCornerCoverage:
@@ -412,6 +420,7 @@ class DreameMowerDeviceStatus:
             if value is not None:
                 _LOGGER.debug("CLEANING_ROUTE not supported: %s", value)
             return DreameMowerCleaningRoute.UNKNOWN
+        return DreameMowerCleaningRoute.UNKNOWN
 
     @property
     def cleaning_route_name(self) -> str:
@@ -472,9 +481,11 @@ class DreameMowerDeviceStatus:
         return TASK_TYPE_TO_NAME.get(self.task_type, STATE_UNKNOWN)
 
     @property
-    def faults(self) -> str:
+    def faults(self) -> int | str | None:
         faults = self._get_property(DreameMowerProperty.FAULTS)
-        return 0 if faults == "" or faults == " " else faults
+        if faults in ("", " "):
+            return 0
+        return faults if isinstance(faults, (int, str)) else None
 
     @property
     def device_code(self) -> int | None:
@@ -500,13 +511,13 @@ class DreameMowerDeviceStatus:
         return mower_device_code_name(value, model=self._device_model) or STATE_UNKNOWN
 
     @property
-    def error_description(self) -> str:
+    def error_description(self) -> list[str]:
         """Return a mower-native device-code description."""
         name = self.error_name
         return [name.replace("_", " ").capitalize(), ""] if name else [STATE_UNKNOWN, ""]
 
     @property
-    def error_image(self) -> str:
+    def error_image(self) -> None:
         """Return no image; bundled images belong to vacuum fault meanings."""
         return None
 
@@ -560,14 +571,15 @@ class DreameMowerDeviceStatus:
         return False
 
     @property
-    def camera_light_brightness(self) -> int:
+    def camera_light_brightness(self) -> int | None:
         if self._capability.camera_streaming:
             brightness = self._get_property(DreameMowerProperty.CAMERA_LIGHT_BRIGHTNESS)
             if brightness and str(brightness).isnumeric():
                 return int(brightness)
+        return None
 
     @property
-    def dnd_remaining(self) -> bool:
+    def dnd_remaining(self) -> int | None:
         """Returns remaining seconds to DND period to end."""
         if self.dnd:
             dnd_start = self.dnd_start
@@ -578,10 +590,7 @@ class DreameMowerDeviceStatus:
                     now = datetime.now()
                     hour = now.hour
                     minute = now.minute
-                    if minute < 10:
-                        minute = f"0{minute}"
-
-                    time = int(f"{hour}{minute}")
+                    time = int(f"{hour}{minute:02}")
                     start = int(dnd_start.replace(":", ""))
                     end = int(dnd_end.replace(":", ""))
                     current_seconds = hour * 3600 + int(minute) * 60
@@ -617,8 +626,7 @@ class DreameMowerDeviceStatus:
     @property
     def sweeping(self) -> bool:
         """Returns true when cleaning mode is sweeping."""
-        cleaning_mode = self.cleaning_mode
-        return 1
+        return True
 
     @property
     def zone_cleaning(self) -> bool:
@@ -879,10 +887,8 @@ class DreameMowerDeviceStatus:
 
     @property
     def max_suction_power(self) -> bool:
-        """Returns true when max suction power feature is enabled."""
-        return bool(
-            self._capability.max_suction_power and self._get_property(DreameMowerAutoSwitchProperty.MAX_SUCTION_POWER)
-        )
+        """Mowers do not expose the vacuum max-suction property."""
+        return False
 
     @property
     def multi_map(self) -> bool:
@@ -893,19 +899,23 @@ class DreameMowerDeviceStatus:
     def last_cleaning_time(self) -> datetime | None:
         if self._cleaning_history:
             return self._last_cleaning_time
+        return None
 
     @property
     def last_cruising_time(self) -> datetime | None:
         if self._cruising_history:
             return self._last_cruising_time
+        return None
 
     @property
     def cleaning_history(self) -> dict[str, Any] | None:
         """Returns the cleaning history list as dict."""
         if self._cleaning_history:
             if self._cleaning_history_attrs is None:
-                list = {}
+                list: dict[str, Any] = {}
                 for history in self._cleaning_history:
+                    if history.date is None:
+                        continue
                     date = time.strftime("%m-%d %H:%M", time.localtime(history.date.timestamp()))
                     list[date] = {
                         ATTR_TIMESTAMP: history.date.timestamp(),
@@ -920,7 +930,9 @@ class DreameMowerDeviceStatus:
                         list[date][ATTR_COMPLETED] = history.completed
                     if history.neglected_segments:
                         list[date][ATTR_NEGLECTED_SEGMENTS] = {
-                            k: v.name.replace("_", " ").capitalize() for k, v in history.neglected_segments.items()
+                            k: SegmentNeglectReason(v).name.replace("_", " ").capitalize()
+                            for k, v in history.neglected_segments.items()
+                            if v in SegmentNeglectReason._value2member_map_
                         }
                     if history.cleanup_method is not None:
                         list[date][ATTR_CLEANUP_METHOD] = history.cleanup_method.name.replace("_", " ").capitalize()
@@ -930,14 +942,17 @@ class DreameMowerDeviceStatus:
                         ).capitalize()
                 self._cleaning_history_attrs = list
             return self._cleaning_history_attrs
+        return None
 
     @property
     def cruising_history(self) -> dict[str, Any] | None:
         """Returns the cruising history list as dict."""
         if self._cruising_history:
             if self._cruising_history_attrs is None:
-                list = {}
+                list: dict[str, Any] = {}
                 for history in self._cruising_history:
+                    if history.date is None:
+                        continue
                     date = time.strftime("%m-%d %H:%M", time.localtime(history.date.timestamp()))
                     list[date] = {
                         ATTR_CRUISING_TIME: f"{history.cleaning_time} min",
@@ -956,6 +971,7 @@ class DreameMowerDeviceStatus:
                         list[date][ATTR_COMPLETED] = history.completed
                 self._cruising_history_attrs = list
             return self._cruising_history_attrs
+        return None
 
     @property
     def maximum_maps(self) -> int:
@@ -969,7 +985,7 @@ class DreameMowerDeviceStatus:
         return bool(
             not self.started
             and not self.fast_mapping
-            and (not self._device.capability.map or self.maximum_maps > len(self.map_list))
+            and (not self._device.capability.map or self.maximum_maps > len(self.map_list or []))
         )
 
     @property
@@ -983,7 +999,8 @@ class DreameMowerDeviceStatus:
                     and (
                         bool(history.neglected_segments)
                         or bool(
-                            history.cleanup_method.value == 2
+                            history.cleanup_method is not None
+                            and history.cleanup_method.value == 2
                             and map_data.cleaned_segments
                             and map_data.cleaning_map_data is not None
                             and map_data.cleaning_map_data.has_dirty_area
@@ -993,44 +1010,47 @@ class DreameMowerDeviceStatus:
         return False
 
     @property
-    def blades_life(self) -> int:
+    def blades_life(self) -> int | None:
         """Returns blade remaining life in percent."""
-        return self._get_property(DreameMowerProperty.BLADES_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.BLADES_LEFT))
 
     @property
-    def side_brush_life(self) -> int:
+    def side_brush_life(self) -> int | None:
         """Returns side brush remaining life in percent."""
-        return self._get_property(DreameMowerProperty.SIDE_BRUSH_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.SIDE_BRUSH_LEFT))
 
     @property
-    def filter_life(self) -> int:
+    def filter_life(self) -> int | None:
         """Returns filter remaining life in percent."""
-        return self._get_property(DreameMowerProperty.FILTER_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.FILTER_LEFT))
 
     @property
-    def sensor_dirty_life(self) -> int:
+    def sensor_dirty_life(self) -> int | None:
         """Returns sensor clean remaining time in percent."""
-        return self._get_property(DreameMowerProperty.SENSOR_DIRTY_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.SENSOR_DIRTY_LEFT))
 
     @property
-    def tank_filter_life(self) -> int:
+    def tank_filter_life(self) -> int | None:
         """Returns tank filter remaining life in percent."""
-        return self._get_property(DreameMowerProperty.TANK_FILTER_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.TANK_FILTER_LEFT))
 
     @property
-    def silver_ion_life(self) -> int:
+    def silver_ion_life(self) -> int | None:
         """Returns silver-ion life in percent."""
-        return self._get_property(DreameMowerProperty.SILVER_ION_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.SILVER_ION_LEFT))
 
     @property
-    def lensbrush_life(self) -> int:
+    def lensbrush_life(self) -> int | None:
         """Returns lensbrush life in percent."""
-        return 30000 - self._get_property(DreameMowerProperty.LENSBRUSH_LEFT)['CMS'][0]
+        data = self._get_property(DreameMowerProperty.LENSBRUSH_LEFT)
+        cms = data.get("CMS") if isinstance(data, dict) else None
+        used = _optional_int_from_raw(cms[0]) if isinstance(cms, list) and cms else None
+        return 30000 - used if used is not None else None
 
     @property
-    def squeegee_life(self) -> int:
+    def squeegee_life(self) -> int | None:
         """Returns squeegee life in percent."""
-        return self._get_property(DreameMowerProperty.SQUEEGEE_LEFT)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.SQUEEGEE_LEFT))
 
     @property
     def dnd(self) -> bool | None:
@@ -1041,6 +1061,7 @@ class DreameMowerDeviceStatus:
                 if not self._capability.dnd_task
                 else self.dnd_tasks[0].get("en") if self.dnd_tasks and len(self.dnd_tasks) else False
             )
+        return None
 
     @property
     def dnd_start(self) -> str | None:
@@ -1051,6 +1072,7 @@ class DreameMowerDeviceStatus:
                 if not self._capability.dnd_task
                 else self.dnd_tasks[0].get("st") if self.dnd_tasks and len(self.dnd_tasks) else "22:00"
             )
+        return None
 
     @property
     def dnd_end(self) -> str | None:
@@ -1061,16 +1083,17 @@ class DreameMowerDeviceStatus:
                 if not self._capability.dnd_task
                 else self.dnd_tasks[0].get("et") if self.dnd_tasks and len(self.dnd_tasks) else "08:00"
             )
+        return None
 
     @property
     def off_peak_charging(self) -> bool | None:
         """Returns Off-Peak charging is enabled."""
         if self._capability.off_peak_charging:
             return bool(
-                self._capability.off_peak_charging
-                and len(self.off_peak_charging_config)
+                self.off_peak_charging_config
                 and self.off_peak_charging_config.get("enable")
             )
+        return None
 
     @property
     def off_peak_charging_start(self) -> str | None:
@@ -1081,6 +1104,7 @@ class DreameMowerDeviceStatus:
                 if self.off_peak_charging_config and len(self.off_peak_charging_config)
                 else "22:00"
             )
+        return None
 
     @property
     def off_peak_charging_end(self) -> str | None:
@@ -1091,33 +1115,34 @@ class DreameMowerDeviceStatus:
                 if self.off_peak_charging_config and len(self.off_peak_charging_config)
                 else "08:00"
             )
+        return None
 
     @property
-    def ai_obstacle_detection(self) -> bool:
+    def ai_obstacle_detection(self) -> bool | None:
         return self._device.get_ai_property(DreameMowerAIProperty.AI_OBSTACLE_DETECTION)
 
     @property
-    def ai_obstacle_image_upload(self) -> bool:
+    def ai_obstacle_image_upload(self) -> bool | None:
         return self._device.get_ai_property(DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD)
 
     @property
-    def ai_pet_detection(self) -> bool:
+    def ai_pet_detection(self) -> bool | None:
         return self._device.get_ai_property(DreameMowerAIProperty.AI_PET_DETECTION)
 
     @property
-    def ai_furniture_detection(self) -> bool:
+    def ai_furniture_detection(self) -> bool | None:
         return self._device.get_ai_property(DreameMowerAIProperty.AI_FURNITURE_DETECTION)
 
     @property
-    def ai_fluid_detection(self) -> bool:
+    def ai_fluid_detection(self) -> bool | None:
         return self._device.get_ai_property(DreameMowerAIProperty.AI_FLUID_DETECTION)
 
     @property
-    def ai_obstacle_picture(self) -> bool:
+    def ai_obstacle_picture(self) -> bool | None:
         return self._device.get_ai_property(DreameMowerAIProperty.AI_OBSTACLE_PICTURE)
 
     @property
-    def fill_light(self) -> bool:
+    def fill_light(self) -> int | None:
         return self._device.get_auto_switch_property(DreameMowerAutoSwitchProperty.FILL_LIGHT)
 
     @property
@@ -1125,16 +1150,16 @@ class DreameMowerDeviceStatus:
         return bool(self._device.get_auto_switch_property(DreameMowerAutoSwitchProperty.STAIN_AVOIDANCE) == 2)
 
     @property
-    def pet_focused_cleaning(self) -> bool:
+    def pet_focused_cleaning(self) -> int | None:
         return self._device.get_auto_switch_property(DreameMowerAutoSwitchProperty.PET_FOCUSED_CLEANING)
 
     @property
     def map_backup_status(self) -> int | None:
-        return self._get_property(DreameMowerProperty.MAP_BACKUP_STATUS)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.MAP_BACKUP_STATUS))
 
     @property
     def map_recovery_status(self) -> int | None:
-        return self._get_property(DreameMowerProperty.MAP_RECOVERY_STATUS)
+        return _optional_int_from_raw(self._get_property(DreameMowerProperty.MAP_RECOVERY_STATUS))
 
     @property
     def custom_order(self) -> bool:
@@ -1157,7 +1182,7 @@ class DreameMowerDeviceStatus:
                 list(
                     sorted(
                         segments,
-                        key=lambda segment_id: segments[segment_id].order if segments[segment_id].order else 99,
+                        key=lambda segment_id: segments[segment_id].order or 99,
                     )
                 )
                 if self.custom_order
@@ -1208,12 +1233,14 @@ class DreameMowerDeviceStatus:
         """Return the selected map data"""
         if self._map_manager and not self.has_temporary_map and not self.has_new_map:
             return self._map_manager.selected_map
+        return None
 
     @property
     def current_map(self) -> MapData | None:
         """Return the current map data"""
         if self._map_manager:
             return self._map_manager.get_map()
+        return None
 
     @property
     def map_list(self) -> list[int] | None:
@@ -1223,7 +1250,7 @@ class DreameMowerDeviceStatus:
                 return self._map_manager.map_list
 
             selected_map = self._map_manager.selected_map
-            if selected_map:
+            if selected_map and selected_map.map_id is not None:
                 return [selected_map.map_id]
         return []
 
@@ -1234,7 +1261,7 @@ class DreameMowerDeviceStatus:
             if self.multi_map:
                 return self._map_manager.map_data_list
             selected_map = self.selected_map
-            if selected_map:
+            if selected_map and selected_map.map_id is not None:
                 return {selected_map.map_id: selected_map}
         return {}
 
@@ -1261,17 +1288,20 @@ class DreameMowerDeviceStatus:
             current_map = self.current_map
             if current_map and current_map.segments and current_map.robot_segment and not current_map.empty_map:
                 return current_map.segments[current_map.robot_segment]
+        return None
 
     @property
     def cleaning_sequence(self) -> list[int] | None:
         """Returns custom segment cleaning sequence list."""
         if self._map_manager:
             return self._map_manager.cleaning_sequence
+        return None
 
     @property
-    def previous_cleaning_sequence(self):
+    def previous_cleaning_sequence(self) -> list[int] | None:
         if self.current_map and self.current_map.map_id in self._previous_cleaning_sequence:
             return self._previous_cleaning_sequence[self.current_map.map_id]
+        return None
 
     @property
     def active_segments(self) -> list[int] | None:
@@ -1290,16 +1320,17 @@ class DreameMowerDeviceStatus:
             ):
                 return list(map_data.segments.keys())
             return []
+        return None
 
     @property
     def job(self) -> dict[str, Any] | None:
-        attributes = {
+        attributes: dict[str, Any] = {
             ATTR_STATUS: self.status.name,
         }
         if self._device._protocol.cloud:
             attributes[ATTR_DID] = self._device._protocol.cloud.device_id
         if self._capability.custom_cleaning_mode:
-            attributes[ATTR_CLEANING_MODE] = self.cleaning_mode.name
+            attributes[ATTR_CLEANING_MODE] = self.cleaning_mode.name if self.cleaning_mode is not None else STATE_UNKNOWN
 
         if self.cleanup_completed:
             attributes.update(
@@ -1317,11 +1348,11 @@ class DreameMowerDeviceStatus:
             if map_data.active_segments:
                 attributes[ATTR_ACTIVE_SEGMENTS] = map_data.active_segments
             elif map_data.active_areas is not None:
-                if self.go_to_zone:
+                if self.go_to_zone and self.go_to_zone.x is not None and self.go_to_zone.y is not None:
                     attributes[ATTR_ACTIVE_CRUISE_POINTS] = {
                         1: Coordinate(self.go_to_zone.x, self.go_to_zone.y, False, 0)
                     }
-                else:
+                elif not self.go_to_zone:
                     attributes[ATTR_ACTIVE_AREAS] = map_data.active_areas
             elif map_data.active_points is not None:
                 attributes[ATTR_ACTIVE_POINTS] = map_data.active_points
@@ -1387,16 +1418,13 @@ class DreameMowerDeviceStatus:
                 ]
             )
 
-        attributes = {}
+        attributes: dict[str, Any] = {}
 
         for prop in properties:
             value = self._get_property(prop)
             if value is not None:
-                prop_name = PROPERTY_TO_NAME.get(prop.name)
-                if prop_name:
-                    prop_name = prop_name[0]
-                else:
-                    prop_name = prop.name.lower()
+                name_parts = PROPERTY_TO_NAME.get(prop.name)
+                prop_name = name_parts[0] if name_parts else prop.name.lower()
 
                 if prop is DreameMowerProperty.ERROR:
                     value = self.error_name.replace("_", " ").capitalize()
@@ -1416,20 +1444,6 @@ class DreameMowerDeviceStatus:
                     attributes[f"{prop_name}_list"] = [
                         v.replace("_", " ").capitalize() for v in self.voice_assistant_language_list.keys()
                     ]
-                elif prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE:
-                    value = self.cleaning_route_name.replace("_", " ").capitalize()
-                    attributes[f"{prop_name}_list"] = (
-                        [v.replace("_", " ").capitalize() for v in self.cleaning_route_list.keys()]
-                        if PROPERTY_AVAILABILITY[prop.name](self._device)
-                        else []
-                    )
-                elif prop is DreameMowerAutoSwitchProperty.CLEANGENIUS:
-                    value = self.cleangenius_name.replace("_", " ").capitalize()
-                    attributes[f"{prop_name}_list"] = (
-                        [v.replace("_", " ").capitalize() for v in self.cleangenius_list.keys()]
-                        if PROPERTY_AVAILABILITY[prop.name](self._device)
-                        else []
-                    )
                 elif prop is DreameMowerProperty.CUSTOMIZED_CLEANING:
                     value = value and not self.zone_cleaning and not self.spot_cleaning
                 elif prop is DreameMowerProperty.SCHEDULED_CLEAN:
@@ -1486,14 +1500,14 @@ class DreameMowerDeviceStatus:
                 attributes[ATTR_CURRENT_SEGMENT] = self.current_zone.segment_id if self.current_zone else 0
             attributes[ATTR_SELECTED_MAP] = self.selected_map.map_name if self.selected_map else None
             attributes[ATTR_ZONES] = {}
-            for k, v in self.map_data_list.items():
+            for k, v in (self.map_data_list or {}).items():
                 attributes[ATTR_ZONES][v.map_name] = [
-                    {ATTR_ID: j, ATTR_NAME: s.name, ATTR_ICON: s.icon} for (j, s) in sorted(v.segments.items())
+                    {ATTR_ID: j, ATTR_NAME: s.name, ATTR_ICON: s.icon} for (j, s) in sorted((v.segments or {}).items())
                 ]
         attributes[ATTR_CAPABILITIES] = self._capability.list
         return attributes
 
-    def consumable_life_warning_description(self, consumable_property) -> str:
+    def consumable_life_warning_description(self, consumable_property: DreameMowerProperty) -> list[str] | None:
         description = CONSUMABLE_TO_LIFE_WARNING_DESCRIPTION.get(consumable_property)
         if description:
             value = self._get_property(consumable_property)
@@ -1501,15 +1515,17 @@ class DreameMowerDeviceStatus:
                 if value != 0 and len(description) > 1:
                     return description[1]
                 return description[0]
+        return None
 
-    def segment_order_list(self, segment) -> list[int] | None:
-        order = []
-        if self.current_segments:
+    def segment_order_list(self, segment: Segment) -> list[str]:
+        order: list[int] = []
+        segments = self.current_segments
+        if segments:
             order = [
                 v.order
                 for k, v in sorted(
-                    self.current_segments.items(),
-                    key=lambda s: s[1].order if s[1].order != None else 0,
+                    segments.items(),
+                    key=lambda s: s[1].order or 0,
                 )
                 if v.order
             ]

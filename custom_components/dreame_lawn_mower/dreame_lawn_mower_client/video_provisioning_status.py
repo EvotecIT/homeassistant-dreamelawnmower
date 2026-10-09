@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, TypeGuard
 
 XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING = "device_triple_missing"
 XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED = "device_permission_denied"
@@ -123,7 +123,7 @@ def _has_device_triple_missing_response(response: Mapping[str, Any]) -> bool:
     return code_matches and message_matches
 
 
-def _is_sequence(value: Any) -> bool:
+def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
     return isinstance(value, Sequence) and not isinstance(
         value,
         str | bytes | bytearray,

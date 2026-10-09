@@ -6,8 +6,8 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
@@ -17,8 +17,9 @@ from .dreame_lawn_mower_client.models import (
 from .dreame_lawn_mower_client.xp2p_config import (
     XP2P_PROTOCOL_AUTO,
     DreameLawnMowerXp2pDeviceConfig,
-    resolve_xp2p_device_config,
+    async_resolve_xp2p_device_config,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .video_cache_storage import async_save_video_cache
 
 _STORAGE_VERSION = 1
@@ -36,11 +37,11 @@ def _cache_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
 
 
 async def async_remove_video_provisioning_cache(
-    hass: HomeAssistant, entry: ConfigEntry,
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
 ) -> None:
     """Remove persisted data even if this entry never loaded successfully."""
     owner = getattr(
-        hass.data.get(DOMAIN, {}).get(entry.entry_id), "video_provisioning_cache", None,
+        getattr(entry, "runtime_data", None), "video_provisioning_cache", None,
     )
     if isinstance(owner, DreameLawnMowerVideoProvisioningCache):
         await owner.async_remove()
@@ -52,6 +53,7 @@ class DreameLawnMowerVideoProvisioningCache:
     """Persist the minimum private XP2P material for one exact mower."""
 
     def __init__(self, hass: HomeAssistant, *, entry_id: str, did: str) -> None:
+        self._hass = hass
         self._store = _cache_store(hass, entry_id)
         self._write_lock = asyncio.Lock()
         self._removed = False
@@ -149,20 +151,16 @@ class DreameLawnMowerVideoProvisioningCache:
             return self._runtime_input_config[1]
         return None
 
-    @staticmethod
-    def resolve_fresh_device_config(
-        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
-    ) -> DreameLawnMowerXp2pDeviceConfig:
-        """Resolve Tencent configuration once before persisting it."""
-        return resolve_xp2p_device_config(inputs)
-
-    def stage_fresh_device_config(
+    async def async_stage_fresh_device_config(
         self,
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,
     ) -> DreameLawnMowerXp2pDeviceConfig:
-        """Retain fresh configuration in memory until stream health is proven."""
-        config = self.resolve_fresh_device_config(inputs)
-        self._runtime_input_config = (inputs, config)
+        """Fetch configuration before starting the native worker."""
+        config = await async_resolve_xp2p_device_config(
+            inputs, session=async_get_clientsession(self._hass),
+        )
+        if not self._removed:
+            self._runtime_input_config = (inputs, config)
         return config
 
     def resolve_for_transport(
@@ -174,7 +172,7 @@ class DreameLawnMowerVideoProvisioningCache:
         """Return cached/fresh configuration with the requested route policy."""
         config = self.resolve_device_config(inputs)
         if config is None:
-            config = self.stage_fresh_device_config(inputs)
+            raise RuntimeError("XP2P device configuration was not staged.")
         if not auto:
             return config
         return DreameLawnMowerXp2pDeviceConfig(
@@ -219,12 +217,16 @@ def _decode_provisioning_payload(
             or "ipc.flv?action=live&channel={channel}&quality=high&_crypto=on"
         ),
     )
+    port = raw_config.get("port")
+    protocol_type = raw_config.get("protocol_type")
+    if port is None or protocol_type is None:
+        return None, None
     try:
         config = DreameLawnMowerXp2pDeviceConfig(
             server=_text(raw_config.get("server")) or "",
             ip=_text(raw_config.get("ip")) or "",
-            port=int(raw_config.get("port")),
-            protocol_type=int(raw_config.get("protocol_type")),
+            port=int(port),
+            protocol_type=int(protocol_type),
             cross=bool(raw_config.get("cross", False)),
         )
     except (TypeError, ValueError):

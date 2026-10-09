@@ -26,7 +26,6 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_NAME,
     CONF_PASSWORD,
     CONF_USERNAME,
-    DOMAIN,
 )
 from custom_components.dreame_lawn_mower.coordinator import (
     DEVICE_SNAPSHOT_GENERATION_HISTORY,
@@ -60,23 +59,32 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
         options={},
     )
     client = Mock()
+    shared_session = Mock()
+    hass = Mock()
 
     with (
         patch.object(
             coordinator_module,
             "DreameLawnMowerClient",
             return_value=client,
-        ),
+        ) as client_factory,
+        patch.object(
+            coordinator_module,
+            "async_get_clientsession",
+            return_value=shared_session,
+        ) as session_factory,
         patch.object(
             DataUpdateCoordinator,
             "__init__",
             return_value=None,
         ) as coordinator_init,
     ):
-        coordinator = DreameLawnMowerCoordinator(Mock(), entry)
+        coordinator = DreameLawnMowerCoordinator(hass, entry)
 
     assert coordinator.entry is entry
     assert coordinator_init.call_args.kwargs["config_entry"] is entry
+    session_factory.assert_called_once_with(hass)
+    assert client_factory.call_args.kwargs["session"] is shared_session
     client.set_update_callback.assert_called_once_with(
         coordinator._handle_client_update
     )
@@ -3319,6 +3327,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(
+                async_entries=lambda domain: [],
                 async_forward_entry_setups=AsyncMock(
                     side_effect=RuntimeError("platform failed")
                 )
@@ -3359,11 +3368,6 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
             patch.object(integration_module, "async_setup_mowing_map_api"),
-            patch.object(
-                integration_module,
-                "async_setup_services",
-                new=AsyncMock(),
-            ),
         ):
             try:
                 await async_setup_entry(hass, entry)
@@ -3375,7 +3379,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         coordinator.video_lan_cache.async_close.assert_awaited_once_with()
         coordinator.video_provisioning_cache.async_close.assert_awaited_once_with()
         coordinator.async_shutdown.assert_awaited_once_with()
-        assert "entry-1" not in hass.data[DOMAIN]
+        assert not hasattr(entry, "runtime_data")
         sample = performance.as_dict()["latest_by_operation"]["setup"]
         assert sample["outcome"] == "RuntimeError"
 
@@ -3448,11 +3452,6 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
             patch.object(integration_module, "async_setup_mowing_map_api"),
-            patch.object(
-                integration_module,
-                "async_setup_services",
-                new=AsyncMock(),
-            ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerNotificationManager",
@@ -3537,7 +3536,7 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
         coordinator.video_lan_cache.async_close.assert_awaited_once_with()
         coordinator.video_provisioning_cache.async_close.assert_awaited_once_with()
         coordinator.async_shutdown.assert_awaited_once_with()
-        assert entry.entry_id not in hass.data.get(DOMAIN, {})
+        assert not hasattr(entry, "runtime_data")
 
     asyncio.run(scenario())
 

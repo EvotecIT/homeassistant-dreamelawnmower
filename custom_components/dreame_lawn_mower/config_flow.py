@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import Any, Literal
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, OptionsFlow
-from homeassistant.data_entry_flow import FlowResult
+from aiohttp import ClientSession
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
     DreameLawnMowerAuthError,
     DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
     DreameLawnMowerDescriptor,
     DreameLawnMowerTwoFactorRequiredError,
 )
@@ -76,6 +78,7 @@ from .const import (
     XP2P_RUNNER_MODE_PROCESS,
 )
 from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
+from .runtime_data import DreameLawnMowerConfigEntry
 
 CONF_DEVICE = "device"
 
@@ -86,6 +89,7 @@ async def async_discover_devices(
     password: str,
     country: str,
     account_type: str,
+    session: ClientSession,
 ) -> list[DreameLawnMowerDescriptor]:
     """Helper for device discovery, separated for easier testing."""
     return list(
@@ -94,6 +98,7 @@ async def async_discover_devices(
             password=password,
             country=country,
             account_type=account_type,
+            session=session,
         )
     )
 
@@ -137,14 +142,16 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._errors: dict[str, str] = {}
 
     @staticmethod
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(
+        config_entry: DreameLawnMowerConfigEntry,
+    ) -> DreameLawnMowerOptionsFlow:
         """Return the options flow."""
         return DreameLawnMowerOptionsFlow(config_entry)
 
     async def async_step_user(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial config flow."""
         self._errors = {}
 
@@ -160,11 +167,14 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     password=self._password,
                     country=self._country,
                     account_type=self._account_type,
+                    session=async_get_clientsession(self.hass),
                 )
             except DreameLawnMowerTwoFactorRequiredError:
                 self._errors["base"] = "2fa_required"
             except DreameLawnMowerAuthError as err:
                 self._errors["base"] = auth_error_key(err)
+            except DreameLawnMowerConnectionError:
+                self._errors["base"] = "cannot_connect"
             else:
                 if not devices:
                     self._errors["base"] = "no_devices"
@@ -210,7 +220,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_device(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle selection when multiple mowers are discovered."""
         if user_input is not None:
             return await self._async_create_entry(
@@ -244,10 +254,29 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle credential refresh."""
+        return await self._async_connection_step(
+            self._get_reauth_entry(), "reauth", user_input
+        )
+
+    async def async_step_reconfigure(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Update the configured mower's connection without replacing its entry."""
+        return await self._async_connection_step(
+            self._get_reconfigure_entry(), "reconfigure", user_input
+        )
+
+    async def _async_connection_step(
+        self,
+        entry: DreameLawnMowerConfigEntry,
+        step_id: Literal["reauth", "reconfigure"],
+        user_input: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        """Validate replacement credentials against the entry's existing mower."""
         self._errors = {}
-        entry = self._get_reauth_entry()
 
         if user_input is not None:
             try:
@@ -256,11 +285,14 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     password=user_input[CONF_PASSWORD],
                     country=user_input[CONF_COUNTRY],
                     account_type=entry.data[CONF_ACCOUNT_TYPE],
+                    session=async_get_clientsession(self.hass),
                 )
             except DreameLawnMowerTwoFactorRequiredError:
                 self._errors["base"] = "2fa_required"
             except DreameLawnMowerAuthError as err:
                 self._errors["base"] = auth_error_key(err)
+            except DreameLawnMowerConnectionError:
+                self._errors["base"] = "cannot_connect"
             else:
                 selected = next(
                     (item for item in devices if item.did == entry.data[CONF_DID]),
@@ -269,9 +301,12 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 if selected is None:
                     self._errors["base"] = "no_devices"
                 else:
-                    return self.async_update_reload_and_abort(
+                    await self.async_set_unique_id(selected.unique_id)
+                    self._abort_if_unique_id_mismatch(reason="wrong_device")
+                    changed = self.hass.config_entries.async_update_entry(
                         entry,
-                        data_updates={
+                        data={
+                            **entry.data,
                             CONF_USERNAME: user_input[CONF_USERNAME],
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
                             CONF_COUNTRY: user_input[CONF_COUNTRY],
@@ -282,9 +317,15 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                             CONF_TOKEN: selected.token,
                         },
                     )
+                    # The registered update listener owns changed-data reloads.
+                    # Re-enabled accounts with unchanged credentials, and entries
+                    # without a loaded listener, still need one explicit reload.
+                    if not changed or not entry.update_listeners:
+                        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                    return self.async_abort(reason=f"{step_id}_successful")
 
         return self.async_show_form(
-            step_id="reauth",
+            step_id=step_id,
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
@@ -307,7 +348,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_create_entry(
         self,
         descriptor: DreameLawnMowerDescriptor,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         await self.async_set_unique_id(descriptor.unique_id)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
@@ -330,14 +371,14 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
 class DreameLawnMowerOptionsFlow(OptionsFlow):
     """Handle integration options."""
 
-    def __init__(self, config_entry) -> None:
+    def __init__(self, config_entry: DreameLawnMowerConfigEntry) -> None:
         self._source_entry = config_entry
         self._entry_options = dict(config_entry.options)
 
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             options = dict(user_input)
             if CONF_MAP_ROTATION in options:
@@ -348,7 +389,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 CONF_MAP_RESTART_PREVIEW
             ):
                 await async_remove_restart_preview(
-                    self.hass, self._source_entry.entry_id
+                    self.hass, self._source_entry
                 )
             return self.async_create_entry(title="", data=options)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 import subprocess
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from .video_runner_diagnostics import safe_output_preview
 
@@ -94,4 +94,4 @@ def format_process_returncode(returncode: int) -> str:
 def _response_status(payload: bytes) -> int | None:
     if len(payload) < 12 or payload[:4] != _RESPONSE_MAGIC:
         return None
-    return struct.unpack("!I", payload[4:8])[0]
+    return cast(int, struct.unpack("!I", payload[4:8])[0])

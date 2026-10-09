@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from time import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import voluptuous as vol
-from homeassistant.components.lawn_mower import (
+from homeassistant.components.lawn_mower import LawnMowerEntity
+from homeassistant.components.lawn_mower.const import (
     LawnMowerActivity,
-    LawnMowerEntity,
     LawnMowerEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -28,7 +27,6 @@ from .const import (
     ACTIVITY_MOWING,
     ACTIVITY_PAUSED,
     ACTIVITY_RETURNING,
-    DOMAIN,
 )
 from .control_options import (
     MOWING_ACTION_EDGE,
@@ -58,6 +56,7 @@ from .runtime_cache import (
     begin_runtime_mission_session,
     runtime_mission_session_generation,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .scheduled_mowing import async_start_scheduled_mowing
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
@@ -69,6 +68,10 @@ from .services import (
     preference_change_request,
 )
 from .session_timing import observed_mowing_time_attributes
+
+# Command owners serialize writes; scheduled rejection and stop requests must
+# reach those owners without waiting behind another entity service.
+PARALLEL_UPDATES = 0
 
 ACTIVITY_MAP = {
     ACTIVITY_DOCKED: LawnMowerActivity.DOCKED,
@@ -123,11 +126,11 @@ def _validate_preference_mode(preference_mode: Any) -> int:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the mower entity."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     platform = async_get_current_platform()
     platform.async_register_entity_service(
         "start_scheduled_mowing",
@@ -284,6 +287,15 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         available_vector_map_names = self._available_vector_map_names(
             vector_map_details
         )
+        connection_last_success_at = getattr(
+            self.coordinator, "connection_last_success_at", None
+        )
+        connection_degraded_since = getattr(
+            self.coordinator, "connection_degraded_since", None
+        )
+        connection_recovered_at = getattr(
+            self.coordinator, "connection_recovered_at", None
+        )
         return {
             "connection_degraded": getattr(
                 self.coordinator,
@@ -294,33 +306,18 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 getattr(self.coordinator, "connection_failure_count", 0)
             ),
             "connection_last_success_at": (
-                self.coordinator.connection_last_success_at.isoformat()
-                if getattr(
-                    self.coordinator,
-                    "connection_last_success_at",
-                    None,
-                )
-                is not None
+                connection_last_success_at.isoformat()
+                if connection_last_success_at is not None
                 else None
             ),
             "connection_degraded_since": (
-                self.coordinator.connection_degraded_since.isoformat()
-                if getattr(
-                    self.coordinator,
-                    "connection_degraded_since",
-                    None,
-                )
-                is not None
+                connection_degraded_since.isoformat()
+                if connection_degraded_since is not None
                 else None
             ),
             "connection_recovered_at": (
-                self.coordinator.connection_recovered_at.isoformat()
-                if getattr(
-                    self.coordinator,
-                    "connection_recovered_at",
-                    None,
-                )
-                is not None
+                connection_recovered_at.isoformat()
+                if connection_recovered_at is not None
                 else None
             ),
             "connection_retry_after_seconds": (
@@ -514,7 +511,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         action = self.coordinator.selected_mowing_action
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
-        new_session = False
+        new_session: bool | None = False
         if action == MOWING_ACTION_EDGE:
             self._ensure_selected_map_matches_active()
             contour_entries = current_contour_entries(
@@ -695,7 +692,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_EDGE
         self.coordinator.selected_contour_id = (
-            tuple(normalized[0]) if len(normalized) == 1 else None
+            (normalized[0][0], normalized[0][1]) if len(normalized) == 1 else None
         )
         self.coordinator.selected_zone_id = None
         self.coordinator.selected_spot_id = None
@@ -776,7 +773,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         ):
             return selected
         if zone_entries:
-            return int(zone_entries[0]["area_id"])
+            return int(cast(int, zone_entries[0]["area_id"]))
         return None
 
     def _selected_contour_id(
@@ -813,7 +810,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         ):
             return selected
         if spot_entries:
-            return int(spot_entries[0]["spot_id"])
+            return int(cast(int, spot_entries[0]["spot_id"]))
         return None
 
     def _selected_map_index(self, maps: list[dict[str, object]]) -> int | None:

@@ -1,0 +1,763 @@
+"""Native async cloud login and account requests using a borrowed session."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import re
+import time
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal
+from urllib.parse import urlencode
+
+from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
+
+from .cloud_auth import CloudAuthentication, parse_cloud_authentication
+from .cloud_files import interim_file_params, interim_file_result
+from .cloud_history import history_params, history_result
+from .cloud_video import (
+    VIDEO_READ_PATHS,
+    VideoReadKind,
+    video_read_params,
+    video_read_result,
+)
+from .cloud_wire import (
+    APP_PLUGIN_PATH,
+    DEVICE_INFO_PATH,
+    DEVICE_LIST_PATH,
+    DEVICE_METADATA_PATHS,
+    FIRMWARE_APPROVAL_PATH,
+    DeviceMetadataKind,
+    cloud_batch_data_params,
+    cloud_device_info_data,
+    cloud_device_list_data,
+    cloud_device_list_page,
+    cloud_headers,
+    cloud_login_data,
+    cloud_plugin_params,
+    cloud_properties_params,
+    cloud_rpc_params,
+    cloud_rpc_path,
+    cloud_strings,
+)
+from .exceptions import (
+    DreameLawnMowerAuthError,
+    DreameLawnMowerCloudAPIError,
+    DreameLawnMowerConnectionError,
+)
+from .http_response import async_read_bounded_response
+
+MAX_CLOUD_RESPONSE_BYTES = 1024 * 1024
+
+
+class DreameCloudSession:
+    """Serialize cloud operations without owning the caller's HTTP session.
+
+    Cancellation releases the active response and operation lock. Authentication
+    state changes only after a complete, validated response. No response bodies,
+    credentials, signed URLs, or authentication headers are logged.
+    """
+
+    def __init__(
+        self,
+        session: ClientSession,
+        *,
+        username: str,
+        password: str,
+        country: str,
+        account_type: str,
+    ) -> None:
+        # aiohttp 3.11 cannot send absolute URLs with base_url configured. Its
+        # public API has no base_url accessor; inspect only, never mutate it.
+        if session._base_url is not None:
+            raise ValueError("Cloud discovery requires a session without base_url")
+        if "Authorization" in session.headers:
+            raise ValueError(
+                "Cloud discovery requires a session "
+                "without a default Authorization header"
+            )
+        country = country.lower()
+        if re.fullmatch(r"[a-z]{2}", country) is None:
+            raise DreameLawnMowerAuthError("Invalid cloud country")
+        self._session = session
+        self._strings = cloud_strings(account_type)
+        self._username = username
+        self._password = password
+        self._country = country
+        self._tenant: str | None = None
+        self._token: str | None = None
+        self._refresh_token: str | None = None
+        self._expires_at = 0.0
+        self._user_id: str | None = None
+        self._region: str | None = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def _base_url(self) -> str:
+        return f"https://{self._country}{self._strings[0]}:{self._strings[1]}"
+
+    async def async_get_video_data(
+        self, kind: VideoReadKind, did: str, *,
+        access_token: str | None = None, os: int = 1,
+        uid: str | None = None, model: str | None = None,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read provisioning data; callers resolve device identity before this call."""
+        response = await self._async_read_response(
+            VIDEO_READ_PATHS[kind],
+            json.dumps(video_read_params(
+                kind, did, access_token, os, uid, model,
+            ), separators=(",", ":")),
+            timeout=5 if kind == "eligibility" else 20,
+            deadline=deadline, retry=kind != "eligibility",
+        )
+        return video_read_result(response)
+
+    async def async_get_property_history(
+        self, did: str, key: str, *, limit: int = 3, time_start: int = 0,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read history with account fields built after login or token renewal."""
+        path = "/".join(self._strings[i] for i in (23, 25, 43))
+        response = await self._async_read_response(
+            f"/{path}",
+            lambda: json.dumps(history_params(
+                self._strings, self._user_id, did, self._country,
+                key, "prop", limit, time_start,
+            ), separators=(",", ":")),
+            timeout=20, deadline=deadline,
+        )
+        return history_result(response, self._strings)
+
+    async def async_get_interim_file_url(
+        self, did: str, model: str | None, object_name: str, *,
+        deadline: float, require_response: bool = False, timeout: float = 20,
+    ) -> Any:
+        """Sign a stored object through native read-only cloud HTTP."""
+        path = "/".join(self._strings[index] for index in (23, 39, 55))
+        response = await self._async_read_response(
+            f"/{path}", json.dumps(interim_file_params(
+                self._strings, did, model, self._country, object_name,
+            ), separators=(",", ":")), timeout=timeout, deadline=deadline,
+        )
+        return interim_file_result(response, require_response=require_response)
+
+    async def async_get_public_file(
+        self, url: str, *, deadline: float, attempts: int = 1, timeout: float = 20,
+        max_bytes: int = MAX_CLOUD_RESPONSE_BYTES,
+    ) -> bytes:
+        """Download without account credentials using the injected connection pool."""
+        from .public_download import async_download_public_file
+
+        return await async_download_public_file(
+            self._session, url, deadline=deadline, attempts=attempts, timeout=timeout,
+            max_bytes=max_bytes,
+        )
+
+    async def async_login(
+        self,
+        *,
+        timeout: float = 10,
+        deadline: float | None = None,
+    ) -> None:
+        await self._async_authenticate(force=True, timeout=timeout, deadline=deadline)
+
+    async def async_ensure_authenticated(
+        self,
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> None:
+        await self._async_authenticate(force=False, timeout=timeout, deadline=deadline)
+
+    async def _async_authenticate(
+        self,
+        *,
+        force: bool,
+        timeout: float = 10,
+        deadline: float | None = None,
+    ) -> None:
+        """Authenticate within a deadline that includes waiting for another call."""
+        end = self._deadline(timeout, deadline)
+        try:
+            async with asyncio.timeout(self._remaining(end)):
+                async with self._lock:
+                    if force or self._token is None or time.time() >= self._expires_at:
+                        await self._login(end)
+        except TimeoutError as err:
+            raise DreameLawnMowerConnectionError("Cloud login timed out") from err
+        except ClientError as err:
+            raise DreameLawnMowerConnectionError(
+                "Cloud login connection failed"
+            ) from err
+
+    async def async_get_devices(
+        self,
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read the account inventory, including authentication in the deadline."""
+        path = "/".join(self._strings[index] for index in (23, 24, 27, 28))
+        return await self._async_read(
+            f"/{path}", None, timeout=timeout, deadline=deadline,
+        )
+
+    async def async_get_device_list_page(
+        self,
+        *,
+        current: int = 1,
+        size: int = 20,
+        language: str | None = None,
+        master: bool | None = None,
+        shared_status: int | None = None,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Read one account page with the same filters as the synchronous client."""
+        result = await self._async_read(
+            DEVICE_LIST_PATH,
+            cloud_device_list_data(current, size, language, master, shared_status),
+            timeout=timeout,
+            deadline=deadline,
+        )
+        return cloud_device_list_page(result)
+
+    async def async_get_properties(
+        self, did: str, keys: str, *, timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read raw cloud properties using the legacy vendor payload shape."""
+        path = "/".join(self._strings[index] for index in (23, 25, 41))
+        return await self._async_read(
+            f"/{path}",
+            json.dumps(cloud_properties_params(did, keys), separators=(",", ":")),
+            timeout=timeout, deadline=deadline,
+        )
+
+    async def async_get_batch_device_datas(
+        self, did: str, properties: Sequence[str], *, timeout: float = 20,
+        deadline: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Read named device metadata through the shared borrowed-session owner."""
+        path = "/".join(self._strings[index] for index in (23, 26, 44))
+        result = await self._async_read(
+            f"/{path}", json.dumps(
+                cloud_batch_data_params(self._strings, did, properties),
+                separators=(",", ":"),
+            ), timeout=timeout, deadline=deadline,
+        )
+        if result is not None and not isinstance(result, dict):
+            raise DreameLawnMowerConnectionError("Cloud batch metadata is invalid")
+        return result
+
+    async def async_get_device_info(
+        self,
+        did: str,
+        *,
+        language: str | None = None,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Read device metadata without mutating the separate MQTT owner."""
+        result = await self._async_read(
+            DEVICE_INFO_PATH, cloud_device_info_data(did, language),
+            timeout=timeout, deadline=deadline,
+        )
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise DreameLawnMowerConnectionError("Cloud device info is invalid")
+        return result
+
+    async def async_get_device_metadata(
+        self,
+        did: str,
+        kind: DeviceMetadataKind,
+        *,
+        language: str | None = None,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read metadata while retaining each endpoint's vendor error contract."""
+        response = await self._async_read_response(
+            DEVICE_METADATA_PATHS[kind], cloud_device_info_data(did, language),
+            timeout=timeout, deadline=deadline,
+        )
+        if response.get("code") == 0 and "data" in response:
+            return response["data"]
+        return response if kind == "firmware" else None
+
+    async def async_get_app_plugin_version(
+        self,
+        model: str | None,
+        app_version_code: int = 2050300,
+        os: int = 1,
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read plugin metadata with the vendor's GET query contract."""
+        query = urlencode(cloud_plugin_params(model, app_version_code, os))
+        response = await self._async_read_response(
+            f"{APP_PLUGIN_PATH}?{query}", None,
+            timeout=timeout, deadline=deadline, http_method="GET",
+        )
+        return response.get("data") if response.get("code") == 0 else None
+
+    @property
+    def authentication(self) -> CloudAuthentication:
+        """Capture validated credentials for the same account's MQTT owner."""
+        if self._token is None:
+            raise DreameLawnMowerAuthError("Cloud authentication is unavailable")
+        return CloudAuthentication(
+            token=self._token, refresh_token=self._refresh_token,
+            expires_at=self._expires_at, tenant=self._tenant,
+            user_id=self._user_id, region=self._region,
+        )
+
+    async def async_get_connection_info(
+        self, did: str, *, deadline: float,
+    ) -> dict[str, Any] | None:
+        """Read startup identity and firmware metadata within one shared deadline."""
+        info = await self.async_get_device_info(did, deadline=deadline)
+        if not info:
+            return None
+        strings = self._strings
+        path = "/".join(strings[index] for index in (23, 25, 30))
+        try:
+            response = await self._async_read_response(
+                f"/{path}", cloud_device_info_data(did, None),
+                timeout=20, deadline=deadline,
+            )
+        except DreameLawnMowerConnectionError:
+            # Firmware enrichment is optional; required identity and initial
+            # properties still determine whether startup can succeed. Never
+            # turn an expired shared deadline into a successful fallback.
+            if time.monotonic() >= deadline:
+                raise
+            return info
+        if response.get("code") != 0 or response.get("data") is None:
+            return info
+        otc = response["data"]
+        if not isinstance(otc, dict):
+            raise DreameLawnMowerConnectionError("Cloud firmware info is invalid")
+        if strings[31] in otc:
+            status = otc[strings[31]]
+            properties = status.get(strings[32]) if isinstance(status, dict) else None
+            if not isinstance(properties, dict):
+                raise DreameLawnMowerConnectionError("Cloud firmware info is invalid")
+            return {**properties, **info}
+        devices = await self.async_get_devices(deadline=deadline)
+        page = devices.get(strings[34]) if isinstance(devices, dict) else None
+        records = page.get(strings[36]) if isinstance(page, dict) else None
+        if not isinstance(records, list):
+            raise DreameLawnMowerConnectionError("Cloud device inventory is invalid")
+        for record in records:
+            if isinstance(record, dict) and str(record.get("did")) == did:
+                return record
+        return None
+
+    async def async_read_device_properties(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        properties: Sequence[Mapping[str, int | str]],
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Send only a property-read RPC; the device owner supplies its request ID."""
+        return await self._async_rpc(
+            did,
+            host,
+            request_id,
+            "get_properties",
+            [dict(row) for row in properties],
+            timeout=timeout,
+            deadline=deadline,
+        )
+
+    async def async_command_device_action(
+        self, did: str, host: str | None, request_id: int,
+        siid: int, aiid: int, parameters: Any, *, deadline: float,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> Any:
+        """Dispatch one mapped device action without replay after sending."""
+        return await self._async_rpc(
+            did, host, request_id, "action",
+            {"did": str(did), "siid": siid, "aiid": aiid,
+             "in": [] if parameters is None else parameters},
+            timeout=max(0.001, deadline - time.monotonic()),
+            deadline=deadline, command=True, on_dispatch=on_dispatch,
+        )
+
+    async def async_command_device_property(
+        self, did: str, host: str | None, request_id: int,
+        siid: int, piid: int, value: Any, *, deadline: float,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> Any:
+        """Write a property once without replaying an uncertain mutation."""
+        return await self._async_rpc(
+            did, host, request_id, "set_properties",
+            [{"did": str(did), "siid": siid, "piid": piid, "value": value}],
+            timeout=max(0.001, deadline - time.monotonic()),
+            deadline=deadline, command=True, on_dispatch=on_dispatch,
+        )
+
+    async def async_read_app_action(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        action: Mapping[str, Any],
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+        strict_response: bool = False,
+    ) -> Any:
+        """Read the mower app bridge without permitting retryable mutations."""
+        if action.get("m") != "g":
+            raise ValueError("App action read requires m='g'")
+        result = await self._async_rpc(
+            did,
+            host,
+            request_id,
+            "action",
+            {"did": str(did), "siid": 2, "aiid": 50, "in": [dict(action)]},
+            timeout=timeout,
+            deadline=deadline,
+            strict_response=strict_response,
+        )
+        out = result.get("out") if isinstance(result, Mapping) else None
+        if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
+            return out[0] if out else None
+        return result
+
+    async def async_command_app_action(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        action: Mapping[str, Any],
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> Any:
+        """Dispatch a mutation once; an uncertain reply must never replay it."""
+        if action.get("m") not in {"a", "s"}:
+            raise ValueError("App command requires m='a' or m='s'")
+        result = await self._async_rpc(
+            did,
+            host,
+            request_id,
+            "action",
+            {"did": str(did), "siid": 2, "aiid": 50, "in": [dict(action)]},
+            timeout=timeout,
+            deadline=deadline,
+            command=True,
+            on_dispatch=on_dispatch,
+        )
+        out = result.get("out") if isinstance(result, Mapping) else None
+        if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
+            return out[0] if out else None
+        return result
+
+    async def _async_rpc(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        method: str,
+        parameters: object,
+        *,
+        timeout: float,
+        deadline: float | None,
+        command: bool = False,
+        strict_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> Any:
+        """Apply the common cloud RPC envelope and absent-result semantics."""
+        path = f"/{cloud_rpc_path(self._strings, host)}"
+        request_data = json.dumps(
+            cloud_rpc_params(did, request_id, method, parameters),
+            separators=(",", ":"),
+        )
+        if command:
+            payload = await self._async_command_response(
+                path,
+                request_data,
+                timeout=timeout,
+                deadline=deadline,
+                on_dispatch=on_dispatch,
+            )
+        else:
+            payload = await self._async_read_response(
+                path,
+                request_data,
+                timeout=timeout,
+                deadline=deadline,
+            )
+        if command or strict_response:
+            code = payload.get("code")
+            if isinstance(code, bool) or not isinstance(code, int):
+                raise DreameLawnMowerConnectionError(
+                    "Cloud command response code is invalid"
+                )
+            if code != 0:
+                raise DreameLawnMowerCloudAPIError(code)
+        if payload.get("code") == 80001:
+            return None
+        if payload.get("code") != 0:
+            raise DreameLawnMowerConnectionError("Device read was rejected")
+        data = payload.get("data")
+        return data.get("result") if isinstance(data, Mapping) else None
+
+    async def _async_read(
+        self,
+        path: str,
+        data: str | None,
+        *,
+        timeout: float,
+        deadline: float | None,
+    ) -> Any:
+        payload = await self._async_read_response(
+            path, data, timeout=timeout, deadline=deadline,
+        )
+        if payload.get("code") != 0:
+            raise DreameLawnMowerConnectionError("Cloud inventory request was rejected")
+        return payload.get("data")
+
+    async def _async_read_response(
+        self,
+        path: str,
+        data: str | None | Callable[[], str],
+        *,
+        timeout: float,
+        deadline: float | None,
+        http_method: Literal["GET", "POST"] = "POST",
+        retry: bool = True,
+    ) -> dict[str, Any]:
+        """Serialize a read-only request, authentication, and bounded retries."""
+        end = self._deadline(timeout, deadline)
+        try:
+            async with asyncio.timeout(self._remaining(end)):
+                async with self._lock:
+                    if self._token is None or time.time() >= self._expires_at:
+                        await self._login(end)
+                    for attempt in range(2 if retry else 1):
+                        headers = self._authenticated_headers()
+                        request = self._request_read if retry else self._request_json
+                        status, payload = await request(
+                            f"{self._base_url}{path}",
+                            headers,
+                            data() if callable(data) else data,
+                            end,
+                            http_method=http_method,
+                        )
+                        if status == 401 and not retry:
+                            self._token = None
+                        if status == 401 and attempt == 0 and retry:
+                            await self._login(end)
+                            continue
+                        if status != 200:
+                            raise DreameLawnMowerConnectionError(
+                                f"Cloud inventory request failed: HTTP {status}"
+                            )
+                        return payload
+        except TimeoutError as err:
+            raise DreameLawnMowerConnectionError("Cloud inventory timed out") from err
+        except ClientError as err:
+            raise DreameLawnMowerConnectionError(
+                "Cloud inventory connection failed"
+            ) from err
+        raise DreameLawnMowerConnectionError("Cloud inventory request failed")
+
+    async def async_approve_firmware_update(
+        self, did: str, language: str | None = None, *,
+        timeout: float = 20, deadline: float | None = None,
+    ) -> dict[str, Any]:
+        """Submit firmware approval once, retaining the vendor result wrapper."""
+        return await self._async_command_response(
+            FIRMWARE_APPROVAL_PATH, cloud_device_info_data(did, language),
+            timeout=timeout, deadline=deadline,
+        )
+
+    async def _async_command_response(
+        self,
+        path: str,
+        data: str | None,
+        *,
+        timeout: float,
+        deadline: float | None,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Authenticate first; never retry or reauthenticate a dispatched command."""
+        end = self._deadline(timeout, deadline)
+        try:
+            async with asyncio.timeout(self._remaining(end)):
+                async with self._lock:
+                    if self._token is None or time.time() >= self._expires_at:
+                        await self._login(end)
+                    headers = self._authenticated_headers()
+                    status, payload = await self._request_json(
+                        f"{self._base_url}{path}",
+                        headers,
+                        data,
+                        end,
+                        on_dispatch=on_dispatch,
+                    )
+                    if status == 401:
+                        # A later operation can log in again, but this command
+                        # may already have reached the vendor. Do not replay it.
+                        self._token = None
+                    if status != 200:
+                        raise DreameLawnMowerConnectionError(
+                            f"Cloud command failed: HTTP {status}"
+                        )
+                    return payload
+        except TimeoutError as err:
+            raise DreameLawnMowerConnectionError("Cloud command timed out") from err
+        except ClientError as err:
+            raise DreameLawnMowerConnectionError(
+                "Cloud command connection failed"
+            ) from err
+
+    def _authenticated_headers(self) -> dict[str, str]:
+        headers = cloud_headers(self._strings, self._country, self._tenant)
+        headers[self._strings[51]] = self._strings[52]
+        assert self._token is not None
+        headers[self._strings[46]] = self._token
+        return headers
+
+    async def _login(self, deadline: float) -> None:
+        for attempt in range(2):
+            status, payload = await self._request_json(
+                self._base_url + self._strings[17],
+                cloud_headers(self._strings, self._country, self._tenant),
+                cloud_login_data(
+                    self._strings,
+                    self._username,
+                    self._password,
+                    self._refresh_token,
+                ),
+                deadline,
+            )
+            if status != 200:
+                description = payload.get("error_description")
+                if (
+                    attempt == 0
+                    and self._refresh_token
+                    and isinstance(description, str)
+                    and "refresh token" in description
+                ):
+                    self._refresh_token = None
+                    continue
+                raise DreameLawnMowerAuthError(
+                    f"Cloud authentication failed: HTTP {status}"
+                )
+            authentication = parse_cloud_authentication(
+                payload, self._strings, now=time.time(),
+                tenant=self._tenant, region=self._region,
+            )
+            self._token = authentication.token
+            self._refresh_token = authentication.refresh_token
+            self._tenant = authentication.tenant
+            self._expires_at = authentication.expires_at
+            self._user_id = authentication.user_id
+            self._region = authentication.region
+            return
+        raise DreameLawnMowerAuthError("Cloud authentication failed")
+
+    async def _request_read(
+        self,
+        url: str,
+        headers: Mapping[str, str],
+        data: str | None,
+        deadline: float,
+        *,
+        http_method: Literal["GET", "POST"] = "POST",
+    ) -> tuple[int, dict[str, Any]]:
+        """Retry only read-only account requests within their shared deadline."""
+        for attempt in range(3):
+            try:
+                return await self._request_json(
+                    url, headers, data, deadline, http_method=http_method,
+                )
+            except (ClientError, TimeoutError):
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(
+                    min((0.25, 1.0)[attempt], self._remaining(deadline))
+                )
+        raise AssertionError("Inventory retry loop exhausted")
+
+    async def _request_json(
+        self,
+        url: str,
+        headers: Mapping[str, str],
+        data: str | None,
+        deadline: float,
+        *,
+        http_method: Literal["GET", "POST"] = "POST",
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        request_headers = dict(headers)
+        request_headers["Accept-Encoding"] = "gzip, deflate"
+        # Explicit auth overrides both borrowed defaults and environment netrc
+        # credentials while preserving the shared vendor wire representation.
+        auth = BasicAuth.decode(request_headers.pop("Authorization"))
+        remaining = self._remaining(deadline)
+        if self._session.closed:
+            raise DreameLawnMowerConnectionError("Cloud session is closed")
+        if on_dispatch is not None:
+            on_dispatch()
+        async with self._session.request(
+            http_method,
+            url,
+            headers=request_headers,
+            auth=auth,
+            data=data,
+            timeout=ClientTimeout(total=remaining),
+            allow_redirects=False,
+            raise_for_status=False,
+            auto_decompress=False,
+        ) as response:
+            body = await async_read_bounded_response(
+                response,
+                max_bytes=MAX_CLOUD_RESPONSE_BYTES,
+            )
+            try:
+                payload = json.loads(body)
+            except (ValueError, UnicodeError) as err:
+                if response.status >= 400:
+                    # Callers classify HTTP failures by status. Login and
+                    # inventory endpoints may return empty or plain-text errors.
+                    return response.status, {}
+                raise DreameLawnMowerConnectionError(
+                    "Cloud response is not valid JSON"
+                ) from err
+            if not isinstance(payload, dict):
+                if response.status >= 400:
+                    return response.status, {}
+                raise DreameLawnMowerConnectionError("Cloud response is not an object")
+            return response.status, payload
+
+    @staticmethod
+    def _deadline(timeout: float, deadline: float | None) -> float:
+        if not math.isfinite(timeout) or (
+            deadline is not None and not math.isfinite(deadline)
+        ):
+            raise ValueError("Cloud timeout and deadline must be finite")
+        end = time.monotonic() + timeout
+        return min(end, deadline) if deadline is not None else end
+
+    @staticmethod
+    def _remaining(deadline: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Cloud operation timed out")
+        return remaining

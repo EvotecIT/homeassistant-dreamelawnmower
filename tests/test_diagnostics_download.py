@@ -8,7 +8,6 @@ from enum import IntFlag
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower import diagnostics as diagnostics_module
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.diagnostic_events import (
     DreameLawnMowerDiagnosticEventStore,
 )
@@ -115,10 +114,11 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         },
     )
     hass = SimpleNamespace(
-        data={DOMAIN: {"entry-1": coordinator}},
+        data={},
         states=SimpleNamespace(get=lambda _entity_id: state),
     )
     entry = SimpleNamespace(
+        runtime_data=coordinator,
         entry_id="entry-1",
         data={"did": "device-1", "token": "secret"},
         options={
@@ -130,6 +130,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         version=1,
         minor_version=2,
     )
+    entry.runtime_data = coordinator
     registry_entry = SimpleNamespace(
         entity_id="camera.garden_live_video",
         original_name="Live Video",

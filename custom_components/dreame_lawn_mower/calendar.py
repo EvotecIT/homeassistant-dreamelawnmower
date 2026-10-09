@@ -5,34 +5,36 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .entity import DreameLawnMowerEntity
+from .runtime_data import DreameLawnMowerConfigEntry
 from .schedule_cache import schedule_entry_has_usable_data
 
 _LOGGER = logging.getLogger(__name__)
+
+# Schedule refreshes are owned by the shared coordinator.
+PARALLEL_UPDATES = 0
 
 SCHEDULE_LOOKAHEAD_DAYS = 14
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower schedule calendar."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerScheduleCalendar(coordinator),
@@ -195,6 +197,8 @@ class DreameLawnMowerAllSchedulesCalendar(DreameLawnMowerScheduleCalendar):
 class DreameLawnMowerMapScheduleCalendar(DreameLawnMowerScheduleCalendar):
     """Read the saved plans of one map without claiming it is the active map."""
 
+    _map_index: int
+
     def __init__(self, coordinator: DreameLawnMowerCoordinator, map_index: int) -> None:
         self._map_index = map_index
         self._unique_id_suffix = f"map_{map_index}_schedule_calendar"
@@ -342,7 +346,7 @@ def schedule_calendar_selection(
             target = hidden_schedules
         target.append(_schedule_selection_entry(schedule))
 
-    selection = {
+    selection: dict[str, Any] = {
         "mode": "all_schedules" if include_all_schedules else "active_schedule",
         "active_version": active_version,
         "active_version_filter_applied": bool(
@@ -461,7 +465,7 @@ def _task_events(
         event_end = (
             event_start + timedelta(minutes=1)
             if start_only
-            else _combine_schedule_time(day, end_minute)
+            else _combine_schedule_time(day, cast(int, end_minute))
         )
         if event_end <= event_start:
             event_end += timedelta(days=1)

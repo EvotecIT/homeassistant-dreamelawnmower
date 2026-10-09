@@ -8,6 +8,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from aiohttp import ClientSession
+
 from .app_protocol import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
@@ -22,9 +24,11 @@ from .client_constants import (
     REMOTE_CONTROL_MAX_VELOCITY,
 )
 from .client_shared_helpers import _operation_value_type
+from .cloud_session import DreameCloudSession
 from .exceptions import (
     DeviceException,
     DreameLawnMowerAuthError,
+    DreameLawnMowerConnectionError,
     DreameLawnMowerTwoFactorRequiredError,
 )
 from .exceptions import (
@@ -113,13 +117,42 @@ def _sync_discover_devices(
         raise DreameLawnMowerAuthError("Unable to log into the Dreame or MOVA cloud.")
 
     records = protocol.cloud.get_devices()
+    return _discovery_descriptors(records, account_type=account_type, country=country)
+
+
+async def async_discover_devices(
+    session: ClientSession,
+    *,
+    username: str,
+    password: str,
+    country: str,
+    account_type: str,
+) -> list[DreameLawnMowerDescriptor]:
+    """Discover account devices without a worker thread or an owned session."""
+    cloud = DreameCloudSession(
+        session, username=username, password=password,
+        country=country, account_type=account_type,
+    )
+    records = await cloud.async_get_devices()
+    return _discovery_descriptors(records, account_type=account_type, country=country)
+
+
+def _discovery_descriptors(
+    records: Any, *, account_type: str, country: str,
+) -> list[DreameLawnMowerDescriptor]:
+    """Normalize the existing inventory shapes for both transport entry points."""
     if not records:
         return []
 
     if isinstance(records, dict):
-        items = records.get("page", {}).get("records", records)
+        page = records.get("page", {})
+        items = page.get("records", records) if isinstance(page, dict) else None
     else:
         items = records
+    if not isinstance(items, list) or any(
+        not isinstance(record, dict) for record in items
+    ):
+        raise DreameLawnMowerConnectionError("Cloud device inventory is invalid")
 
     found: list[DreameLawnMowerDescriptor] = []
     for record in items:

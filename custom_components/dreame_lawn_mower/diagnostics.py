@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import system_info
 from homeassistant.loader import async_get_loaded_integration
@@ -13,11 +16,14 @@ from .reporting import (
     build_entity_diagnostics,
     build_report_context,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 
 
-async def async_get_config_entry_diagnostics(hass, entry):
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
+) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     await coordinator.async_request_refresh()
     integration = async_get_loaded_integration(hass, DOMAIN)
     registry = er.async_get(hass)

@@ -29,7 +29,8 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping
+from typing import Mapping
+from numpy.typing import NDArray
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -203,30 +204,60 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+_Color = tuple[int, int, int, int]
+_IconColor = tuple[int, int, int] | _Color
+_LayerObjects = dict[int | str, Image.Image | None]
+_Layers = dict[MapRendererLayer, Image.Image | _LayerObjects]
+_CalibrationPoints = list[dict[str, dict[str, int | float]]]
+
+
+def _layer_image(layers: _Layers, key: MapRendererLayer) -> Image.Image:
+    """Read an image layer from the existing heterogeneous cache."""
+    value = layers[key]
+    if not isinstance(value, Image.Image):
+        raise TypeError("Expected an image layer.")
+    return value
+
+
+def _layer_objects(layers: _Layers, key: MapRendererLayer) -> _LayerObjects:
+    """Read the existing object-image collection without copying its entries."""
+    value = layers[key]
+    if not isinstance(value, dict):
+        raise TypeError("Expected an object layer collection.")
+    return value
+
+
+def _json_default(value: object) -> dict[str, object]:
+    """Preserve the existing non-null dataclass resource/map export fields."""
+    return {key: item for key, item in vars(value).items() if item is not None}
+
+
 class DreameMowerMapRenderer:
     def __init__(
         self,
-        color_scheme: str = None,
-        icon_set: str = None,
-        map_objects: list[str] = None,
+        color_scheme: str | None = None,
+        icon_set: str | None = None,
+        map_objects: list[str] | None = None,
         robot_type: int = 0,
         low_resolution: bool = False,
         square: bool = False,
         cache: bool = True,
     ) -> None:
-        self.color_scheme: MapRendererColorScheme = MAP_COLOR_SCHEME_LIST.get(color_scheme, MapRendererColorScheme())
-        self.icon_set: int = MAP_ICON_SET_LIST.get(icon_set, 0)
+        self.color_scheme: MapRendererColorScheme = MAP_COLOR_SCHEME_LIST.get(
+            color_scheme or "", MapRendererColorScheme()
+        )
+        self.icon_set: int = MAP_ICON_SET_LIST.get(icon_set or "", 0)
         self.config: MapRendererConfig = MapRendererConfig()
         if map_objects is not None:
             for attr in self.config.__dict__.keys():
                 if attr not in map_objects:
                     setattr(self.config, attr, False)
 
-        self._map_data: MapData = None
+        self._map_data: MapData | None = None
         self.render_complete: bool = True
-        self._layers: dict[MapRendererLayer, Any] = {}
-        self._robot_status: int = None
-        self._station_status: int = None
+        self._layers: _Layers = {}
+        self._robot_status: int | None = None
+        self._station_status: int | None = None
         self._robot_type: int = robot_type
         self._low_resolution: bool = low_resolution
         self._low_memory: bool = low_resolution
@@ -237,8 +268,8 @@ class DreameMowerMapRenderer:
         self._square: bool = square
         self._cache: bool = cache
         self._has_mask: bool = False
-        self._calibration_points: dict[str, int] = None
-        self._default_calibration_points: dict[str, int] = [
+        self._calibration_points: _CalibrationPoints | None = None
+        self._default_calibration_points: _CalibrationPoints = [
             {
                 MAP_PARAMETER_MOWER: {
                     MAP_DATA_JSON_PARAMETER_X: 0,
@@ -271,35 +302,35 @@ class DreameMowerMapRenderer:
             },
         ]
 
-        self._image = None
-        self._charger_icon = None
-        self._robot_icon = None
-        self._robot_charging_icon = None
-        self._robot_cleaning_icon = None
-        self._robot_warning_icon = None
-        self._robot_sleeping_icon = None
-        self._robot_emptying_icon = None
-        self._robot_cleaning_direction_icon = None
-        self._obstacle_background = None
-        self._obstacle_hidden_background = None
-        self._cruise_path_point_background = None
-        self._cruise_point_background = None
-        self._furniture_background = None
-        self._wifi_icon = None
-        self._font_file = None
-        self._light_font_file = None
-        self._default_map_image = None
-        self._obstacle_bottom_left_icon = None
-        self._obstacle_top_left_icon = None
-        self._obstacle_bottom_right_icon = None
-        self._obstacle_top_right_icon = None
-        self._map_problem_icon = None
+        self._image: Image.Image | None = None
+        self._charger_icon: Image.Image | None = None
+        self._robot_icon: Image.Image | None = None
+        self._robot_charging_icon: Image.Image | None = None
+        self._robot_cleaning_icon: Image.Image | None = None
+        self._robot_warning_icon: Image.Image | None = None
+        self._robot_sleeping_icon: list[Image.Image] | None = None
+        self._robot_emptying_icon: Image.Image | None = None
+        self._robot_cleaning_direction_icon: Image.Image | None = None
+        self._obstacle_background: Image.Image | None = None
+        self._obstacle_hidden_background: Image.Image | None = None
+        self._cruise_path_point_background: Image.Image | None = None
+        self._cruise_point_background: Image.Image | None = None
+        self._furniture_background: Image.Image | None = None
+        self._wifi_icon: Image.Image | None = None
+        self._font_file: bytes | None = None
+        self._light_font_file: bytes | None = None
+        self._default_map_image: Image.Image | None = None
+        self._obstacle_bottom_left_icon: Image.Image | None = None
+        self._obstacle_top_left_icon: Image.Image | None = None
+        self._obstacle_bottom_right_icon: Image.Image | None = None
+        self._obstacle_top_right_icon: Image.Image | None = None
+        self._map_problem_icon: Image.Image | None = None
 
-        self._segment_icons = {}
-        self._obstacle_icons = {}
-        self._obstacle_hidden_icons = {}
-        self._furniture_icons = {}
-        self._furniture_images = {}
+        self._segment_icons: dict[int, Image.Image] = {}
+        self._obstacle_icons: dict[int, Image.Image] = {}
+        self._obstacle_hidden_icons: dict[int, Image.Image] = {}
+        self._furniture_icons: dict[int, Image.Image] = {}
+        self._furniture_images: dict[int, Image.Image] = {}
 
         if self._low_memory:
             self.config.obstacle = False
@@ -318,38 +349,61 @@ class DreameMowerMapRenderer:
 
         if self.config.cleaning_times:
             self._cleaning_times_icon = [
-                Image.open(BytesIO(base64.b64decode(icon))).convert("RGBA") for icon in repeats
+                Image.open(BytesIO(base64.b64decode(icon))).convert("RGBA")
+                for icon in repeats
             ]
         if self.config.cleaning_mode:
             self._cleaning_mode_icon = [
-                Image.open(BytesIO(base64.b64decode(icon))).convert("RGBA") for icon in cleaning_mode
+                Image.open(BytesIO(base64.b64decode(icon))).convert("RGBA")
+                for icon in cleaning_mode
             ]
 
     @staticmethod
-    def _to_buffer(image) -> bytes:
-        if image:
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            return buffer.getvalue()
+    def _valid_raster(
+        map_data: MapData,
+    ) -> tuple[MapImageDimensions, NDArray[np.uint8]] | None:
+        dimensions, pixels = map_data.dimensions, map_data.pixel_type
+        if dimensions is None or pixels is None:
+            return None
+        if dimensions.grid_size <= 0 or dimensions.width <= 0 or dimensions.height <= 0:
+            return None
+        if pixels.ndim != 2 or pixels.shape != (dimensions.width, dimensions.height):
+            return None
+        return dimensions, pixels
 
     @staticmethod
-    def _set_icon_color(image, size, color):
+    def _to_buffer(image: Image.Image) -> bytes:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    @staticmethod
+    def _set_icon_color(
+        image: Image.Image, size: float, color: _IconColor
+    ) -> Image.Image:
         ico = image.resize((int(size), int(size)))
         pixdata = ico.load()
+        if pixdata is None:
+            raise ValueError("Image has no writable pixel buffer.")
         for yy in range(ico.size[1]):
             for xx in range(ico.size[0]):
+                pixel = pixdata[xx, yy]
                 if (
-                    pixdata[xx, yy][0] > 80
-                    and pixdata[xx, yy][1] > 80
-                    and pixdata[xx, yy][2] > 80
-                    and pixdata[xx, yy][3] > 80
+                    isinstance(pixel, tuple)
+                    and len(pixel) >= 4
+                    and pixel[0] > 80
+                    and pixel[1] > 80
+                    and pixel[2] > 80
+                    and pixel[3] > 80
                 ):
                     pixdata[xx, yy] = color
 
         return ico
 
     @staticmethod
-    def _calculate_bounds(dimensions, segments) -> list[int]:
+    def _calculate_bounds(
+        dimensions: MapImageDimensions, segments: Mapping[int, Segment] | None
+    ) -> list[int] | None:
         if segments:
             min_x = dimensions.width - 1
             min_y = dimensions.height - 1
@@ -357,40 +411,43 @@ class DreameMowerMapRenderer:
             max_y = 0
             for segment in segments.values():
                 p = segment.to_coord(dimensions, False)
-                x_coords = [int(p.x0), int(p.x1)]
-                y_coords = [int(p.y0), int(p.y1)]
+                x0, y0, x1, y1 = p._bounds()
+                x_coords = [int(x0), int(x1)]
+                y_coords = [int(y0), int(y1)]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
                 max_y = max(max(y_coords), max_y)
 
             return [min_x, min_y, max_x, max_y]
+        return None
 
     @staticmethod
     def _calculate_padding(
-        dimensions,
-        active_areas,
-        no_go_areas,
-        walls,
-        pathways,
-        furnitures,
-        furniture_version,
-        segments,
-        padding,
-        min_width,
-        min_height,
-        scale,
+        dimensions: MapImageDimensions,
+        active_areas: list[Area] | None,
+        no_go_areas: list[Area] | None,
+        walls: list[Wall] | None,
+        pathways: list[Wall] | None,
+        furnitures: Mapping[int, Furniture] | None,
+        furniture_version: int | None,
+        segments: Mapping[int, Segment] | None,
+        padding: list[int],
+        min_width: int,
+        min_height: int,
+        scale: int,
     ) -> list[int]:
-        min_x = 0
-        min_y = 0
-        max_x = dimensions.width
-        max_y = dimensions.height
+        min_x: float = 0
+        min_y: float = 0
+        max_x: float = dimensions.width
+        max_y: float = dimensions.height
 
         if segments:
             for segment in segments.values():
-                p = segment.to_coord(dimensions, False)
-                x_coords = sorted([int(p.x0), int(p.x1)])
-                y_coords = sorted([int(p.y0), int(p.y1)])
+                segment_point = segment.to_coord(dimensions, False)
+                x0, y0, x1, y1 = segment_point._bounds()
+                x_coords: list[float] = sorted([int(x0), int(x1)])
+                y_coords: list[float] = sorted([int(y0), int(y1)])
                 min_x = min(x_coords[0], min_x)
                 max_x = max(x_coords[1], max_x)
                 min_y = min(y_coords[0], min_y)
@@ -398,9 +455,19 @@ class DreameMowerMapRenderer:
 
         if active_areas:
             for area in active_areas:
-                p = area.to_coord(dimensions)
-                x_coords = [p.x0, p.x1, p.x2, p.x3]
-                y_coords = [p.y0, p.y1, p.y2, p.y3]
+                active_point = area.to_coord(dimensions)
+                x_coords = [
+                    active_point.x0,
+                    active_point.x1,
+                    active_point.x2,
+                    active_point.x3,
+                ]
+                y_coords = [
+                    active_point.y0,
+                    active_point.y1,
+                    active_point.y2,
+                    active_point.y3,
+                ]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -408,9 +475,19 @@ class DreameMowerMapRenderer:
 
         if no_go_areas:
             for area in no_go_areas:
-                p = area.to_coord(dimensions)
-                x_coords = [p.x0, p.x1, p.x2, p.x3]
-                y_coords = [p.y0, p.y1, p.y2, p.y3]
+                forbidden_point = area.to_coord(dimensions)
+                x_coords = [
+                    forbidden_point.x0,
+                    forbidden_point.x1,
+                    forbidden_point.x2,
+                    forbidden_point.x3,
+                ]
+                y_coords = [
+                    forbidden_point.y0,
+                    forbidden_point.y1,
+                    forbidden_point.y2,
+                    forbidden_point.y3,
+                ]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -418,9 +495,9 @@ class DreameMowerMapRenderer:
 
         if walls:
             for wall in walls:
-                p = wall.to_coord(dimensions)
-                x_coords = [p.x0, p.x1]
-                y_coords = [p.y0, p.y1]
+                wall_point = wall.to_coord(dimensions)
+                x_coords = [wall_point.x0, wall_point.x1]
+                y_coords = [wall_point.y0, wall_point.y1]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -428,9 +505,9 @@ class DreameMowerMapRenderer:
 
         if pathways:
             for line in pathways:
-                p = line.to_coord(dimensions)
-                x_coords = [p.x0, p.x1]
-                y_coords = [p.y0, p.y1]
+                pathway_point = line.to_coord(dimensions)
+                x_coords = [pathway_point.x0, pathway_point.x1]
+                y_coords = [pathway_point.y0, pathway_point.y1]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -438,24 +515,28 @@ class DreameMowerMapRenderer:
 
         if furnitures:
             for k, v in furnitures.items():
-                p = Point(v.x, v.y).to_coord(dimensions)
+                furniture_point = Point(v.x, v.y).to_coord(dimensions)
                 w = 0
                 h = 0
                 if v.width and v.height:
                     if v.type.value not in (
-                        FURNITURE_V2_TYPE_TO_IMAGE if furniture_version == 2 else FURNITURE_TYPE_TO_IMAGE
+                        FURNITURE_V2_TYPE_TO_IMAGE
+                        if furniture_version == 2
+                        else FURNITURE_TYPE_TO_IMAGE
                     ):
                         continue
                     w = int((v.width / dimensions.grid_size) / 2)
                     h = int((v.height / dimensions.grid_size) / 2)
                 elif v.type.value not in (
-                    FURNITURE_V2_TYPE_TO_ICON if furniture_version == 2 else FURNITURE_TYPE_TO_ICON
+                    FURNITURE_V2_TYPE_TO_ICON
+                    if furniture_version == 2
+                    else FURNITURE_TYPE_TO_ICON
                 ):
                     continue
-                min_x = min(p.x - w, min_x)
-                max_x = max(p.x + w, max_x)
-                min_y = min(p.y - h, min_y)
-                max_y = max(p.y + h, max_y)
+                min_x = min(furniture_point.x - w, min_x)
+                max_x = max(furniture_point.x + w, max_x)
+                min_y = min(furniture_point.y - h, min_y)
+                max_y = max(furniture_point.y + h, max_y)
 
         if min_x < 0:
             padding[0] = padding[0] + int(-min_x)
@@ -482,11 +563,18 @@ class DreameMowerMapRenderer:
         return padding
 
     @staticmethod
-    def _calculate_calibration_points(map_data: MapData) -> dict[str, int] | None:
-        if (map_data.dimensions.width * map_data.dimensions.height) > 0:
-            calibration_points = []
+    def _calculate_calibration_points(map_data: MapData) -> _CalibrationPoints | None:
+        dimensions = map_data.dimensions
+        if (
+            dimensions is not None
+            and dimensions.grid_size > 0
+            and (dimensions.width * dimensions.height) > 0
+        ):
+            calibration_points: _CalibrationPoints = []
             for point in [Point(0, 0), Point(1000, 0), Point(0, 1000)]:
-                img_point = point.to_img(map_data.dimensions).rotated(map_data.dimensions, map_data.rotation)
+                img_point = point.to_img(dimensions).rotated(
+                    dimensions, map_data.rotation or 0
+                )
                 calibration_points.append(
                     {
                         MAP_PARAMETER_MOWER: {
@@ -500,55 +588,78 @@ class DreameMowerMapRenderer:
                     }
                 )
             return calibration_points
+        return None
 
     @staticmethod
-    def _alpha_composite(source, destination):
+    def _alpha_composite(source: _Color, destination: NDArray[np.uint8]) -> _Color:
         srcA = source[3] / 255.0
         dstA = destination[3] / 255.0
         outA = srcA + dstA * (1 - srcA)
         if outA:
             outRGB = []
             for i in range(3):
-                outRGB.append((float(source[i]) * srcA + float(destination[i]) * dstA * (1 - srcA)) / outA)
+                outRGB.append(
+                    (
+                        float(source[i]) * srcA
+                        + float(destination[i]) * dstA * (1 - srcA)
+                    )
+                    / outA
+                )
             return (int(outRGB[0]), int(outRGB[1]), int(outRGB[2]), int(outA * 255))
         return source
 
-    def _combine_layers(self, cached_layers, layer_size, parent, sub):
+    def _combine_layers(
+        self,
+        cached_layers: _Layers,
+        layer_size: tuple[int, int],
+        parent: MapRendererLayer,
+        sub: MapRendererLayer,
+    ) -> None:
         cached_layers[parent] = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         if sub in cached_layers:
-            for k, v in sorted(cached_layers[sub].items()):
+            for k, v in sorted(_layer_objects(cached_layers, sub).items()):
                 if v is not None:
-                    cached_layers[parent] = Image.alpha_composite(cached_layers[parent], v)
+                    cached_layers[parent] = Image.alpha_composite(
+                        _layer_image(cached_layers, parent), v
+                    )
 
     def get_data_string(
         self,
         map_data: MapData,
-        resources: MapRendererResources = None,
+        resources: MapRendererResources | None = None,
         robot_status: int = 0,
         station_status: int = 0,
     ) -> str:
-        if not map_data or map_data.empty_map or (map_data.dimensions.width * map_data.dimensions.height) < 2:
+        geometry = self._valid_raster(map_data) if map_data is not None else None
+        if (
+            map_data is None
+            or map_data.empty_map
+            or geometry is None
+            or (geometry[0].width * geometry[0].height) < 2
+        ):
             return (
                 json.dumps(
                     {"resources": resources},
+                    default=_json_default,
                     separators=(",", ":"),
                 )
                 if resources
                 else "{}"
             )
+        dimensions, pixel_type = geometry
         now = time.time()
 
-        pixels = {}
-        min_x = map_data.dimensions.width - 1
-        min_y = map_data.dimensions.height - 1
+        pixels: dict[int, list[int]] = {}
+        min_x = dimensions.width - 1
+        min_y = dimensions.height - 1
         max_x = 0
         max_y = 0
-        for y in range(map_data.dimensions.height):
-            for x in range(map_data.dimensions.width):
-                px_type = int(map_data.pixel_type[x, y])
+        for y in range(dimensions.height):
+            for x in range(dimensions.width):
+                px_type = int(pixel_type[x, y])
                 if px_type:
                     # if map_data.segments and map_data.saved_map and px_type == 255:
-                    #    pixel = map_data.data[(map_data.dimensions.width * y) + x]
+                    #    pixel = map_data.data[(dimensions.width * y) + x]
                     #    if pixel > 0:
                     #        px_type = px_type + (pixel & 0x3F)
 
@@ -564,31 +675,31 @@ class DreameMowerMapRenderer:
         crop = [0, 0, 0, 0]
 
         if not map_data.saved_map:
-            map_data.dimensions.bounds = DreameMowerMapRenderer._calculate_bounds(
-                map_data.dimensions, map_data.segments
+            dimensions.bounds = DreameMowerMapRenderer._calculate_bounds(
+                dimensions, map_data.segments
             )
 
-        if map_data.dimensions.bounds:
-            min_x = max(min(map_data.dimensions.bounds[0], min_x), min_x)
-            max_x = min(max(map_data.dimensions.bounds[2], max_x), max_x)
-            min_y = max(min(map_data.dimensions.bounds[1], min_y), min_y)
-            max_y = min(max(map_data.dimensions.bounds[3], max_y), max_y)
+        if dimensions.bounds:
+            min_x = max(min(dimensions.bounds[0], min_x), min_x)
+            max_x = min(max(dimensions.bounds[2], max_x), max_x)
+            min_y = max(min(dimensions.bounds[1], min_y), min_y)
+            max_y = min(max(dimensions.bounds[3], max_y), max_y)
 
         if (
-            min_x != (map_data.dimensions.width - 1)
-            and min_y != (map_data.dimensions.height - 1)
+            min_x != (dimensions.width - 1)
+            and min_y != (dimensions.height - 1)
             and max_x != 0
             and max_y != 0
         ) and (
             min_x != 0
             or min_y != 0
-            or max_x != (map_data.dimensions.width - 1)
-            or max_y != (map_data.dimensions.height - 1)
+            or max_x != (dimensions.width - 1)
+            or max_y != (dimensions.height - 1)
         ):
             crop = [
                 min_x,
-                (map_data.dimensions.height - (max_y + 1)),
-                (map_data.dimensions.width - (max_x + 1)),
+                (dimensions.height - (max_y + 1)),
+                (dimensions.width - (max_x + 1)),
                 min_y,
             ]
 
@@ -602,7 +713,9 @@ class DreameMowerMapRenderer:
                 x = coords[i]
                 y = coords[i + 1]
                 if y != current_y or x > (current_x_start + current_count):
-                    compressed_pixels.extend([current_x_start, current_y, current_count])
+                    compressed_pixels.extend(
+                        [current_x_start, current_y, current_count]
+                    )
                     current_x_start = x
                     current_y = y
                     current_count = 1
@@ -612,43 +725,49 @@ class DreameMowerMapRenderer:
             pixels[layer] = compressed_pixels[3:]
 
         path_types = {"S": 1, "W": 2, "M": 3}
-        paths = None
+        paths: list[list[float | None]] | None = None
         if map_data.path:
             paths = []
-            coords = [
+            path_coords: list[float | None] = [
                 path_types.get(map_data.path[0].path_type),
                 map_data.path[0].x,
                 map_data.path[0].y,
             ]
             for path in map_data.path[1:]:
                 if path.path_type.value != "L":
-                    paths.append(coords)
-                    coords = [path_types.get(path.path_type)]
-                coords.extend([path.x, path.y])
+                    paths.append(path_coords)
+                    path_coords = [path_types.get(path.path_type)]
+                path_coords.extend([path.x, path.y])
 
-            if len(coords) > 2:
-                paths.append(coords)
+            if len(path_coords) > 2:
+                paths.append(path_coords)
 
         map_data_json = MapRendererData(
             data=pixels,
             size=[
-                map_data.dimensions.left,
-                map_data.dimensions.top,
-                map_data.dimensions.width if not map_data.empty_map else 1,
-                map_data.dimensions.height if not map_data.empty_map else 1,
-                map_data.dimensions.grid_size,
+                dimensions.left,
+                dimensions.top,
+                dimensions.width if not map_data.empty_map else 1,
+                dimensions.height if not map_data.empty_map else 1,
+                dimensions.grid_size,
                 map_data.rotation,
                 crop,
             ],
             frame_id=map_data.frame_id,
             active_segments=map_data.active_segments,
-            cleanset=bool(map_data.cleanset) if not map_data.saved_map and not map_data.wifi_map else False,
+            cleanset=bool(map_data.cleanset)
+            if not map_data.saved_map and not map_data.wifi_map
+            else False,
             docked=map_data.docked,
             floor_material=map_data.floor_material,
             hidden_segments=map_data.hidden_segments,
             neglected_segments=map_data.neglected_segments,
-            robot_status=robot_status if not map_data.saved_map and not map_data.wifi_map else 0,
-            station_status=station_status if not map_data.saved_map and not map_data.wifi_map else 0,
+            robot_status=robot_status
+            if not map_data.saved_map and not map_data.wifi_map
+            else 0,
+            station_status=station_status
+            if not map_data.saved_map and not map_data.wifi_map
+            else 0,
             saved_map=map_data.saved_map,
             wifi_map=map_data.wifi_map,
             history_map=map_data.history_map,
@@ -687,8 +806,12 @@ class DreameMowerMapRenderer:
             # ai_furniture_warning=map_data.ai_furniture_warning,
             # walls_info=map_data.walls_info,
             # walls_info_new=map_data.walls_info_new,
-            startup_method=map_data.startup_method.name.lower() if map_data.startup_method is not None else None,
-            cleanup_method=map_data.cleanup_method.name.lower() if map_data.cleanup_method is not None else None,
+            startup_method=map_data.startup_method.name.lower()
+            if map_data.startup_method is not None
+            else None,
+            cleanup_method=map_data.cleanup_method.name.lower()
+            if map_data.cleanup_method is not None
+            else None,
             second_cleaning=map_data.second_cleaning,
             multiple_cleaning_time=map_data.multiple_cleaning_time,
             dos=map_data.dos,
@@ -704,12 +827,16 @@ class DreameMowerMapRenderer:
                         v.x,
                         v.y,
                         v.type,
-                        base64.b64encode(v.custom_name.encode("utf-8")).decode("utf-8") if v.custom_name else None,
+                        base64.b64encode(v.custom_name.encode("utf-8")).decode("utf-8")
+                        if v.custom_name
+                        else None,
                         v.index,
                         v.color_index,
                         v.order,
                         v.cleaning_times,
-                        v.cleaning_mode if v.cleanset_type != CleansetType.DEFAULT else None,
+                        v.cleaning_mode
+                        if v.cleanset_type != CleansetType.DEFAULT
+                        else None,
                         v.floor_material,
                         v.floor_material_direction,
                         v.visibility,
@@ -737,9 +864,14 @@ class DreameMowerMapRenderer:
                 if map_data.active_areas
                 else []
             ),
-            active_points=[[point.x0, point.y0] for point in map_data.active_points] if map_data.active_points else [],
+            active_points=[[point.x, point.y] for point in map_data.active_points]
+            if map_data.active_points
+            else [],
             active_cruise_points=(
-                [[point.x, point.y, point.type, point.completed] for point in map_data.active_cruise_points.values()]
+                [
+                    [point.x, point.y, point.type, point.completed]
+                    for point in map_data.active_cruise_points.values()
+                ]
                 if map_data.active_cruise_points
                 else []
             ),
@@ -791,7 +923,7 @@ class DreameMowerMapRenderer:
                 else []
             ),
             predefined_points=(
-                [[point.x0, point.y0] for point in map_data.predefined_points]
+                [[point.x, point.y] for point in map_data.predefined_points.values()]
                 if map_data.predefined_points is not None
                 else None
             ),
@@ -829,9 +961,9 @@ class DreameMowerMapRenderer:
             resources=resources,
         )
 
-        map_data_json = json.dumps(
+        serialized = json.dumps(
             map_data_json,
-            default=lambda o: dict((key, value) for key, value in o.__dict__.items() if value is not None),
+            default=_json_default,
             allow_nan=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -842,19 +974,22 @@ class DreameMowerMapRenderer:
             map_data.frame_id,
             time.time() - now,
         )
-        return map_data_json
+        return serialized
 
     def render_obstacle_image(
         self,
-        image_bytes,
+        image_bytes: bytes | None,
         obstacle: Obstacle,
         ai_image_crop: bool,
         render_box: bool = True,
         crop_image: bool = False,
-    ):
+    ) -> bytes | None:
         if image_bytes:
             if not obstacle or not (
-                obstacle.width and obstacle.height and obstacle.pos_x != None and obstacle.pos_y != None
+                obstacle.width
+                and obstacle.height
+                and obstacle.pos_x != None
+                and obstacle.pos_y != None
             ):
                 return image_bytes
 
@@ -866,7 +1001,9 @@ class DreameMowerMapRenderer:
             x1_offset = 0
             if ai_image_crop:
                 if crop_image:
-                    image = image.crop((crop, 0, image.size[0] - crop, image.size[1] - int(crop / 2)))
+                    image = image.crop(
+                        (crop, 0, image.size[0] - crop, image.size[1] - int(crop / 2))
+                    )
                     w = image.size[0]
                     h = image.size[1]
                 else:
@@ -898,11 +1035,22 @@ class DreameMowerMapRenderer:
                         BytesIO(base64.b64decode(MAP_ROBOT_OBSTACLE_TOP_RIGHT_IMAGE))
                     ).convert("RGBA")
 
+                assert self._obstacle_top_left_icon is not None
+                assert self._obstacle_bottom_right_icon is not None
+                assert self._obstacle_top_right_icon is not None
                 icon_size = int(round(5 * h / 100.0))
-                obstacle_bottom_left_icon = self._obstacle_bottom_left_icon.resize((icon_size, icon_size))
-                obstacle_top_left_icon = self._obstacle_top_left_icon.resize((icon_size, icon_size))
-                obstacle_bottom_right_icon = self._obstacle_bottom_right_icon.resize((icon_size, icon_size))
-                obstacle_top_right_icon = self._obstacle_top_right_icon.resize((icon_size, icon_size))
+                obstacle_bottom_left_icon = self._obstacle_bottom_left_icon.resize(
+                    (icon_size, icon_size)
+                )
+                obstacle_top_left_icon = self._obstacle_top_left_icon.resize(
+                    (icon_size, icon_size)
+                )
+                obstacle_bottom_right_icon = self._obstacle_bottom_right_icon.resize(
+                    (icon_size, icon_size)
+                )
+                obstacle_top_right_icon = self._obstacle_top_right_icon.resize(
+                    (icon_size, icon_size)
+                )
 
                 x = obstacle.pos_x - 4
                 y = obstacle.pos_y - 4
@@ -981,17 +1129,32 @@ class DreameMowerMapRenderer:
             buffer = io.BytesIO()
             image.convert("RGB").save(buffer, format="JPEG")
             return buffer.getvalue()
+        return None
+
+    def _previous_dimensions(self) -> MapImageDimensions:
+        """Read geometry from the complete map snapshot held by this renderer."""
+        previous = self._map_data
+        if previous is None or previous.dimensions is None:
+            raise ValueError("Cached map geometry is unavailable.")
+        return previous.dimensions
 
     def render_map(
         self,
-        map_data: MapData,
+        map_data: MapData | None,
         robot_status: int = 0,
         station_status: int = 0,
         info_text: bool = False,
     ) -> bytes:
-        if map_data is None or map_data.empty_map or (map_data.dimensions.width * map_data.dimensions.height) < 2:
+        geometry = self._valid_raster(map_data) if map_data is not None else None
+        if (
+            map_data is None
+            or map_data.empty_map
+            or geometry is None
+            or (geometry[0].width * geometry[0].height) < 2
+        ):
             return self.default_map_image
 
+        dimensions, pixel_type = geometry
         self.render_complete = False
         now = time.time()
 
@@ -1002,7 +1165,7 @@ class DreameMowerMapRenderer:
             if self._cache:
                 if (
                     self._map_data is None
-                    or self._map_data.dimensions != map_data.dimensions
+                    or self._previous_dimensions() != dimensions
                     or self._map_data.map_id != map_data.map_id
                     or self._map_data.saved_map_status != map_data.saved_map_status
                 ):
@@ -1029,14 +1192,18 @@ class DreameMowerMapRenderer:
                     if (map_data.saved_map_status == 2 or map_data.restored_map)
                     and not map_data.recovery_map
                     and not map_data.history_map
-                    else 2 if (map_data.wifi_map or map_data.history_map) and self._cache else 3
+                    else 2
+                    if (map_data.wifi_map or map_data.history_map) and self._cache
+                    else 3
                 )
             )
             object_scale = 2
 
             render_material = False
-            if (map_data.saved_map_status == 2 or map_data.saved_map) and not map_data.wifi_map:
-                render_material = self.config.material and map_data.floor_material
+            if (
+                map_data.saved_map_status == 2 or map_data.saved_map
+            ) and not map_data.wifi_map:
+                render_material = bool(self.config.material and map_data.floor_material)
 
             if scale == 3 and (render_material):
                 scale = 2 if info_text else 4
@@ -1045,20 +1212,20 @@ class DreameMowerMapRenderer:
                 if (
                     self._map_data is None
                     or self._map_data.segments != map_data.segments
-                    or self._map_data.dimensions != map_data.dimensions
+                    or self._previous_dimensions() != dimensions
                     or self._map_data.saved_map_id != map_data.saved_map_id
                 ):
-                    map_data.dimensions.bounds = DreameMowerMapRenderer._calculate_bounds(
-                        map_data.dimensions, map_data.segments
+                    dimensions.bounds = DreameMowerMapRenderer._calculate_bounds(
+                        dimensions, map_data.segments
                     )
 
                     if self._map_data and (
-                        self._map_data.dimensions.bounds != map_data.dimensions.bounds
+                        self._previous_dimensions().bounds != dimensions.bounds
                         or self._map_data.saved_map_id != map_data.saved_map_id
                     ):
                         self._map_data = None
                 else:
-                    map_data.dimensions.bounds = self._map_data.dimensions.bounds
+                    dimensions.bounds = self._previous_dimensions().bounds
 
             if (
                 not self._cache
@@ -1068,11 +1235,11 @@ class DreameMowerMapRenderer:
                 or self._map_data.virtual_walls != map_data.virtual_walls
                 or self._map_data.pathways != map_data.pathways
                 or self._map_data.segments != map_data.segments
-                or self._map_data.dimensions != map_data.dimensions
+                or self._previous_dimensions() != dimensions
                 or self._map_data.restored_map != map_data.restored_map
             ):
-                map_data.dimensions.padding = DreameMowerMapRenderer._calculate_padding(
-                    map_data.dimensions,
+                dimensions.padding = DreameMowerMapRenderer._calculate_padding(
+                    dimensions,
                     map_data.active_areas if self.config.active_area else None,
                     map_data.no_go_areas if self.config.no_go else None,
                     map_data.virtual_walls if self.config.virtual_wall else None,
@@ -1086,28 +1253,59 @@ class DreameMowerMapRenderer:
                     scale,
                 )
 
-                if self._cache and self._map_data and self._map_data.dimensions.padding != map_data.dimensions.padding:
+                if (
+                    self._cache
+                    and self._map_data
+                    and self._previous_dimensions().padding != dimensions.padding
+                ):
                     self._map_data = None
             else:
-                map_data.dimensions.padding = self._map_data.dimensions.padding
+                dimensions.padding = self._previous_dimensions().padding
 
-            map_data.dimensions.scale = scale
-            segment_mask = None
+            dimensions.scale = scale
+            segment_mask: NDArray[np.uint8] | None = None
+            segment_mask_image: Image.Image | None = None
 
-            if not self._low_memory and self.config.path and map_data.path and self._robot_type != RobotType.VSLAM:
-                if not self._cache or self._map_data is None or self._map_data.path != map_data.path:
+            if (
+                not self._low_memory
+                and self.config.path
+                and map_data.path
+                and self._robot_type != RobotType.VSLAM
+            ):
+                if (
+                    not self._cache
+                    or self._map_data is None
+                    or self._map_data.path != map_data.path
+                ):
                     self._has_mask = False
             else:
                 self._has_mask = False
 
-            cached_layers = self._layers if self._cache else {}
-            if self._cache and not self._has_mask and cached_layers.get(MapRendererLayer.PATH_MASK):
+            cached_layers: _Layers = (
+                {
+                    key: value.copy() if isinstance(value, dict) else value
+                    for key, value in self._layers.items()
+                }
+                if self._cache
+                else {}
+            )
+            if (
+                self._cache
+                and not self._has_mask
+                and cached_layers.get(MapRendererLayer.PATH_MASK)
+            ):
                 del cached_layers[MapRendererLayer.PATH_MASK]
 
-            if self._cache and self._map_data and self._map_data.dimensions.scale != scale:
+            if (
+                self._cache
+                and self._map_data
+                and self._previous_dimensions().scale != scale
+            ):
                 self._map_data = None
 
-            if not self._cache or (self._map_data is None or self._map_data.rotation != map_data.rotation):
+            if not self._cache or (
+                self._map_data is None or self._map_data.rotation != map_data.rotation
+            ):
                 self._robot_sleeping_icon = None
                 self._obstacle_background = None
                 self._obstacle_hidden_background = None
@@ -1127,7 +1325,9 @@ class DreameMowerMapRenderer:
                 else (
                     (255, 255, 255, 255)
                     if info_text
-                    else (255, 255, 255, 0) if map_data.wifi_map else self.color_scheme.outside
+                    else (255, 255, 255, 0)
+                    if map_data.wifi_map
+                    else self.color_scheme.outside
                 )
             )
             if (
@@ -1138,8 +1338,13 @@ class DreameMowerMapRenderer:
                 or self._map_data.active_areas != map_data.active_areas
                 or self._map_data.segments != map_data.segments
                 or self._map_data.data != map_data.data
-                or (self._has_mask and not cached_layers.get(MapRendererLayer.PATH_MASK))
-                or (render_material and self._map_data.floor_material != map_data.floor_material)
+                or (
+                    self._has_mask and not cached_layers.get(MapRendererLayer.PATH_MASK)
+                )
+                or (
+                    render_material
+                    and self._map_data.floor_material != map_data.floor_material
+                )
             ):
                 area_colors = {}
                 # as implemented on the app
@@ -1147,12 +1352,22 @@ class DreameMowerMapRenderer:
                     area_colors[MapPixelType.OUTSIDE.value] = bg_color
                     area_colors[MapPixelType.WALL.value] = self.color_scheme.wall
                     if map_data.second_cleaning:
-                        area_colors[MapPixelType.DIRTY_AREA.value] = self.color_scheme.second_clean_area
-                        area_colors[MapPixelType.CLEAN_AREA.value] = self.color_scheme.cleaned_area
+                        area_colors[MapPixelType.DIRTY_AREA.value] = (
+                            self.color_scheme.second_clean_area
+                        )
+                        area_colors[MapPixelType.CLEAN_AREA.value] = (
+                            self.color_scheme.cleaned_area
+                        )
                     else:
-                        area_colors[MapPixelType.DIRTY_AREA.value] = self.color_scheme.dirty_area
-                        area_colors[MapPixelType.CLEAN_AREA.value] = self.color_scheme.clean_area
-                    area_colors[MapPixelType.NEW_SEGMENT.value] = self.color_scheme.passive_segment
+                        area_colors[MapPixelType.DIRTY_AREA.value] = (
+                            self.color_scheme.dirty_area
+                        )
+                        area_colors[MapPixelType.CLEAN_AREA.value] = (
+                            self.color_scheme.clean_area
+                        )
+                    area_colors[MapPixelType.NEW_SEGMENT.value] = (
+                        self.color_scheme.passive_segment
+                    )
                 elif map_data.wifi_map:
                     area_colors[MapPixelType.OUTSIDE.value] = bg_color
                     area_colors[MapPixelType.WIFI_EXCELLENT.value] = (
@@ -1171,16 +1386,26 @@ class DreameMowerMapRenderer:
                         255,
                     )
                     area_colors[MapPixelType.WIFI_WALL.value] = (160, 160, 160, 255)
-                    area_colors[MapPixelType.NEW_SEGMENT.value] = area_colors[MapPixelType.OUTSIDE.value]
+                    area_colors[MapPixelType.NEW_SEGMENT.value] = area_colors[
+                        MapPixelType.OUTSIDE.value
+                    ]
                 else:
                     area_colors[MapPixelType.OUTSIDE.value] = bg_color
                     area_colors[MapPixelType.WALL.value] = self.color_scheme.wall
-                    area_colors[MapPixelType.HIDDEN_WALL.value] = self.color_scheme.hidden_segment
+                    area_colors[MapPixelType.HIDDEN_WALL.value] = (
+                        self.color_scheme.hidden_segment
+                    )
                     area_colors[MapPixelType.FLOOR.value] = self.color_scheme.floor
-                    area_colors[MapPixelType.NEW_SEGMENT.value] = self.color_scheme.new_segment
+                    area_colors[MapPixelType.NEW_SEGMENT.value] = (
+                        self.color_scheme.new_segment
+                    )
                     area_colors[MapPixelType.UNKNOWN.value] = self.color_scheme.floor
-                    area_colors[MapPixelType.OBSTACLE_WALL.value] = self.color_scheme.wall
-                    area_colors[MapPixelType.NEW_SEGMENT_UNKNOWN.value] = self.color_scheme.new_segment
+                    area_colors[MapPixelType.OBSTACLE_WALL.value] = (
+                        self.color_scheme.wall
+                    )
+                    area_colors[MapPixelType.NEW_SEGMENT_UNKNOWN.value] = (
+                        self.color_scheme.new_segment
+                    )
 
                 if map_data.cleaning_map:
                     if map_data.neglected_segments:
@@ -1189,19 +1414,27 @@ class DreameMowerMapRenderer:
                 elif map_data.segments is not None and not map_data.cleaning_map:
                     for k, v in map_data.segments.items():
                         if self.config.color:
-                            if map_data.hidden_segments and k in map_data.hidden_segments:
+                            if (
+                                map_data.hidden_segments
+                                and k in map_data.hidden_segments
+                            ):
                                 area_colors[k] = self.color_scheme.hidden_segment
-                            elif map_data.active_segments and k not in map_data.active_segments:
+                            elif (
+                                map_data.active_segments
+                                and k not in map_data.active_segments
+                            ):
                                 area_colors[k] = self.color_scheme.passive_segment
                             elif v.color_index is not None:
-                                area_colors[k] = self.color_scheme.segment[v.color_index][0]
+                                area_colors[k] = self.color_scheme.segment[
+                                    v.color_index
+                                ][0]
                         else:
                             area_colors[k] = area_colors[MapPixelType.FLOOR.value]
 
-                pixels = np.full(
+                pixels: NDArray[np.uint8] = np.full(
                     (
-                        map_data.dimensions.height,
-                        map_data.dimensions.width,
+                        dimensions.height,
+                        dimensions.width,
                         4,
                     ),
                     area_colors[MapPixelType.OUTSIDE.value],
@@ -1210,10 +1443,10 @@ class DreameMowerMapRenderer:
 
                 if self._has_mask:
                     mask_color = (255, 255, 255, 255)
-                    mask = np.full(
+                    mask: NDArray[np.uint8] = np.full(
                         (
-                            map_data.dimensions.height,
-                            map_data.dimensions.width,
+                            dimensions.height,
+                            dimensions.width,
                             4,
                         ),
                         (255, 255, 255, 0),
@@ -1223,22 +1456,22 @@ class DreameMowerMapRenderer:
                 if map_data.history_map and map_data.neglected_segments:
                     segment_mask = np.full(
                         (
-                            map_data.dimensions.height,
-                            map_data.dimensions.width,
+                            dimensions.height,
+                            dimensions.width,
                             4,
                         ),
                         (255, 255, 255, 0),
                         dtype=np.uint8,
                     )
 
-                min_x = map_data.dimensions.width - 1
-                min_y = map_data.dimensions.height - 1
+                min_x = dimensions.width - 1
+                min_y = dimensions.height - 1
                 max_x = 0
                 max_y = 0
 
-                for y in range(map_data.dimensions.height):
-                    for x in range(map_data.dimensions.width):
-                        px_type = int(map_data.pixel_type[x, map_data.dimensions.height - y - 1])
+                for y in range(dimensions.height):
+                    for x in range(dimensions.width):
+                        px_type = int(pixel_type[x, dimensions.height - y - 1])
 
                         if px_type != 0:
                             pixels[y, x] = area_colors.get(px_type, area_colors[253])
@@ -1252,19 +1485,26 @@ class DreameMowerMapRenderer:
                                 mask[y, x] = mask_color
 
                             if segment_mask is not None:
-                                if px_type in map_data.neglected_segments:
-                                    segment_mask[y, x] = self.color_scheme.neglected_segment
+                                if (
+                                    map_data.neglected_segments is not None
+                                    and px_type in map_data.neglected_segments
+                                ):
+                                    segment_mask[y, x] = (
+                                        self.color_scheme.neglected_segment
+                                    )
 
                 if render_material:
                     floor_scale = 2
-                    pixels = pixels.repeat(floor_scale, axis=0).repeat(floor_scale, axis=1)
+                    pixels = pixels.repeat(floor_scale, axis=0).repeat(
+                        floor_scale, axis=1
+                    )
                     if render_material:
                         floor_material = self.render_floor_material(
                             pixels,
-                            map_data.floor_material,
-                            map_data.pixel_type,
+                            map_data.floor_material or {},
+                            pixel_type,
                             self.color_scheme.material_color,
-                            map_data.dimensions,
+                            dimensions,
                             floor_scale,
                         )
                         if floor_material is not None:
@@ -1272,7 +1512,9 @@ class DreameMowerMapRenderer:
                             _LOGGER.debug("Render MATERIAL")
 
                     if scale != floor_scale:
-                        pixels = pixels.repeat(scale / floor_scale, axis=0).repeat(scale / floor_scale, axis=1)
+                        pixels = pixels.repeat(scale // floor_scale, axis=0).repeat(
+                            scale // floor_scale, axis=1
+                        )
                 else:
                     pixels = pixels.repeat(scale, axis=0).repeat(scale, axis=1)
 
@@ -1280,28 +1522,30 @@ class DreameMowerMapRenderer:
                     mask = mask.repeat(scale, axis=0).repeat(scale, axis=1)
 
                 if segment_mask is not None:
-                    segment_mask = segment_mask.repeat(scale, axis=0).repeat(scale, axis=1)
+                    segment_mask = segment_mask.repeat(scale, axis=0).repeat(
+                        scale, axis=1
+                    )
 
-                if map_data.dimensions.bounds:
-                    # min_x = max(0, min(map_data.dimensions.bounds[0], min_x))
-                    # max_x = min((map_data.dimensions.width - 1), max(map_data.dimensions.bounds[2], max_x))
-                    # min_y = max(0, min(map_data.dimensions.bounds[1], min_y))
-                    # max_y = min((map_data.dimensions.height - 1), max(map_data.dimensions.bounds[3], max_y))
-                    min_x = max(min(map_data.dimensions.bounds[0], min_x), min_x)
-                    max_x = min(max(map_data.dimensions.bounds[2], max_x), max_x)
-                    min_y = max(min(map_data.dimensions.bounds[1], min_y), min_y)
-                    max_y = min(max(map_data.dimensions.bounds[3], max_y), max_y)
+                if dimensions.bounds:
+                    # min_x = max(0, min(dimensions.bounds[0], min_x))
+                    # max_x = min((dimensions.width - 1), max(dimensions.bounds[2], max_x))
+                    # min_y = max(0, min(dimensions.bounds[1], min_y))
+                    # max_y = min((dimensions.height - 1), max(dimensions.bounds[3], max_y))
+                    min_x = max(min(dimensions.bounds[0], min_x), min_x)
+                    max_x = min(max(dimensions.bounds[2], max_x), max_x)
+                    min_y = max(min(dimensions.bounds[1], min_y), min_y)
+                    max_y = min(max(dimensions.bounds[3], max_y), max_y)
 
                 if (
-                    min_x != (map_data.dimensions.width - 1)
-                    and min_y != (map_data.dimensions.height - 1)
+                    min_x != (dimensions.width - 1)
+                    and min_y != (dimensions.height - 1)
                     and max_x != 0
                     and max_y != 0
                 ) and (
                     min_x != 0
                     or min_y != 0
-                    or max_x != (map_data.dimensions.width - 1)
-                    or max_y != (map_data.dimensions.height - 1)
+                    or max_x != (dimensions.width - 1)
+                    or max_y != (dimensions.height - 1)
                 ):
                     from_y = min_y * scale
                     to_y = (max_y + 1) * scale
@@ -1312,32 +1556,41 @@ class DreameMowerMapRenderer:
                         mask = mask[from_y:to_y, from_x:to_x]
                     if segment_mask is not None:
                         segment_mask = segment_mask[from_y:to_y, from_x:to_x]
-                    map_data.dimensions.crop = [
+                    dimensions.crop = [
                         from_x,
                         from_y,
-                        (map_data.dimensions.width - (max_x + 1)) * scale,
-                        (map_data.dimensions.height - (max_y + 1)) * scale,
+                        (dimensions.width - (max_x + 1)) * scale,
+                        (dimensions.height - (max_y + 1)) * scale,
                     ]
 
-                if self._map_data and self._map_data.dimensions.crop != map_data.dimensions.crop:
+                if (
+                    self._map_data
+                    and self._previous_dimensions().crop != dimensions.crop
+                ):
                     self._map_data = None
 
                 image = Image.fromarray(pixels)
-                if self._square and not map_data.wifi_map:  # and not map_data.saved_map:
-                    height = image.size[0] + map_data.dimensions.padding[0] + map_data.dimensions.padding[2]
-                    width = image.size[1] + map_data.dimensions.padding[1] + map_data.dimensions.padding[3]
+                if (
+                    self._square and not map_data.wifi_map
+                ):  # and not map_data.saved_map:
+                    height = (
+                        image.size[0] + dimensions.padding[0] + dimensions.padding[2]
+                    )
+                    width = (
+                        image.size[1] + dimensions.padding[1] + dimensions.padding[3]
+                    )
                     if height != width:
                         dif = int(abs(height - width) / 2)
                         if height < width:
-                            map_data.dimensions.padding[0] = map_data.dimensions.padding[0] + dif
-                            map_data.dimensions.padding[2] = map_data.dimensions.padding[2] + dif
+                            dimensions.padding[0] = dimensions.padding[0] + dif
+                            dimensions.padding[2] = dimensions.padding[2] + dif
                         else:
-                            map_data.dimensions.padding[1] = map_data.dimensions.padding[1] + dif
-                            map_data.dimensions.padding[3] = map_data.dimensions.padding[3] + dif
+                            dimensions.padding[1] = dimensions.padding[1] + dif
+                            dimensions.padding[3] = dimensions.padding[3] + dif
 
                 cached_layers[MapRendererLayer.IMAGE] = ImageOps.expand(
                     Image.fromarray(pixels),
-                    border=tuple(map_data.dimensions.padding),
+                    border=tuple(dimensions.padding),
                     fill=bg_color,
                 )
 
@@ -1346,33 +1599,37 @@ class DreameMowerMapRenderer:
                         self._map_data.path = None
 
                     cached_layers[MapRendererLayer.PATH_MASK] = ImageOps.expand(
-                        Image.fromarray(mask.repeat(object_scale, axis=0).repeat(object_scale, axis=1)),
+                        Image.fromarray(
+                            mask.repeat(object_scale, axis=0).repeat(
+                                object_scale, axis=1
+                            )
+                        ),
                         border=(
-                            map_data.dimensions.padding[0] * object_scale,
-                            map_data.dimensions.padding[1] * object_scale,
-                            map_data.dimensions.padding[2] * object_scale,
-                            map_data.dimensions.padding[3] * object_scale,
+                            dimensions.padding[0] * object_scale,
+                            dimensions.padding[1] * object_scale,
+                            dimensions.padding[2] * object_scale,
+                            dimensions.padding[3] * object_scale,
                         ),
                         fill=(255, 255, 255, 0),
                     )
 
                 if segment_mask is not None:
-                    segment_mask = ImageOps.expand(
+                    segment_mask_image = ImageOps.expand(
                         Image.fromarray(segment_mask),
                         border=(
-                            map_data.dimensions.padding[0],
-                            map_data.dimensions.padding[1],
-                            map_data.dimensions.padding[2],
-                            map_data.dimensions.padding[3],
+                            dimensions.padding[0],
+                            dimensions.padding[1],
+                            dimensions.padding[2],
+                            dimensions.padding[3],
                         ),
                         fill=(255, 255, 255, 0),
                     )
             else:
-                map_data.dimensions.crop = self._map_data.dimensions.crop
+                dimensions.crop = self._previous_dimensions().crop
 
-            self._calibration_points = self._calculate_calibration_points(map_data)
+            calibration_points = self._calculate_calibration_points(map_data)
 
-            image = cached_layers[MapRendererLayer.IMAGE]
+            image = _layer_image(cached_layers, MapRendererLayer.IMAGE)
 
             if not map_data.saved_map and map_data.path and self.config.path:
                 if (
@@ -1388,39 +1645,56 @@ class DreameMowerMapRenderer:
                             int(image.size[0] * object_scale),
                             int(image.size[1] * object_scale),
                         ),
-                        cached_layers.get(MapRendererLayer.PATH_MASK),
-                        map_data.dimensions,
+                        _layer_image(cached_layers, MapRendererLayer.PATH_MASK)
+                        if MapRendererLayer.PATH_MASK in cached_layers
+                        else None,
+                        dimensions,
                         0.375 * scale * object_scale,
                         object_scale,
                     )
-                    cached_layers[MapRendererLayer.PATH].thumbnail(image.size, Image.Resampling.BOX, reducing_gap=1.5)
+                    _layer_image(cached_layers, MapRendererLayer.PATH).thumbnail(
+                        image.size, Image.Resampling.BOX, reducing_gap=1.5
+                    )
                     _LOGGER.debug("Render PATH")
-                image = Image.alpha_composite(image, cached_layers[MapRendererLayer.PATH])
+                image = Image.alpha_composite(
+                    image, _layer_image(cached_layers, MapRendererLayer.PATH)
+                )
             elif self._cache and cached_layers.get(MapRendererLayer.PATH):
                 del cached_layers[MapRendererLayer.PATH]
 
-            image = self.render_objects(cached_layers, map_data, robot_status, station_status, image, object_scale)
+            image = self.render_objects(
+                cached_layers,
+                map_data,
+                robot_status,
+                station_status,
+                image,
+                object_scale,
+            )
 
-            if segment_mask is not None:
+            if (
+                segment_mask_image is not None
+                and map_data.neglected_segments is not None
+                and map_data.segments is not None
+            ):
                 image = Image.alpha_composite(
                     image,
                     self.render_neglected_segments(
                         map_data.neglected_segments,
                         map_data.segments,
                         image.size,
-                        segment_mask,
-                        map_data.dimensions,
-                        map_data.rotation,
+                        segment_mask_image,
+                        dimensions,
+                        map_data.rotation or 0,
                         map_data.cleaning_map,
                     ),
                 )
 
             if map_data.rotation == 90:
-                image = image.transpose(Image.ROTATE_90)
+                image = image.transpose(Image.Transpose.ROTATE_90)
             elif map_data.rotation == 180:
-                image = image.transpose(Image.ROTATE_180)
+                image = image.transpose(Image.Transpose.ROTATE_180)
             elif map_data.rotation == 270:
-                image = image.transpose(Image.ROTATE_270)
+                image = image.transpose(Image.Transpose.ROTATE_270)
 
             if info_text:
                 base_width = 490  # int(round(image.size[0] / 4 * 3))
@@ -1428,7 +1702,12 @@ class DreameMowerMapRenderer:
                     image = image.resize(
                         (
                             base_width,
-                            int((float(image.size[1]) * float((base_width / float(image.size[0]))))),
+                            int(
+                                (
+                                    float(image.size[1])
+                                    * float((base_width / float(image.size[0])))
+                                )
+                            ),
                         ),
                         Image.Resampling.LANCZOS,
                     )
@@ -1443,7 +1722,11 @@ class DreameMowerMapRenderer:
                             header_text = f"{header_text} | Second Cleaning"
                         elif map_data.cleanup_method is not None:
                             header_text = f"{header_text} | {map_data.cleanup_method.name.replace('_', ' ').title()}"
-                elif map_data.recovery_map and map_data.recovery_map_type is not RecoveryMapType.UNKNOWN:
+                elif (
+                    map_data.recovery_map
+                    and map_data.recovery_map_type is not None
+                    and map_data.recovery_map_type is not RecoveryMapType.UNKNOWN
+                ):
                     header_text = f"{header_text} | {map_data.recovery_map_type.name.replace('_', ' ').title()}"
 
                 image_width = image.size[0]
@@ -1454,16 +1737,28 @@ class DreameMowerMapRenderer:
                 text_draw = ImageDraw.Draw(image, "RGBA")
                 text_size = int(image_width * 0.035)
                 if self._light_font_file is None:
-                    self._light_font_file = zlib.decompress(base64.b64decode(MAP_FONT_LIGHT), zlib.MAX_WBITS | 32)
+                    self._light_font_file = zlib.decompress(
+                        base64.b64decode(MAP_FONT_LIGHT), zlib.MAX_WBITS | 32
+                    )
 
-                text_font = ImageFont.truetype(BytesIO(self._light_font_file), text_size)
+                text_font = ImageFont.truetype(
+                    BytesIO(self._light_font_file), text_size
+                )
                 if map_data.history_map:
-                    value_font = ImageFont.truetype(BytesIO(self._light_font_file), int(text_size * 1.8))
-                    name_font = ImageFont.truetype(BytesIO(self._light_font_file), int(text_size * 0.8))
-                left, top, width, height = text_draw.textbbox((0, 0), header_text, font=text_font)
+                    value_font = ImageFont.truetype(
+                        BytesIO(self._light_font_file), int(text_size * 1.8)
+                    )
+                    name_font = ImageFont.truetype(
+                        BytesIO(self._light_font_file), int(text_size * 0.8)
+                    )
+                left, top, text_width, text_height = text_draw.textbbox(
+                    (0, 0), header_text, font=text_font
+                )
                 max_width = image_width * 0.9
-                if width > max_width:
-                    lines = textwrap.wrap(header_text, width=int(max_width / (text_size / 2)))
+                if text_width > max_width:
+                    lines = textwrap.wrap(
+                        header_text, width=int(max_width / (text_size / 2))
+                    )
                 else:
                     lines = [header_text]
 
@@ -1474,15 +1769,19 @@ class DreameMowerMapRenderer:
                         lines.append(header_text)
 
                 max_width = 0
-                header_height = int(text_size * 5) if map_data.history_map else text_size
-                total_height = header_height
+                header_height = (
+                    int(text_size * 5) if map_data.history_map else text_size
+                )
+                total_height: float = header_height
 
                 line_sizes = []
                 for line in lines:
-                    left, top, width, height = text_draw.textbbox((0, 0), line, font=text_font)
-                    line_sizes.append((width, height))
-                    max_width = max(max_width, width)
-                    total_height = total_height + height
+                    left, top, text_width, text_height = text_draw.textbbox(
+                        (0, 0), line, font=text_font
+                    )
+                    line_sizes.append((text_width, text_height))
+                    max_width = max(max_width, text_width)
+                    total_height = total_height + text_height
 
                 padding = int((min_width - image.size[0]) / 2)
                 if padding < 0:
@@ -1512,35 +1811,45 @@ class DreameMowerMapRenderer:
                     header_lines = [
                         (str(map_data.cleaning_time), f"{map_type} Time", "min"),
                         (
-                            "Interrupted" if map_data.completed == False else "Completed",
+                            "Interrupted"
+                            if map_data.completed == False
+                            else "Completed",
                             f"{map_type} Status",
                             "",
                         ),
                     ]
 
                     if not cruising_map:
-                        header_lines.append((str(map_data.cleaned_area), f"{map_type} Area", "m²"))
+                        header_lines.append(
+                            (str(map_data.cleaned_area), f"{map_type} Area", "m²")
+                        )
 
                     for i in range(len(header_lines)):
                         value = header_lines[i][0]
                         name = header_lines[i][1]
                         unit = header_lines[i][2]
-                        left, top, value_width, value_height = text_draw.textbbox((0, 0), value, font=value_font)
-                        left, top, unit_width, unit_height = text_draw.textbbox((0, 0), unit, font=name_font)
-                        left, top, name_width, name_height = text_draw.textbbox((0, 0), name, font=name_font)
+                        left, top, value_width, value_height = text_draw.textbbox(
+                            (0, 0), value, font=value_font
+                        )
+                        left, top, unit_width, unit_height = text_draw.textbbox(
+                            (0, 0), unit, font=name_font
+                        )
+                        left, top, name_width, name_height = text_draw.textbbox(
+                            (0, 0), name, font=name_font
+                        )
                         y = text_size
-                        x = int(image_width * 0.06)
+                        header_x: float = int(image_width * 0.06)
                         pos = []
                         if len(header_lines) == 3:
                             if i == 0:
-                                value_x = x + name_width / 2
+                                value_x = header_x + name_width / 2
                                 t1 = value_width / 2
                                 t2 = unit_width / 2
                                 t3 = text_size / 4
                                 pos.extend(
                                     [
                                         (value_x - t1 - t2 - t3, y),
-                                        (x, y + (text_size * 2)),
+                                        (header_x, y + (text_size * 2)),
                                         (
                                             value_x - t2 + t1 + t3,
                                             y + value_height - unit_height,
@@ -1550,9 +1859,15 @@ class DreameMowerMapRenderer:
                             elif i == 1:
                                 pos.extend(
                                     [
-                                        (image_width - x - value_width, text_size),
                                         (
-                                            image_width - x - name_width - ((value_width - name_width) / 2),
+                                            image_width - header_x - value_width,
+                                            text_size,
+                                        ),
+                                        (
+                                            image_width
+                                            - header_x
+                                            - name_width
+                                            - ((value_width - name_width) / 2),
                                             y + (text_size * 2),
                                         ),
                                     ]
@@ -1562,7 +1877,15 @@ class DreameMowerMapRenderer:
                                 pos.extend(
                                     [
                                         (
-                                            ((image_width - value_width - unit_width - t1) / 2),
+                                            (
+                                                (
+                                                    image_width
+                                                    - value_width
+                                                    - unit_width
+                                                    - t1
+                                                )
+                                                / 2
+                                            ),
                                             y,
                                         ),
                                         (
@@ -1570,7 +1893,15 @@ class DreameMowerMapRenderer:
                                             y + (text_size * 2),
                                         ),
                                         (
-                                            ((image_width - unit_width + value_width + t1) / 2),
+                                            (
+                                                (
+                                                    image_width
+                                                    - unit_width
+                                                    + value_width
+                                                    + t1
+                                                )
+                                                / 2
+                                            ),
                                             y + value_height - unit_height,
                                         ),
                                     ]
@@ -1581,15 +1912,34 @@ class DreameMowerMapRenderer:
                                 pos.extend(
                                     [
                                         (
-                                            ((image_width - value_width - unit_width - t1) / 2) - (image_width / 4),
+                                            (
+                                                (
+                                                    image_width
+                                                    - value_width
+                                                    - unit_width
+                                                    - t1
+                                                )
+                                                / 2
+                                            )
+                                            - (image_width / 4),
                                             y,
                                         ),
                                         (
-                                            ((image_width - name_width) / 2) - (image_width / 4),
+                                            ((image_width - name_width) / 2)
+                                            - (image_width / 4),
                                             y + (text_size * 2),
                                         ),
                                         (
-                                            ((image_width - unit_width + value_width + t1) / 2) - (image_width / 4),
+                                            (
+                                                (
+                                                    image_width
+                                                    - unit_width
+                                                    + value_width
+                                                    + t1
+                                                )
+                                                / 2
+                                            )
+                                            - (image_width / 4),
                                             y + value_height - unit_height,
                                         ),
                                     ]
@@ -1598,25 +1948,35 @@ class DreameMowerMapRenderer:
                                 pos.extend(
                                     [
                                         (
-                                            ((image_width - value_width) / 2) + (image_width / 4),
+                                            ((image_width - value_width) / 2)
+                                            + (image_width / 4),
                                             y,
                                         ),
                                         (
-                                            ((image_width - name_width) / 2) + (image_width / 4),
+                                            ((image_width - name_width) / 2)
+                                            + (image_width / 4),
                                             y + (text_size * 2),
                                         ),
                                     ]
                                 )
 
                         for k in range(len(pos)):
-                            style = (value_color, value_font) if k == 0 else (text_color, name_font)
-                            text_draw.text(pos[k], header_lines[i][k], fill=style[0], font=style[1])
+                            style = (
+                                (value_color, value_font)
+                                if k == 0
+                                else (text_color, name_font)
+                            )
+                            text_draw.text(
+                                pos[k], header_lines[i][k], fill=style[0], font=style[1]
+                            )
 
-                x = (image_width - max_width) / 2
-                line_y = header_height
+                header_x = (image_width - max_width) / 2
+                line_y: float = header_height
                 for i in range(len(lines)):
-                    line_x = x + (max_width - line_sizes[i][0]) / 2
-                    text_draw.text((line_x, line_y), lines[i], fill=text_color, font=text_font)
+                    line_x = header_x + (max_width - line_sizes[i][0]) / 2
+                    text_draw.text(
+                        (line_x, line_y), lines[i], fill=text_color, font=text_font
+                    )
                     line_y = line_y + line_sizes[i][1]
 
             _LOGGER.info(
@@ -1626,25 +1986,36 @@ class DreameMowerMapRenderer:
                 time.time() - now,
             )
 
+            encoded = self._to_buffer(image)
+            snapshot = copy.deepcopy(map_data) if self._cache else None
+            self._calibration_points = calibration_points
             if self._cache:
-                self._map_data = map_data
+                self._map_data = snapshot
                 self._robot_status = robot_status
                 self._station_status = station_status
                 self._image = image
+                self._layers = cached_layers
+            return encoded
         except Exception:
             _LOGGER.error("Map render Failed: %s", traceback.format_exc())
-
-        self.render_complete = True
-        return self._to_buffer(self._image if self._cache else image)
+            self._map_data = None
+            self._has_mask = False
+            return (
+                self._to_buffer(self._image)
+                if self._image is not None
+                else self.default_map_image
+            )
+        finally:
+            self.render_complete = True
 
     @staticmethod
     def _segments_layer_needs_update(
         *,
-        cache_enabled,
-        previous_map,
-        map_data,
-        has_cached_layer,
-    ):
+        cache_enabled: bool,
+        previous_map: MapData | None,
+        map_data: MapData,
+        has_cached_layer: bool,
+    ) -> bool:
         return (
             not cache_enabled
             or previous_map is None
@@ -1668,8 +2039,7 @@ class DreameMowerMapRenderer:
                 and previous_map.cleanset
             )
             != bool(
-                (not map_data.saved_map or map_data.recovery_map)
-                and map_data.cleanset
+                (not map_data.saved_map or map_data.recovery_map) and map_data.cleanset
             )
             or not has_cached_layer
         )
@@ -1677,13 +2047,13 @@ class DreameMowerMapRenderer:
     @staticmethod
     def _segment_needs_render(
         *,
-        cache_enabled,
-        previous_map,
-        cached_segments,
-        map_data,
-        segment_id,
-        segment,
-    ):
+        cache_enabled: bool,
+        previous_map: MapData | None,
+        cached_segments: Mapping[int | str, object],
+        map_data: MapData,
+        segment_id: int,
+        segment: Segment,
+    ) -> bool:
         if not cache_enabled or previous_map is None:
             return True
 
@@ -1700,8 +2070,7 @@ class DreameMowerMapRenderer:
             (not map_data.saved_map or map_data.recovery_map) and map_data.cleanset
         )
         previous_map_has_cleanset = bool(
-            (not map_data.saved_map or map_data.recovery_map)
-            and previous_map.cleanset
+            (not map_data.saved_map or map_data.recovery_map) and previous_map.cleanset
         )
         segment_is_visible = bool(
             (not map_data.active_segments or segment_id in map_data.active_segments)
@@ -1738,14 +2107,24 @@ class DreameMowerMapRenderer:
             or segment_is_neglected != previous_segment_was_neglected
         )
 
-    def render_objects(self, cached_layers, map_data, robot_status, station_status, map_image, scale):
+    def render_objects(
+        self,
+        cached_layers: _Layers,
+        map_data: MapData,
+        robot_status: int,
+        station_status: int,
+        map_image: Image.Image,
+        scale: int,
+    ) -> Image.Image:
+        dimensions = map_data.dimensions
+        if dimensions is None:
+            raise ValueError("Object rendering requires map dimensions.")
         layer_size = (int(map_image.size[0] * scale), int(map_image.size[1] * scale))
         line_width = max(
             1,
             int(
                 round(
-                    (3 if map_data.dimensions.scale > 2 else 1)
-                    * self.presentation_stroke_scale
+                    (3 if dimensions.scale > 2 else 1) * self.presentation_stroke_scale
                 )
             ),
         )
@@ -1753,35 +2132,38 @@ class DreameMowerMapRenderer:
             1,
             int(
                 round(
-                    (2 if map_data.dimensions.scale > 2 else 1)
-                    * self.presentation_stroke_scale
+                    (2 if dimensions.scale > 2 else 1) * self.presentation_stroke_scale
                 )
             ),
         )
         changes = []
         layers = []
 
-        if map_data.rotation == 0 or map_data.rotation == 180 or self._square:
-            width = (map_data.dimensions.width) + (
+        if (
+            (map_data.rotation or 0) == 0
+            or (map_data.rotation or 0) == 180
+            or self._square
+        ):
+            width = (dimensions.width) + (
                 (
-                    map_data.dimensions.padding[0]
-                    + map_data.dimensions.padding[2]
-                    - map_data.dimensions.crop[0]
-                    - map_data.dimensions.crop[2]
+                    dimensions.padding[0]
+                    + dimensions.padding[2]
+                    - dimensions.crop[0]
+                    - dimensions.crop[2]
                 )
-                / map_data.dimensions.scale
+                / dimensions.scale
             )
             robot_icon_size = width * 0.037
             icon_size = width * (0.022 if self._square else 0.027)
         else:
-            height = (map_data.dimensions.height) + (
+            height = (dimensions.height) + (
                 (
-                    map_data.dimensions.padding[1]
-                    + map_data.dimensions.padding[3]
-                    - map_data.dimensions.crop[1]
-                    - map_data.dimensions.crop[3]
+                    dimensions.padding[1]
+                    + dimensions.padding[3]
+                    - dimensions.crop[1]
+                    - dimensions.crop[3]
                 )
-                / map_data.dimensions.scale
+                / dimensions.scale
             )
             robot_icon_size = height * 0.037
             icon_size = height * 0.027
@@ -1792,12 +2174,16 @@ class DreameMowerMapRenderer:
         robot_icon_size *= self.presentation_marker_scale
         icon_size *= self.presentation_marker_scale
 
-        if map_data.dimensions.scale <= 2:
+        if dimensions.scale <= 2:
             robot_icon_size = robot_icon_size * 0.7
             icon_size = icon_size * 1.3
 
         layer = MapRendererLayer.NO_GO
-        if (not map_data.saved_map or map_data.recovery_map) and map_data.no_go_areas and self.config.no_go:
+        if (
+            (not map_data.saved_map or map_data.recovery_map)
+            and map_data.no_go_areas
+            and self.config.no_go
+        ):
             layers.append(layer)
             if (
                 not self._cache
@@ -1811,7 +2197,7 @@ class DreameMowerMapRenderer:
                     self.color_scheme.no_go_outline,
                     self.color_scheme.no_go,
                     layer_size,
-                    map_data.dimensions,
+                    dimensions,
                     border_width,
                     scale,
                 )
@@ -1820,7 +2206,11 @@ class DreameMowerMapRenderer:
             del cached_layers[layer]
 
         layer = MapRendererLayer.WALL
-        if (not map_data.saved_map or map_data.recovery_map) and map_data.virtual_walls and self.config.virtual_wall:
+        if (
+            (not map_data.saved_map or map_data.recovery_map)
+            and map_data.virtual_walls
+            and self.config.virtual_wall
+        ):
             layers.append(layer)
             if (
                 not self._cache
@@ -1833,7 +2223,7 @@ class DreameMowerMapRenderer:
                     map_data.virtual_walls,
                     self.color_scheme.virtual_wall,
                     layer_size,
-                    map_data.dimensions,
+                    dimensions,
                     line_width,
                     scale,
                 )
@@ -1842,7 +2232,11 @@ class DreameMowerMapRenderer:
             del cached_layers[layer]
 
         layer = MapRendererLayer.PATHWAY
-        if (not map_data.saved_map or map_data.recovery_map) and map_data.pathways and self.config.pathway:
+        if (
+            (not map_data.saved_map or map_data.recovery_map)
+            and map_data.pathways
+            and self.config.pathway
+        ):
             layers.append(layer)
             if (
                 not self._cache
@@ -1855,7 +2249,7 @@ class DreameMowerMapRenderer:
                     map_data.pathways,
                     self.color_scheme.pathway,
                     layer_size,
-                    map_data.dimensions,
+                    dimensions,
                     self.presentation_stroke_scale,
                     scale,
                 )
@@ -1878,7 +2272,7 @@ class DreameMowerMapRenderer:
                     self.color_scheme.active_area_outline,
                     self.color_scheme.active_area,
                     layer_size,
-                    map_data.dimensions,
+                    dimensions,
                     border_width,
                     scale,
                 )
@@ -1887,7 +2281,11 @@ class DreameMowerMapRenderer:
             del cached_layers[layer]
 
         layer = MapRendererLayer.ACTIVE_POINT
-        if not map_data.saved_map and map_data.active_points and self.config.active_point:
+        if (
+            not map_data.saved_map
+            and map_data.active_points
+            and self.config.active_point
+        ):
             layers.append(layer)
             if (
                 not self._cache
@@ -1901,7 +2299,7 @@ class DreameMowerMapRenderer:
                     self.color_scheme.active_point_outline,
                     self.color_scheme.active_point,
                     layer_size,
-                    map_data.dimensions,
+                    dimensions,
                     border_width,
                     scale,
                 )
@@ -1916,41 +2314,50 @@ class DreameMowerMapRenderer:
                 not self._cache
                 or self._map_data is None
                 or self._map_data.furnitures != map_data.furnitures
-                or self._map_data.rotation != map_data.rotation
+                or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                 or not cached_layers.get(layer)
             ):
                 if layer not in cached_layers:
                     cached_layers[MapRendererLayer.FURNITURE] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.FURNITURE].keys()).copy():
+                    for k in list(
+                        _layer_objects(cached_layers, MapRendererLayer.FURNITURE).keys()
+                    ).copy():
                         if k not in map_data.furnitures:
-                            del cached_layers[MapRendererLayer.FURNITURE][k]
+                            del _layer_objects(
+                                cached_layers, MapRendererLayer.FURNITURE
+                            )[k]
 
                 changed = False
-                for k, v in map_data.furnitures.items():
+                for k, furniture in map_data.furnitures.items():
                     if (
                         not self._cache
                         or self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.FURNITURE]
+                        or k
+                        not in _layer_objects(cached_layers, MapRendererLayer.FURNITURE)
                         or not self._map_data.furnitures
                         or k not in self._map_data.furnitures
-                        or self._map_data.furnitures[k] != v
-                        or self._map_data.rotation != map_data.rotation
+                        or self._map_data.furnitures[k] != furniture
+                        or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                     ):
                         changed = True
-                        cached_layers[MapRendererLayer.FURNITURE][k] = self.render_furniture(
-                            v,
-                            map_data.furniture_version,
-                            layer_size,
-                            map_data.dimensions,
-                            int((icon_size * 1.2) * map_data.dimensions.scale),
-                            map_data.rotation,
-                            scale,
+                        _layer_objects(cached_layers, MapRendererLayer.FURNITURE)[k] = (
+                            self.render_furniture(
+                                furniture,
+                                map_data.furniture_version,
+                                layer_size,
+                                dimensions,
+                                int((icon_size * 1.2) * dimensions.scale),
+                                (map_data.rotation or 0),
+                                scale,
+                            )
                         )
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.FURNITURE)
+                    self._combine_layers(
+                        cached_layers, layer_size, layer, MapRendererLayer.FURNITURE
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
@@ -1977,45 +2384,64 @@ class DreameMowerMapRenderer:
                 if MapRendererLayer.SEGMENT not in cached_layers:
                     cached_layers[MapRendererLayer.SEGMENT] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.SEGMENT].keys()).copy():
+                    for k in list(
+                        _layer_objects(cached_layers, MapRendererLayer.SEGMENT).keys()
+                    ).copy():
                         if k not in map_data.segments:
-                            del cached_layers[MapRendererLayer.SEGMENT][k]
+                            del _layer_objects(cached_layers, MapRendererLayer.SEGMENT)[
+                                k
+                            ]
 
                 changed = False
                 for k in sorted(map_data.segments.keys()):
-                    v = map_data.segments[k]
+                    segment = map_data.segments[k]
                     if self._segment_needs_render(
                         cache_enabled=self._cache,
                         previous_map=self._map_data,
-                        cached_segments=cached_layers[MapRendererLayer.SEGMENT],
+                        cached_segments=_layer_objects(
+                            cached_layers, MapRendererLayer.SEGMENT
+                        ),
                         map_data=map_data,
                         segment_id=k,
-                        segment=v,
+                        segment=segment,
                     ):
                         changed = True
-                        cached_layers[MapRendererLayer.SEGMENT][k] = self.render_segment(
-                            v,
-                            bool((not map_data.saved_map or map_data.recovery_map) and map_data.cleanset),
-                            layer_size,
-                            map_data.dimensions,
-                            int(segment_icon_size * map_data.dimensions.scale),
-                            map_data.rotation,
-                            scale,
-                            (
-                                (not map_data.active_segments or k in map_data.active_segments)
-                                and (not map_data.hidden_segments or k not in map_data.hidden_segments)
-                                and not map_data.cleaning_map
-                            ),
-                            (
-                                map_data.cleaning_map
-                                and map_data.neglected_segments
-                                and k in map_data.neglected_segments
-                            ),
+                        _layer_objects(cached_layers, MapRendererLayer.SEGMENT)[k] = (
+                            self.render_segment(
+                                segment,
+                                bool(
+                                    (not map_data.saved_map or map_data.recovery_map)
+                                    and map_data.cleanset
+                                ),
+                                layer_size,
+                                dimensions,
+                                int(segment_icon_size * dimensions.scale),
+                                (map_data.rotation or 0),
+                                scale,
+                                (
+                                    (
+                                        not map_data.active_segments
+                                        or k in map_data.active_segments
+                                    )
+                                    and (
+                                        not map_data.hidden_segments
+                                        or k not in map_data.hidden_segments
+                                    )
+                                    and not map_data.cleaning_map
+                                ),
+                                bool(
+                                    map_data.cleaning_map
+                                    and map_data.neglected_segments
+                                    and k in map_data.neglected_segments
+                                ),
+                            )
                         )
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.SEGMENT)
+                    self._combine_layers(
+                        cached_layers, layer_size, layer, MapRendererLayer.SEGMENT
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
@@ -2027,7 +2453,7 @@ class DreameMowerMapRenderer:
                 not self._cache
                 or self._map_data is None
                 or self._map_data.charger_position != map_data.charger_position
-                or self._map_data.rotation != map_data.rotation
+                or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                 or self._station_status != station_status
                 or not cached_layers.get(layer)
             ):
@@ -2156,10 +2582,12 @@ class DreameMowerMapRenderer:
                 elif self._robot_type == RobotType.VSLAM and self.icon_set == 3:
                     offset = int(-robot_icon_size * 18)
 
-                if offset:
+                if offset and charger_position.a is not None:
                     charger_position = Point(
-                        charger_position.x - offset * math.cos(charger_position.a * math.pi / 180),
-                        charger_position.y - offset * math.sin(charger_position.a * math.pi / 180),
+                        charger_position.x
+                        - offset * math.cos(charger_position.a * math.pi / 180),
+                        charger_position.y
+                        - offset * math.sin(charger_position.a * math.pi / 180),
                         charger_position.a,
                     )
 
@@ -2168,9 +2596,15 @@ class DreameMowerMapRenderer:
                     charger_position,
                     station_status,
                     layer_size,
-                    map_data.dimensions,
-                    int((robot_icon_size * (map_data.dimensions.scale if map_data.dimensions.scale > 2 else 3)) * 1.2),
-                    map_data.rotation,
+                    dimensions,
+                    int(
+                        (
+                            robot_icon_size
+                            * (dimensions.scale if dimensions.scale > 2 else 3)
+                        )
+                        * 1.2
+                    ),
+                    (map_data.rotation or 0),
                     scale,
                 )
         elif self._cache and cached_layers.get(layer):
@@ -2185,7 +2619,7 @@ class DreameMowerMapRenderer:
                 or self._map_data is None
                 or self._map_data.robot_position != map_data.robot_position
                 or self._map_data.charger_position != map_data.charger_position
-                or self._map_data.rotation != map_data.rotation
+                or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                 or self._robot_status != robot_status
                 or self._station_status != station_status
                 or self._map_data.docked != map_data.docked
@@ -2193,13 +2627,15 @@ class DreameMowerMapRenderer:
             ):
                 robot_position = map_data.robot_position
 
-                if map_data.docked:
+                if (
+                    map_data.docked
+                    and map_data.charger_position is not None
+                    and map_data.charger_position.a is not None
+                ):
                     # Calculate charger angle
                     charger_angle = map_data.charger_position.a
                     if self._robot_type != RobotType.VSLAM:
-                        offset = int(
-                            robot_icon_size * (21.42)
-                        )
+                        offset = int(robot_icon_size * (21.42))
 
                         if self.icon_set != 2:
                             if charger_angle > -45 and charger_angle < 45:
@@ -2236,11 +2672,11 @@ class DreameMowerMapRenderer:
                         offset = int(robot_icon_size * 35.71)
 
                     robot_position = Point(
-                        map_data.charger_position.x + offset * math.cos(charger_angle * math.pi / 180),
-                        map_data.charger_position.y + offset * math.sin(charger_angle * math.pi / 180),
-                        (
-                            charger_angle
-                        ),
+                        map_data.charger_position.x
+                        + offset * math.cos(charger_angle * math.pi / 180),
+                        map_data.charger_position.y
+                        + offset * math.sin(charger_angle * math.pi / 180),
+                        (charger_angle),
                     )
 
                 changes.append(layer)
@@ -2248,9 +2684,12 @@ class DreameMowerMapRenderer:
                     robot_position,
                     robot_status,
                     layer_size,
-                    map_data.dimensions,
-                    int(robot_icon_size * (map_data.dimensions.scale if map_data.dimensions.scale > 2 else 3)),
-                    map_data.rotation,
+                    dimensions,
+                    int(
+                        robot_icon_size
+                        * (dimensions.scale if dimensions.scale > 2 else 3)
+                    ),
+                    (map_data.rotation or 0),
                     scale,
                 )
         elif self._cache and cached_layers.get(layer):
@@ -2264,16 +2703,16 @@ class DreameMowerMapRenderer:
                 not self._cache
                 or self._map_data is None
                 or self._map_data.router_position != map_data.router_position
-                or self._map_data.rotation != map_data.rotation
+                or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                 or not cached_layers.get(layer)
             ):
                 changes.append(layer)
                 cached_layers[layer] = self.render_router(
                     map_data.router_position,
                     layer_size,
-                    map_data.dimensions,
-                    int((robot_icon_size * 1.25) * map_data.dimensions.scale),
-                    map_data.rotation,
+                    dimensions,
+                    int((robot_icon_size * 1.25) * dimensions.scale),
+                    (map_data.rotation or 0),
                     scale,
                 )
         elif self._cache and cached_layers.get(layer):
@@ -2281,100 +2720,132 @@ class DreameMowerMapRenderer:
             del cached_layers[layer]
 
         layer = MapRendererLayer.OBSTACLES
-        if not map_data.saved_map and map_data.obstacles and (self.config.obstacle or self.config.pet):
+        if (
+            not map_data.saved_map
+            and map_data.obstacles
+            and (self.config.obstacle or self.config.pet)
+        ):
             layers.append(layer)
             if (
                 not self._cache
                 or self._map_data is None
                 or self._map_data.obstacles != map_data.obstacles
-                or self._map_data.rotation != map_data.rotation
+                or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                 or not cached_layers.get(layer)
             ):
                 if MapRendererLayer.OBSTACLE not in cached_layers:
                     cached_layers[MapRendererLayer.OBSTACLE] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.OBSTACLE].keys()).copy():
+                    for k in list(
+                        _layer_objects(cached_layers, MapRendererLayer.OBSTACLE).keys()
+                    ).copy():
                         if k not in map_data.obstacles:
-                            del cached_layers[MapRendererLayer.OBSTACLE][k]
+                            del _layer_objects(
+                                cached_layers, MapRendererLayer.OBSTACLE
+                            )[k]
 
                 changed = False
-                for k, v in map_data.obstacles.items():
-                    if not self.config.obstacle and v.type != ObstacleType.PET:
+                for k, obstacle in map_data.obstacles.items():
+                    if not self.config.obstacle and obstacle.type != ObstacleType.PET:
                         continue
-                    elif not self.config.pet and v.type == ObstacleType.PET:
+                    elif not self.config.pet and obstacle.type == ObstacleType.PET:
                         continue
 
                     if (
                         not self._cache
                         or self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.OBSTACLE]
+                        or k
+                        not in _layer_objects(cached_layers, MapRendererLayer.OBSTACLE)
                         or not self._map_data.obstacles
                         or k not in self._map_data.obstacles
-                        or self._map_data.obstacles[k] != v
-                        or self._map_data.rotation != map_data.rotation
+                        or self._map_data.obstacles[k] != obstacle
+                        or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                     ):
                         obstacle_image = self.render_obstacle(
-                            v,
+                            obstacle,
                             layer_size,
-                            map_data.dimensions,
-                            int((icon_size * 1.2) * map_data.dimensions.scale),
-                            map_data.rotation,
+                            dimensions,
+                            int((icon_size * 1.2) * dimensions.scale),
+                            (map_data.rotation or 0),
                             scale,
                         )
                         if obstacle_image:
                             changed = True
-                            cached_layers[MapRendererLayer.OBSTACLE][k] = obstacle_image
-                        elif k in cached_layers[MapRendererLayer.OBSTACLE]:
-                            del cached_layers[MapRendererLayer.OBSTACLE][k]
+                            _layer_objects(cached_layers, MapRendererLayer.OBSTACLE)[
+                                k
+                            ] = obstacle_image
+                        elif k in _layer_objects(
+                            cached_layers, MapRendererLayer.OBSTACLE
+                        ):
+                            del _layer_objects(
+                                cached_layers, MapRendererLayer.OBSTACLE
+                            )[k]
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.OBSTACLE)
+                    self._combine_layers(
+                        cached_layers, layer_size, layer, MapRendererLayer.OBSTACLE
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
 
         layer = MapRendererLayer.CRUISE_POINTS
-        if not map_data.saved_map and map_data.active_cruise_points:  # and self.config.cruise_point:
+        if (
+            not map_data.saved_map and map_data.active_cruise_points
+        ):  # and self.config.cruise_point:
             layers.append(layer)
             if (
                 not self._cache
                 or self._map_data is None
                 or self._map_data.active_cruise_points != map_data.active_cruise_points
-                or self._map_data.rotation != map_data.rotation
+                or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                 or not cached_layers.get(layer)
             ):
                 if MapRendererLayer.CRUISE_POINT not in cached_layers:
                     cached_layers[MapRendererLayer.CRUISE_POINT] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.CRUISE_POINT].keys()).copy():
+                    for k in list(
+                        _layer_objects(
+                            cached_layers, MapRendererLayer.CRUISE_POINT
+                        ).keys()
+                    ).copy():
                         if k not in map_data.active_cruise_points:
-                            del cached_layers[MapRendererLayer.CRUISE_POINT][k]
+                            del _layer_objects(
+                                cached_layers, MapRendererLayer.CRUISE_POINT
+                            )[k]
 
                 changed = False
-                for k, v in map_data.active_cruise_points.items():
+                for k, cruise_point in map_data.active_cruise_points.items():
                     if (
                         self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.CRUISE_POINT]
+                        or k
+                        not in _layer_objects(
+                            cached_layers, MapRendererLayer.CRUISE_POINT
+                        )
                         or not self._map_data.active_cruise_points
                         or k not in self._map_data.active_cruise_points
-                        or self._map_data.active_cruise_points[k] != v
-                        or self._map_data.rotation != map_data.rotation
+                        or self._map_data.active_cruise_points[k] != cruise_point
+                        or (self._map_data.rotation or 0) != (map_data.rotation or 0)
                     ):
                         changed = True
-                        cached_layers[MapRendererLayer.CRUISE_POINT][k] = self.render_cruise_point(
+                        _layer_objects(cached_layers, MapRendererLayer.CRUISE_POINT)[
+                            k
+                        ] = self.render_cruise_point(
                             k,
-                            v,
+                            cruise_point,
                             layer_size,
-                            map_data.dimensions,
-                            int(round(icon_size * 1.25 * map_data.dimensions.scale)),
-                            map_data.rotation,
+                            dimensions,
+                            int(round(icon_size * 1.25 * dimensions.scale)),
+                            (map_data.rotation or 0),
                             scale,
                         )
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.CRUISE_POINT)
+                    self._combine_layers(
+                        cached_layers, layer_size, layer, MapRendererLayer.CRUISE_POINT
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
@@ -2390,11 +2861,12 @@ class DreameMowerMapRenderer:
                     if l in changes:
                         _LOGGER.debug("Render %s", l.name)
                     cached_layers[MapRendererLayer.OBJECTS] = Image.alpha_composite(
-                        cached_layers[MapRendererLayer.OBJECTS], cached_layers[l]
+                        _layer_image(cached_layers, MapRendererLayer.OBJECTS),
+                        _layer_image(cached_layers, l),
                     )
 
             if layer_size != map_image.size:
-                cached_layers[MapRendererLayer.OBJECTS].thumbnail(
+                _layer_image(cached_layers, MapRendererLayer.OBJECTS).thumbnail(
                     map_image.size, Image.Resampling.BOX, reducing_gap=1.5
                 )
         else:
@@ -2403,10 +2875,19 @@ class DreameMowerMapRenderer:
 
         return Image.alpha_composite(
             map_image,
-            cached_layers[MapRendererLayer.OBJECTS],
+            _layer_image(cached_layers, MapRendererLayer.OBJECTS),
         )
 
-    def render_areas(self, areas, color, fill, layer_size, dimensions, width, scale):
+    def render_areas(
+        self,
+        areas: list[Area],
+        color: _Color,
+        fill: _Color,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        width: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         for area in areas:
@@ -2424,7 +2905,16 @@ class DreameMowerMapRenderer:
             draw.polygon(coords, fill, color, width=(width * scale))
         return new_layer
 
-    def render_points(self, points, color, fill, layer_size, dimensions, width, scale):
+    def render_points(
+        self,
+        points: list[Point],
+        color: _Color,
+        fill: _Color,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        width: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         size = 15 * dimensions.grid_size
@@ -2454,7 +2944,15 @@ class DreameMowerMapRenderer:
             draw.polygon(coords, fill, color, width=(width * scale))
         return new_layer
 
-    def render_walls(self, walls, color, layer_size, dimensions, width, scale):
+    def render_walls(
+        self,
+        walls: list[Wall],
+        color: _Color,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        width: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         for wall in walls:
@@ -2466,32 +2964,38 @@ class DreameMowerMapRenderer:
             )
         return new_layer
 
-    def render_path(self, path, color, layer_size, mask, dimensions, width, scale):
+    def render_path(
+        self,
+        path: list[Path],
+        color: _Color,
+        layer_size: tuple[int, int],
+        mask: Image.Image | None,
+        dimensions: MapImageDimensions,
+        width: float,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
-        sweep = []
-        mop = []
-        sweep_path = []
-        path_type = ""
+        sweep: list[list[float]] = []
+        sweep_path: list[float] = []
 
         for point in path:
             p = point.to_img(dimensions)
             if point.path_type == PathType.LINE:
-                l = [p.x * scale, p.y * scale]
+                sweep_path.extend([p.x * scale, p.y * scale])
             else:
                 if sweep_path:
                     sweep.append(sweep_path)
 
-                path_type = point.path_type
-                sweep_path = []
+                sweep_path = [p.x * scale, p.y * scale]
 
         if sweep_path:
             sweep.append(sweep_path)
 
-        for path in sweep:
+        for path_coords in sweep:
             size = width * scale
             draw.line(
-                path,
+                path_coords,
                 width=int(round(size)),
                 fill=color,
                 joint="curve",
@@ -2499,19 +3003,19 @@ class DreameMowerMapRenderer:
             size = int(math.floor(size / 2))
             draw.ellipse(
                 [
-                    path[-2] - size,
-                    path[-1] - size,
-                    path[-2] + size,
-                    path[-1] + size,
+                    path_coords[-2] - size,
+                    path_coords[-1] - size,
+                    path_coords[-2] + size,
+                    path_coords[-1] + size,
                 ],
                 fill=color,
             )
             draw.ellipse(
                 [
-                    path[0] - size,
-                    path[1] - size,
-                    path[0] + size,
-                    path[1] + size,
+                    path_coords[0] - size,
+                    path_coords[1] - size,
+                    path_coords[0] + size,
+                    path_coords[1] + size,
                 ],
                 fill=color,
             )
@@ -2520,14 +3024,14 @@ class DreameMowerMapRenderer:
 
     def render_charger(
         self,
-        charger_position,
-        station_status,
-        layer_size,
-        dimensions,
-        size,
-        map_rotation,
-        scale,
-    ):
+        charger_position: Point,
+        station_status: int,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        map_rotation: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         icon_size = int(size * scale)
         if self.icon_set == 3:
@@ -2547,7 +3051,9 @@ class DreameMowerMapRenderer:
                     charger_image = MAP_CHARGER_VSLAM_IMAGE_DREAME
                 else:
                     charger_image = MAP_CHARGER_IMAGE_DREAME
-            self._charger_icon = Image.open(BytesIO(base64.b64decode(charger_image))).convert("RGBA")
+            self._charger_icon = Image.open(
+                BytesIO(base64.b64decode(charger_image))
+            ).convert("RGBA")
 
             if self.icon_set == 3:
                 self._charger_icon = DreameMowerMapRenderer._set_icon_color(
@@ -2560,9 +3066,11 @@ class DreameMowerMapRenderer:
                 enhancer = ImageEnhance.Brightness(self._charger_icon)
                 self._charger_icon = enhancer.enhance(0.7)
 
-        charger_icon = self._charger_icon.resize((icon_size, icon_size), resample=Image.Resampling.NEAREST).rotate(
+        charger_icon = self._charger_icon.resize(
+            (icon_size, icon_size), resample=Image.Resampling.NEAREST
+        ).rotate(
             (
-                charger_position.a
+                (charger_position.a if charger_position.a is not None else 0)
                 if self._robot_type == RobotType.VSLAM
                 or self.icon_set == 0
                 or self.icon_set == 2
@@ -2586,19 +3094,20 @@ class DreameMowerMapRenderer:
 
     def render_mower(
         self,
-        robot_position,
-        robot_status,
-        layer_size,
-        dimensions,
-        size,
-        map_rotation,
-        scale,
-    ):
+        robot_position: Point,
+        robot_status: int,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        map_rotation: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         icon_size = int(size * scale)
         robot_icon_size = (
             int(icon_size * 1.4)
-            if self.icon_set == 2 or (self._robot_type == RobotType.VSLAM and self.icon_set == 3)
+            if self.icon_set == 2
+            or (self._robot_type == RobotType.VSLAM and self.icon_set == 3)
             else icon_size
         )
         if self.presentation_marker_image is not None:
@@ -2621,12 +3130,11 @@ class DreameMowerMapRenderer:
                     else:
                         robot_image = MAP_ROBOT_LIDAR_IMAGE_DREAME_DARK
 
-            self._robot_icon = Image.open(BytesIO(base64.b64decode(robot_image))).convert("RGBA")
+            self._robot_icon = Image.open(
+                BytesIO(base64.b64decode(robot_image))
+            ).convert("RGBA")
 
-            if (
-                self.icon_set != 2
-                and self.icon_set != 3
-            ):
+            if self.icon_set != 2 and self.icon_set != 3:
                 enhancer = ImageEnhance.Brightness(self._robot_icon)
                 if self.color_scheme.dark:
                     self._robot_icon = enhancer.enhance(1.5)
@@ -2636,7 +3144,7 @@ class DreameMowerMapRenderer:
         icon = self._robot_icon.resize(
             (robot_icon_size, robot_icon_size),
             resample=Image.Resampling.NEAREST,
-        ).rotate(robot_position.a, expand=1)
+        ).rotate(robot_position.a if robot_position.a is not None else 0, expand=1)
         point = robot_position.to_img(dimensions)
 
         if not self._low_memory:
@@ -2658,17 +3166,23 @@ class DreameMowerMapRenderer:
                     )
                 status_icon = self._robot_cleaning_icon
 
-                if self.config.cleaning_direction:
+                if self.config.cleaning_direction and robot_position.a is not None:
                     if self._robot_cleaning_direction_icon is None:
                         self._robot_cleaning_direction_icon = (
-                            Image.open(BytesIO(base64.b64decode(MAP_ROBOT_CLEANING_DIRECTION_IMAGE)))
+                            Image.open(
+                                BytesIO(
+                                    base64.b64decode(MAP_ROBOT_CLEANING_DIRECTION_IMAGE)
+                                )
+                            )
                             .convert("RGBA")
                             .resize(
                                 ((int(icon_size * 1.5), int(icon_size * 1.5))),
                             )
                         )
 
-                    ico = self._robot_cleaning_direction_icon.rotate(robot_position.a, expand=1)
+                    ico = self._robot_cleaning_direction_icon.rotate(
+                        robot_position.a, expand=1
+                    )
 
                     offset = int(icon_size * 0.3)
                     x = point.x + offset * math.cos(-robot_position.a * math.pi / 180)
@@ -2777,16 +3291,16 @@ class DreameMowerMapRenderer:
 
     def render_segment(
         self,
-        segment,
-        cleanset,
-        layer_size,
-        dimensions,
-        size,
-        rotation,
-        scale,
-        active,
-        neglected,
-    ):
+        segment: Segment,
+        cleanset: bool,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int,
+        scale: int,
+        active: bool,
+        neglected: bool,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         if segment.x is not None and segment.y is not None:
@@ -2805,8 +3319,12 @@ class DreameMowerMapRenderer:
                     self._segment_icons[segment.type] = Image.open(
                         BytesIO(base64.b64decode(icon_set[segment.type]))
                     ).convert("RGBA")
-                    if self.color_scheme.invert and not (self.config.name_background and self.icon_set != 2):
-                        enhancer = ImageEnhance.Brightness(self._segment_icons[segment.type])
+                    if self.color_scheme.invert and not (
+                        self.config.name_background and self.icon_set != 2
+                    ):
+                        enhancer = ImageEnhance.Brightness(
+                            self._segment_icons[segment.type]
+                        )
                         self._segment_icons[segment.type] = enhancer.enhance(0.1)
 
             icon = self._segment_icons.get(segment.type) if self.config.icon else None
@@ -2821,20 +3339,36 @@ class DreameMowerMapRenderer:
             elif segment.index > 0:
                 text = str(segment.index)
 
+            color_index = segment.color_index if segment.color_index is not None else 0
             text_font = None
             order_font = None
-            render_font = text and (self.config.name or segment.type == 0 or segment.index > 0)
-            if self._font_file is None and (render_font or (segment.order and self.config.order)):
-                self._font_file = zlib.decompress(base64.b64decode(MAP_FONT), zlib.MAX_WBITS | 32)
+            render_font = text and (
+                self.config.name or segment.type == 0 or segment.index > 0
+            )
+            if self._font_file is None and (
+                render_font or (segment.order and self.config.order)
+            ):
+                self._font_file = zlib.decompress(
+                    base64.b64decode(MAP_FONT), zlib.MAX_WBITS | 32
+                )
 
             if render_font and self._font_file:
                 text_font = ImageFont.truetype(
                     BytesIO(self._font_file),
-                    int((size * 1.9)) if segment.index or icon is None else int((size * 1.7)),
+                    int((size * 1.9))
+                    if segment.index or icon is None
+                    else int((size * 1.7)),
                 )
 
-            if active and segment.order and self.config.order:
-                order_font = ImageFont.truetype(BytesIO(self._font_file), int((size * 2.1)))
+            if (
+                active
+                and segment.order
+                and self.config.order
+                and self._font_file is not None
+            ):
+                order_font = ImageFont.truetype(
+                    BytesIO(self._font_file), int((size * 2.1))
+                )
 
             p = Point(segment.x, segment.y).to_img(dimensions, False)
             x = p.x
@@ -2842,7 +3376,7 @@ class DreameMowerMapRenderer:
 
             if neglected:
                 offset = size * 1.5
-                x_offset = 0
+                x_offset: float = 0
                 y_offset = -offset
                 if rotation == 90:
                     y_offset = 0
@@ -2864,7 +3398,7 @@ class DreameMowerMapRenderer:
                     x1 = x + size
                     y1 = y + size
 
-                    if text_font:
+                    if text_font and text is not None:
                         left, top, tw, th = draw.textbbox((0, 0), text, text_font)
                         ws = tw / 4
 
@@ -2872,7 +3406,7 @@ class DreameMowerMapRenderer:
                             icon_size = size * 1.35
                             padding = icon_size / 2
                             text_offset = (icon_size / 2) + 2
-                            icon_offset = 2
+                            icon_offset: float = 2
                             th = int(round(size * 2.3))
                         else:
                             icon_size = size * 1.15
@@ -2885,7 +3419,9 @@ class DreameMowerMapRenderer:
                             text_offset = 0
                             padding = -(icon_size / 4)
 
-                        name_background = self.config.icon or (self.config.name_background and self.config.name)
+                        name_background = self.config.icon or (
+                            self.config.name_background and self.config.name
+                        )
 
                         stroke_width = dimensions.scale
                         if neglected:
@@ -2905,7 +3441,11 @@ class DreameMowerMapRenderer:
                                 stroke_color = (255, 255, 255, 200)
                         elif self.config.icon or self.config.name:
                             stroke_width = 1
-                            if self.config.name_background and self.icon_set != 2 and self.color_scheme.invert:
+                            if (
+                                self.config.name_background
+                                and self.icon_set != 2
+                                and self.color_scheme.invert
+                            ):
                                 text_color = (240, 240, 240, 255)
                                 stroke_color = (240, 240, 240, 200)
                             else:
@@ -2953,14 +3493,18 @@ class DreameMowerMapRenderer:
                                     int(y1 * scale),
                                 ],
                                 fill=(
-                                    self.color_scheme.segment[segment.color_index][1]
-                                    if name_background and self.config.name_background and self.icon_set != 2
+                                    self.color_scheme.segment[color_index][1]
+                                    if name_background
+                                    and self.config.name_background
+                                    and self.icon_set != 2
                                     else self.color_scheme.icon_background
                                 ),
-                                radius=((size * scale)),
+                                radius=(size * scale),
                             )
 
-                        icon_text = Image.new("RGBA", (tw, th), (255, 255, 255, 0))
+                        icon_text = Image.new(
+                            "RGBA", (int(tw), int(th)), (255, 255, 255, 0)
+                        )
                         draw_text = ImageDraw.Draw(icon_text, "RGBA")
 
                         draw_text.text(
@@ -2979,7 +3523,7 @@ class DreameMowerMapRenderer:
                         draw.ellipse(
                             [x0 * scale, y0 * scale, x1 * scale, y1 * scale],
                             fill=(
-                                self.color_scheme.segment[segment.color_index][1]
+                                self.color_scheme.segment[color_index][1]
                                 if self.config.name_background and self.icon_set != 2
                                 else self.color_scheme.icon_background
                             ),
@@ -3009,10 +3553,7 @@ class DreameMowerMapRenderer:
                 active
                 and not neglected
                 and cleanset
-                and (
-                    self.config.cleaning_times
-                    or self.config.cleaning_mode
-                )
+                and (self.config.cleaning_times or self.config.cleaning_mode)
             )
             if order_font or custom:
                 offset = size * 2.7
@@ -3032,7 +3573,9 @@ class DreameMowerMapRenderer:
                 y = p.y + y_offset
                 cleaning_mode = (
                     None
-                    if segment.cleaning_mode is None or segment.cleaning_mode < 0 or segment.cleaning_mode > 3
+                    if segment.cleaning_mode is None
+                    or segment.cleaning_mode < 0
+                    or segment.cleaning_mode > 3
                     else segment.cleaning_mode
                 )
                 if custom:
@@ -3049,10 +3592,7 @@ class DreameMowerMapRenderer:
                         icon_count = icon_count - 1
                     if cleaning_mode == 0 or cleaning_mode == 1:
                         icon_count = icon_count - 1
-                    if (
-                        segment.cleaning_route is not None
-                        and cleaning_mode == 1
-                    ):
+                    if segment.cleaning_route is not None and cleaning_mode == 1:
                         icon_count = icon_count + 1
                 else:
                     icon_count = 1
@@ -3066,9 +3606,11 @@ class DreameMowerMapRenderer:
                 if custom:
                     radius = size - 2
 
-                icon_w = ((radius * icon_count * 2) * scale) + (arrow * 2) + (margin * 2)
+                icon_w = (
+                    ((radius * icon_count * 2) * scale) + (arrow * 2) + (margin * 2)
+                )
                 icon_h = ((radius * 2) * scale) + (arrow * 2)
-                icon = Image.new("RGBA", (icon_w, icon_h), (255, 255, 255, 0))
+                icon = Image.new("RGBA", (int(icon_w), int(icon_h)), (255, 255, 255, 0))
                 icon_draw = ImageDraw.Draw(icon, "RGBA")
 
                 if arrow and (segment.type != 0 or text_font):
@@ -3091,12 +3633,12 @@ class DreameMowerMapRenderer:
 
                 padding = int(round((size * 0.3) + (size * 0.6)))
                 r = icon_h - (padding * 2)
-                ellipse_x1 = padding + margin
+                ellipse_x1: float = padding + margin
                 ellipse_x2 = ellipse_x1 + r
                 if order_font:
                     icon_draw.ellipse(
                         [ellipse_x1, padding, ellipse_x2, icon_h - padding],
-                        fill=self.color_scheme.segment[segment.color_index][1],
+                        fill=self.color_scheme.segment[color_index][1],
                     )
                     text = str(segment.order)
                     left, top, tw, th = icon_draw.textbbox((0, 0), text, order_font)
@@ -3125,9 +3667,9 @@ class DreameMowerMapRenderer:
                             s = icon_size * 0.85 * scale
 
                         ico = DreameMowerMapRenderer._set_icon_color(
-                            self._cleaning_mode_icon[segment.cleaning_mode],
+                            self._cleaning_mode_icon[cleaning_mode],
                             s,
-                            self.color_scheme.segment[segment.color_index][1],
+                            self.color_scheme.segment[color_index][1],
                         )
 
                         icon_draw.ellipse(
@@ -3137,7 +3679,12 @@ class DreameMowerMapRenderer:
                         icon.paste(
                             ico,
                             (
-                                int(2 + ellipse_x1 + ((ellipse_x2 - ellipse_x1) / 2) - ico.size[0] / 2),
+                                int(
+                                    2
+                                    + ellipse_x1
+                                    + ((ellipse_x2 - ellipse_x1) / 2)
+                                    - ico.size[0] / 2
+                                ),
                                 int(((icon_h / 2) - ico.size[1] / 2)),
                             ),
                             ico,
@@ -3146,7 +3693,10 @@ class DreameMowerMapRenderer:
                         ellipse_x1 = ellipse_x2 + (margin * 2)
                         ellipse_x2 = ellipse_x1 + r
 
-                    if self.config.cleaning_times and segment.cleaning_times is not None:
+                    if (
+                        self.config.cleaning_times
+                        and segment.cleaning_times is not None
+                    ):
                         if self.icon_set == 3 or self.icon_set == 2:
                             s = icon_size * 0.95 * scale
                         else:
@@ -3155,7 +3705,7 @@ class DreameMowerMapRenderer:
                         ico = DreameMowerMapRenderer._set_icon_color(
                             self._cleaning_times_icon[segment.cleaning_times - 1],
                             s,
-                            self.color_scheme.segment[segment.color_index][1],
+                            self.color_scheme.segment[color_index][1],
                         )
 
                         icon_draw.ellipse(
@@ -3165,7 +3715,12 @@ class DreameMowerMapRenderer:
                         icon.paste(
                             ico,
                             (
-                                int(2 + ellipse_x1 + ((ellipse_x2 - ellipse_x1) / 2) - ico.size[0] / 2),
+                                int(
+                                    2
+                                    + ellipse_x1
+                                    + ((ellipse_x2 - ellipse_x1) / 2)
+                                    - ico.size[0] / 2
+                                ),
                                 int(((icon_h / 2) - ico.size[1] / 2)),
                             ),
                             ico,
@@ -3181,21 +3736,39 @@ class DreameMowerMapRenderer:
                     icon,
                 )
         return new_layer
+        return new_layer
 
-    def render_obstacle(self, obstacle, layer_size, dimensions, size, rotation, scale):
+    def render_obstacle(
+        self,
+        obstacle: Obstacle,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int,
+        scale: int,
+    ) -> Image.Image | None:
         if obstacle.ignore_status == 1:
             if (
                 obstacle.type.value not in self._obstacle_hidden_icons
                 and obstacle.type.value in OBSTACLE_TYPE_TO_HIDDEN_ICON
             ):
                 self._obstacle_hidden_icons[obstacle.type.value] = Image.open(
-                    BytesIO(base64.b64decode(OBSTACLE_TYPE_TO_HIDDEN_ICON[obstacle.type.value]))
+                    BytesIO(
+                        base64.b64decode(
+                            OBSTACLE_TYPE_TO_HIDDEN_ICON[obstacle.type.value]
+                        )
+                    )
                 ).convert("RGBA")
             icon = self._obstacle_hidden_icons.get(obstacle.type.value)
         else:
-            if obstacle.type.value not in self._obstacle_icons and obstacle.type.value in OBSTACLE_TYPE_TO_ICON:
+            if (
+                obstacle.type.value not in self._obstacle_icons
+                and obstacle.type.value in OBSTACLE_TYPE_TO_ICON
+            ):
                 self._obstacle_icons[obstacle.type.value] = Image.open(
-                    BytesIO(base64.b64decode(OBSTACLE_TYPE_TO_ICON[obstacle.type.value]))
+                    BytesIO(
+                        base64.b64decode(OBSTACLE_TYPE_TO_ICON[obstacle.type.value])
+                    )
                 ).convert("RGBA")
             icon = self._obstacle_icons.get(obstacle.type.value)
 
@@ -3205,26 +3778,40 @@ class DreameMowerMapRenderer:
             draw = ImageDraw.Draw(new_layer, "RGBA")
 
             if obstacle.ignore_status != 2 and self._obstacle_background is None:
-                self._obstacle_background = Image.open(BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_BG_DREAME))).convert(
-                    "RGBA"
-                )
+                self._obstacle_background = Image.open(
+                    BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_BG_DREAME))
+                ).convert("RGBA")
                 s = int(size * scale * 2)
                 self._obstacle_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-                self._obstacle_background = self._obstacle_background.rotate(-rotation, expand=1)
+                self._obstacle_background = self._obstacle_background.rotate(
+                    -rotation, expand=1
+                )
 
             if obstacle.ignore_status == 2 and self._obstacle_hidden_background is None:
                 self._obstacle_hidden_background = Image.open(
                     BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_HIDDEN_BG_DREAME))
                 ).convert("RGBA")
                 s = int((size * 0.75) * scale * 2)
-                self._obstacle_hidden_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-                self._obstacle_hidden_background = self._obstacle_hidden_background.rotate(-rotation, expand=1)
+                self._obstacle_hidden_background.thumbnail(
+                    (s, s), Image.Resampling.LANCZOS
+                )
+                self._obstacle_hidden_background = (
+                    self._obstacle_hidden_background.rotate(-rotation, expand=1)
+                )
 
             background_image = (
-                self._obstacle_hidden_background if obstacle.ignore_status == 2 else self._obstacle_background
+                self._obstacle_hidden_background
+                if obstacle.ignore_status == 2
+                else self._obstacle_background
             )
-            bg_size = int((min(background_image.size[1], background_image.size[0]) / scale / 4) * 1.25)
-            offset = int(-(size * (0.15 if obstacle.ignore_status == 2 else 0.2)) * scale)
+            assert background_image is not None
+            bg_size = int(
+                (min(background_image.size[1], background_image.size[0]) / scale / 4)
+                * 1.25
+            )
+            offset = int(
+                -(size * (0.15 if obstacle.ignore_status == 2 else 0.2)) * scale
+            )
 
             p = obstacle.to_img(dimensions)
             x = p.x
@@ -3288,7 +3875,9 @@ class DreameMowerMapRenderer:
                         )
                     ),
                 )
-                icon = icon.resize((int(icon_size), int(icon_size))).rotate(-rotation, expand=1)
+                icon = icon.resize((int(icon_size), int(icon_size))).rotate(
+                    -rotation, expand=1
+                )
 
             new_layer.paste(
                 icon,
@@ -3300,8 +3889,18 @@ class DreameMowerMapRenderer:
             )
 
             return new_layer
+        return None
 
-    def render_cruise_point(self, index, cruise_point, layer_size, dimensions, size, rotation, scale):
+    def render_cruise_point(
+        self,
+        index: int,
+        cruise_point: Coordinate,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         if cruise_point.type == 1 and self._cruise_path_point_background is None:
@@ -3309,8 +3908,12 @@ class DreameMowerMapRenderer:
                 BytesIO(base64.b64decode(MAP_ICON_CRUISE_POINT_BG_DREAME))
             ).convert("RGBA")
             s = int(size * scale * 3)
-            self._cruise_path_point_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-            self._cruise_path_point_background = self._cruise_path_point_background.rotate(-rotation, expand=1)
+            self._cruise_path_point_background.thumbnail(
+                (s, s), Image.Resampling.LANCZOS
+            )
+            self._cruise_path_point_background = (
+                self._cruise_path_point_background.rotate(-rotation, expand=1)
+            )
 
         if cruise_point.type != 1 and self._cruise_point_background is None:
             self._cruise_point_background = Image.open(
@@ -3318,12 +3921,19 @@ class DreameMowerMapRenderer:
             ).convert("RGBA")
             s = int(round(size * scale * 2))
             self._cruise_point_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-            self._cruise_point_background = self._cruise_point_background.rotate(-rotation, expand=1)
+            self._cruise_point_background = self._cruise_point_background.rotate(
+                -rotation, expand=1
+            )
 
         background_image = (
-            self._cruise_point_background if cruise_point.type != 1 else self._cruise_path_point_background
+            self._cruise_point_background
+            if cruise_point.type != 1
+            else self._cruise_path_point_background
         )
-        bg_size = int(min(background_image.size[1], background_image.size[0]) / scale / 4)
+        assert background_image is not None
+        bg_size = int(
+            min(background_image.size[1], background_image.size[0]) / scale / 4
+        )
         offset = int(-bg_size * 1.25)
 
         p = cruise_point.to_img(dimensions)
@@ -3369,17 +3979,25 @@ class DreameMowerMapRenderer:
                     (x + bg_size) * scale,
                     (y + bg_size) * scale,
                 ],
-                fill=(212, 212, 212, 255) if cruise_point.completed else (34, 109, 242, 255),
+                fill=(212, 212, 212, 255)
+                if cruise_point.completed
+                else (34, 109, 242, 255),
             )
 
         if cruise_point.type == 1:
-            text_box = Image.new("RGBA", (bg_size * 2 * scale, bg_size * 2 * scale), (255, 255, 255, 0))
+            text_box = Image.new(
+                "RGBA", (bg_size * 2 * scale, bg_size * 2 * scale), (255, 255, 255, 0)
+            )
             text_box_draw = ImageDraw.Draw(text_box, "RGBA")
 
             if self._font_file is None:
-                self._font_file = zlib.decompress(base64.b64decode(MAP_FONT), zlib.MAX_WBITS | 32)
+                self._font_file = zlib.decompress(
+                    base64.b64decode(MAP_FONT), zlib.MAX_WBITS | 32
+                )
 
-            font = ImageFont.truetype(BytesIO(self._font_file), int((bg_size * 1.5 * scale)))
+            font = ImageFont.truetype(
+                BytesIO(self._font_file), int((bg_size * 1.5 * scale))
+            )
 
             text = str(index)
             left, top, tw, th = text_box_draw.textbbox((0, 0), text, font)
@@ -3403,23 +4021,53 @@ class DreameMowerMapRenderer:
 
         return new_layer
 
-    def render_furniture(self, furniture, furniture_version, layer_size, dimensions, size, rotation, scale):
+    def render_furniture(
+        self,
+        furniture: Furniture,
+        furniture_version: int | None,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int,
+        scale: int,
+    ) -> Image.Image | None:
         draw_image = furniture.width and furniture.height
         furniture_type = (
             FurnitureType.COFFEE_TABLE.value
-            if furniture_version == 1 and furniture.type == FurnitureType.ROUND_COFFEE_TABLE
+            if furniture_version == 1
+            and furniture.type == FurnitureType.ROUND_COFFEE_TABLE
             else furniture.type.value
         )
         if draw_image:
-            furniture_images = FURNITURE_V2_TYPE_TO_IMAGE if furniture_version == 2 else FURNITURE_TYPE_TO_IMAGE
-            if furniture_type not in self._furniture_images and furniture_type in furniture_images:
-                img = np.array(Image.open(BytesIO(base64.b64decode(furniture_images[furniture_type]))).convert("RGBA"))
-                img[..., 3] = 235 * (img[..., 3] > 0)
-                self._furniture_images[furniture_type] = Image.fromarray(img)
+            furniture_images = (
+                FURNITURE_V2_TYPE_TO_IMAGE
+                if furniture_version == 2
+                else FURNITURE_TYPE_TO_IMAGE
+            )
+            if (
+                furniture_type not in self._furniture_images
+                and furniture_type in furniture_images
+            ):
+                furniture_pixels = np.array(
+                    Image.open(
+                        BytesIO(base64.b64decode(furniture_images[furniture_type]))
+                    ).convert("RGBA")
+                )
+                furniture_pixels[..., 3] = 235 * (furniture_pixels[..., 3] > 0)
+                self._furniture_images[furniture_type] = Image.fromarray(
+                    furniture_pixels
+                )
             icon = self._furniture_images.get(furniture_type)
         else:
-            furniture_icons = FURNITURE_V2_TYPE_TO_ICON if furniture_version == 2 else FURNITURE_TYPE_TO_ICON
-            if furniture_type not in self._furniture_icons and furniture_type in furniture_icons:
+            furniture_icons = (
+                FURNITURE_V2_TYPE_TO_ICON
+                if furniture_version == 2
+                else FURNITURE_TYPE_TO_ICON
+            )
+            if (
+                furniture_type not in self._furniture_icons
+                and furniture_type in furniture_icons
+            ):
                 self._furniture_icons[furniture_type] = Image.open(
                     BytesIO(base64.b64decode(furniture_icons[furniture_type]))
                 ).convert("RGBA")
@@ -3443,7 +4091,9 @@ class DreameMowerMapRenderer:
                         resample=Image.Resampling.LANCZOS,
                     )
                 else:
-                    img.thumbnail((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                    img.thumbnail(
+                        (int(w * scale), int(h * scale)), Image.Resampling.LANCZOS
+                    )
                 img = img.rotate(-(furniture.angle * 2), expand=1)
 
                 new_layer.paste(
@@ -3461,8 +4111,12 @@ class DreameMowerMapRenderer:
                         BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_BG_DREAME))
                     ).convert("RGBA")
                     s = int(size * scale * 2)
-                    self._furniture_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-                    self._furniture_background = self._furniture_background.rotate(-rotation, expand=1)
+                    self._furniture_background.thumbnail(
+                        (s, s), Image.Resampling.LANCZOS
+                    )
+                    self._furniture_background = self._furniture_background.rotate(
+                        -rotation, expand=1
+                    )
 
                 offset = int(-(size * 0.2) * scale)
 
@@ -3470,7 +4124,10 @@ class DreameMowerMapRenderer:
                 x = p.x
                 y = p.y
                 pos_offset = (
-                    (self._furniture_background.size[1] * (1.15 if rotation == 90 or rotation == 270 else 0.9))
+                    (
+                        self._furniture_background.size[1]
+                        * (1.15 if rotation == 90 or rotation == 270 else 0.9)
+                    )
                     / scale
                     / 2
                 )
@@ -3495,12 +4152,26 @@ class DreameMowerMapRenderer:
                 new_layer.paste(
                     self._furniture_background,
                     (
-                        int(round(x * scale - (self._furniture_background.size[0] / 2) + x_offset)),
-                        int(round(y * scale - (self._furniture_background.size[1] / 2) + y_offset)),
+                        int(
+                            round(
+                                x * scale
+                                - (self._furniture_background.size[0] / 2)
+                                + x_offset
+                            )
+                        ),
+                        int(
+                            round(
+                                y * scale
+                                - (self._furniture_background.size[1] / 2)
+                                + y_offset
+                            )
+                        ),
                     ),
                 )
 
-                icon = icon.resize((int(icon_size), int(icon_size))).rotate(-rotation, expand=1)
+                icon = icon.resize((int(icon_size), int(icon_size))).rotate(
+                    -rotation, expand=1
+                )
 
                 new_layer.paste(
                     icon,
@@ -3512,16 +4183,17 @@ class DreameMowerMapRenderer:
                 )
 
             return new_layer
+        return None
 
     def render_router(
         self,
-        router_position,
-        layer_size,
-        dimensions,
-        size,
-        rotation,
-        scale,
-    ):
+        router_position: Point,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         icon_size = int(size * scale)
@@ -3555,7 +4227,15 @@ class DreameMowerMapRenderer:
 
         return new_layer
 
-    def render_floor_material(self, image, floor_material, pixel_type, color, dimensions, scale):
+    def render_floor_material(
+        self,
+        image: NDArray[np.uint8],
+        floor_material: Mapping[int, int],
+        pixel_type: NDArray[np.uint8],
+        color: _Color,
+        dimensions: MapImageDimensions,
+        scale: int,
+    ) -> NDArray[np.uint8]:
         tile_w = 12
         floor_w = 4
         floor_h = 16
@@ -3579,7 +4259,7 @@ class DreameMowerMapRenderer:
                         y_start = 1
                         x_start = 0
                         x_multiplier = floor_h / 2
-                        y_multiplier = floor_w
+                        y_multiplier: float = floor_w
                     elif floor_type == 2:
                         w = math.floor(dimensions.width / floor_w)
                         h = math.floor(2 * dimensions.height / floor_h)
@@ -3601,8 +4281,14 @@ class DreameMowerMapRenderer:
                             if xx < dimensions.width and (
                                 floor_type != 1
                                 or (
-                                    (math.floor((y - 1) / floor_w) % 2 == 0 and x % 2 == 0)
-                                    or (math.floor((y - 1) / floor_w) % 2 == 1 and x % 2 == 1)
+                                    (
+                                        math.floor((y - 1) / floor_w) % 2 == 0
+                                        and x % 2 == 0
+                                    )
+                                    or (
+                                        math.floor((y - 1) / floor_w) % 2 == 1
+                                        and x % 2 == 1
+                                    )
                                 )
                             ):
                                 val = int(pixel_type[xx, y])
@@ -3611,7 +4297,9 @@ class DreameMowerMapRenderer:
                                     y_index = (height - 1) - (y * scale) - 1
 
                                     if val not in color_map:
-                                        cc = DreameMowerMapRenderer._alpha_composite(color, image[y_index, x_index])
+                                        cc = DreameMowerMapRenderer._alpha_composite(
+                                            color, image[y_index, x_index]
+                                        )
                                         color_map[val] = cc
                                     else:
                                         cc = color_map[val]
@@ -3625,8 +4313,14 @@ class DreameMowerMapRenderer:
                             if yy < dimensions.height and (
                                 floor_type != 2
                                 or (
-                                    (math.floor((x - 1) / floor_w) % 2 == 0 and y % 2 == 0)
-                                    or (math.floor((x - 1) / floor_w) % 2 == 1 and y % 2 == 1)
+                                    (
+                                        math.floor((x - 1) / floor_w) % 2 == 0
+                                        and y % 2 == 0
+                                    )
+                                    or (
+                                        math.floor((x - 1) / floor_w) % 2 == 1
+                                        and y % 2 == 1
+                                    )
                                 )
                             ):
                                 val = int(pixel_type[x, yy])
@@ -3634,40 +4328,54 @@ class DreameMowerMapRenderer:
                                     x_index = x * scale
                                     y_index = (height - 1) - ((yy * scale) + 1)
                                     if val not in color_map:
-                                        cc = DreameMowerMapRenderer._alpha_composite(color, image[y_index, x_index])
+                                        cc = DreameMowerMapRenderer._alpha_composite(
+                                            color, image[y_index, x_index]
+                                        )
                                         color_map[val] = cc
                                     else:
                                         cc = color_map[val]
                                     image[y_index, x_index] = cc
                                     x_index = x_index + 1
                                     image[y_index, x_index] = cc
-            return image
+        return image
 
     def render_neglected_segments(
         self,
-        neglected_segments,
-        segments,
-        layer_size,
-        segment_mask,
-        dimensions,
-        rotation,
-        cleaning_map,
-    ):
+        neglected_segments: Mapping[int, int],
+        segments: Mapping[int, Segment],
+        layer_size: tuple[int, int],
+        segment_mask: Image.Image,
+        dimensions: MapImageDimensions,
+        rotation: int,
+        cleaning_map: bool | None,
+    ) -> Image.Image:
         mask_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         mask_layer.paste(segment_mask, (0, 0))
 
         if self._map_problem_icon is None:
-            self._map_problem_icon = Image.open(BytesIO(base64.b64decode(MAP_ICON_PROBLEM))).convert("RGBA")
+            self._map_problem_icon = Image.open(
+                BytesIO(base64.b64decode(MAP_ICON_PROBLEM))
+            ).convert("RGBA")
 
         if rotation == 0 or rotation == 180 or self._square:
             width = (dimensions.width) + (
-                (dimensions.padding[0] + dimensions.padding[2] - dimensions.crop[0] - dimensions.crop[2])
+                (
+                    dimensions.padding[0]
+                    + dimensions.padding[2]
+                    - dimensions.crop[0]
+                    - dimensions.crop[2]
+                )
                 / dimensions.scale
             )
             icon_size = width * (0.06 if self._square else 0.07) * dimensions.scale
         else:
             height = (dimensions.height) + (
-                (dimensions.padding[1] + dimensions.padding[3] - dimensions.crop[1] - dimensions.crop[3])
+                (
+                    dimensions.padding[1]
+                    + dimensions.padding[3]
+                    - dimensions.crop[1]
+                    - dimensions.crop[3]
+                )
                 / dimensions.scale
             )
             icon_size = height * 0.07 * dimensions.scale
@@ -3675,13 +4383,22 @@ class DreameMowerMapRenderer:
         if cleaning_map:
             icon_size = int(icon_size * 0.7)
 
-        problem_icon = self._map_problem_icon.resize((int(icon_size), int(icon_size))).rotate(-rotation, expand=1)
+        problem_icon = self._map_problem_icon.resize(
+            (int(icon_size), int(icon_size))
+        ).rotate(-rotation, expand=1)
 
         mask_layer.paste(segment_mask, (0, 0))
         for k in neglected_segments.keys():
-            if k in segments:
+            if (
+                k in segments
+                and segments[k].x is not None
+                and segments[k].y is not None
+            ):
                 segment = segments[k]
-                p = Point(segment.x, segment.y).to_img(dimensions, False)
+                x, y = segment.x, segment.y
+                if x is None or y is None:
+                    continue
+                p = Point(x, y).to_img(dimensions, False)
                 mask_layer.paste(
                     problem_icon,
                     (
@@ -3693,7 +4410,9 @@ class DreameMowerMapRenderer:
 
         return mask_layer
 
-    def get_resources(self, capability) -> MapRendererResources:
+    def get_resources(
+        self, capability: DreameMowerDeviceCapability
+    ) -> MapRendererResources:
         if self.icon_set == 2:
             if self._robot_type == RobotType.VSLAM:
                 robot_image = MAP_ROBOT_VSLAM_IMAGE_MIJIA
@@ -3740,11 +4459,13 @@ class DreameMowerMapRenderer:
             cleaning_mode = MAP_ICON_CLEANING_MODE_DREAME
 
         if self._light_font_file is None:
-            self._light_font_file = zlib.decompress(base64.b64decode(MAP_FONT_LIGHT), zlib.MAX_WBITS | 32)
+            self._light_font_file = zlib.decompress(
+                base64.b64decode(MAP_FONT_LIGHT), zlib.MAX_WBITS | 32
+            )
 
         resources = MapRendererResources(
             icon_set=self.icon_set,
-            robot_type=self._robot_type.value,
+            robot_type=int(self._robot_type),
             robot=robot_image,
             charger=charger_image,
             charging=MAP_ROBOT_CHARGING_IMAGE,
@@ -3777,7 +4498,9 @@ class DreameMowerMapRenderer:
                 resources.cleaning_mode = cleaning_mode
                 if capability.cleaning_route:
                     resources.cleaning_route = (
-                        MAP_ICON_CLEANING_ROUTE_MATERIAL if self.icon_set == 3 else MAP_ICON_CLEANING_ROUTE_DREAME
+                        MAP_ICON_CLEANING_ROUTE_MATERIAL
+                        if self.icon_set == 3
+                        else MAP_ICON_CLEANING_ROUTE_DREAME
                     )
 
         if capability.wifi_map:
@@ -3811,7 +4534,10 @@ class DreameMowerMapRenderer:
                 )
 
             if not capability.extended_furnitures:
-                furniture_types = list(set(furniture_types) - set([i for i in FurnitureType if i.value > 13]))
+                furniture_types = list(
+                    set(furniture_types)
+                    - set([i for i in FurnitureType if i.value > 13])
+                )
 
             if capability.new_furnitures:
                 resources.furniture = {
@@ -3837,13 +4563,15 @@ class DreameMowerMapRenderer:
         return resources
 
     @property
-    def calibration_points(self) -> dict[str, int]:
+    def calibration_points(self) -> _CalibrationPoints | None:
         return self._calibration_points
 
     @property
     def default_map_image(self) -> bytes:
         if self._default_map_image is None:
-            default_map_image = Image.open(BytesIO(base64.b64decode(DEFAULT_MAP_IMAGE))).convert("RGBA")
+            default_map_image = Image.open(
+                BytesIO(base64.b64decode(DEFAULT_MAP_IMAGE))
+            ).convert("RGBA")
             self._default_map_image = ImageOps.expand(
                 default_map_image.resize(
                     (
@@ -3858,9 +4586,13 @@ class DreameMowerMapRenderer:
     @property
     def disconnected_map_image(self) -> bytes:
         if self._image:
-            return self._to_buffer(self._image.filter(ImageFilter.GaussianBlur(7 if self._low_resolution else 13)))
+            return self._to_buffer(
+                self._image.filter(
+                    ImageFilter.GaussianBlur(7 if self._low_resolution else 13)
+                )
+            )
         return self.default_map_image
 
     @property
-    def default_calibration_points(self) -> dict[str, int]:
+    def default_calibration_points(self) -> _CalibrationPoints:
         return self._default_calibration_points

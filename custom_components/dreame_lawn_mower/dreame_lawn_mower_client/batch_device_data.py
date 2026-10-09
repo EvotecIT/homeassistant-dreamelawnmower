@@ -23,7 +23,7 @@ _DEFAULT_BATCH_CHUNK_COUNT = 10
 
 
 def decode_batch_schedule_payload(
-    batch_data: Mapping[str, Any],
+    batch_data: Mapping[str, Any] | None,
     *,
     include_raw: bool = False,
     map_index_hint: int | None = None,
@@ -36,6 +36,13 @@ def decode_batch_schedule_payload(
         "schedules": [],
         "errors": [],
     }
+
+    if batch_data is None:
+        result["errors"].append({
+            "stage": "schedule",
+            "error": "Batch device data returned no schedule payload.",
+        })
+        return result
 
     payload_text = batch_data_text(batch_data, "SCHEDULE")
     schedule: dict[str, Any] = {
@@ -96,7 +103,7 @@ def decode_batch_schedule_payload(
 
 
 def decode_batch_mowing_preferences(
-    batch_data: Mapping[str, Any],
+    batch_data: Mapping[str, Any] | None,
     *,
     include_raw: bool = False,
     map_indices: Sequence[int] | None = None,
@@ -104,6 +111,20 @@ def decode_batch_mowing_preferences(
     map_slot_index_hints: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Decode `SETTINGS.*` batch device data into readable preference summaries."""
+    if batch_data is None:
+        return {
+            "source": "batch_device_data_mowing_preferences",
+            "available": False,
+            "property_hint": "2.52",
+            "maps": [],
+            "errors": [
+                {
+                    "stage": "settings",
+                    "error": "Batch device data returned no settings payload.",
+                }
+            ],
+        }
+
     result: dict[str, Any] = {
         "source": "batch_device_data_mowing_preferences",
         "available": False,
@@ -250,11 +271,26 @@ def _batch_preference_map_index(
 
 
 def decode_batch_ota_info(
-    batch_data: Mapping[str, Any],
+    batch_data: Mapping[str, Any] | None,
     *,
     include_raw: bool = False,
 ) -> dict[str, Any]:
     """Decode `OTA_INFO.*` and related auto-upgrade batch data."""
+    if batch_data is None:
+        return {
+            "source": "batch_device_data_ota_info",
+            "available": False,
+            "ota_info": None,
+            "update_available": None,
+            "auto_upgrade_enabled": None,
+            "errors": [
+                {
+                    "stage": "ota",
+                    "error": "Batch device data returned no OTA payload.",
+                }
+            ],
+        }
+
     result: dict[str, Any] = {
         "source": "batch_device_data_ota_info",
         "available": False,
@@ -297,6 +333,8 @@ def decode_batch_ota_info(
 
 def _ota_state_name(value: int | None) -> str | None:
     """Return the app OTA state label used by the mower plugin."""
+    if value is None:
+        return None
     return {
         0: "undefined",
         1: "idle",
@@ -450,7 +488,7 @@ def _decode_batch_preference_map_entry(
                 settings_inventory_valid = False
                 continue
             area_ids.add(area_id)
-            preference = {
+            preference: dict[str, Any] = {
                 "version": _to_int(raw_preference.get("version")),
                 "reported_version": _to_int(raw_preference.get("version")),
                 "map_index": map_index,

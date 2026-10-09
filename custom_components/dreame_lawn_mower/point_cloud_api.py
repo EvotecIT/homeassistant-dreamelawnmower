@@ -9,12 +9,12 @@ import time
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, TypedDict
 
 from aiohttp import web
-from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.decorators import require_admin
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.http import HomeAssistantView
 
 from .const import DOMAIN
 from .control_options import active_map_index, current_map_index
@@ -26,9 +26,19 @@ from .dreame_lawn_mower_client import (
 from .dreame_lawn_mower_client.feature_capabilities import FEATURE_POINT_CLOUD
 from .feature_capabilities import coordinator_feature_capabilities
 from .performance import format_performance_sample
+from .runtime_data import get_coordinator
 
 if TYPE_CHECKING:
     from .coordinator import DreameLawnMowerCoordinator
+
+
+class _PointCloudDownloadOptions(TypedDict, total=False):
+    """Existing keyword options supplied to the owning async client."""
+
+    map_index: int
+    allow_stored: bool
+    allow_unscoped_stored: bool
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -308,16 +318,17 @@ class DreameLawnMowerPointCloudAPI:
         performance = getattr(coordinator, "performance", None)
         cycle = (
             performance.start("point_cloud_generation")
-            if hasattr(performance, "start")
+            if performance is not None and hasattr(performance, "start")
             else None
         )
-        download_options = {
+        download_options: _PointCloudDownloadOptions = {
             "map_index": key[1],
             "allow_stored": allow_stored,
         }
         if allow_unscoped_stored != allow_stored:
             download_options["allow_unscoped_stored"] = allow_unscoped_stored
         sample = None
+        download: DreameLawnMowerPointCloudDownload
         try:
             if self._entry_epochs.get(key[0], 0) != epoch:
                 raise DreameLawnMowerPointCloudError(
@@ -555,8 +566,8 @@ class DreameLawnMowerPointCloudAPI:
             task.exception()
 
     def _coordinator(self, entry_id: str) -> DreameLawnMowerCoordinator:
-        coordinator = self._hass.data.get(DOMAIN, {}).get(entry_id)
-        if coordinator is None or not hasattr(coordinator, "client"):
+        coordinator = get_coordinator(self._hass, entry_id)
+        if coordinator is None:
             raise web.HTTPNotFound(text="Dreame lawn mower entry not found.")
         return coordinator
 

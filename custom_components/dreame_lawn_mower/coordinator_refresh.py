@@ -7,18 +7,23 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .api import (
+    DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
+    DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerSnapshot,
+    DreameLawnMowerWorkLogTotals,
 )
 from .const import DOMAIN
 from .control_options import active_map_index
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
+from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
 from .ha_tasks import create_background_task
 from .performance import (
     DreameLawnMowerPerformanceCycle,
@@ -27,6 +32,7 @@ from .performance import (
     format_performance_sample,
 )
 from .runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
     runtime_mission_cached_session_identity,
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
@@ -70,6 +76,84 @@ def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
 class DreameLawnMowerRefreshMixin:
     """Keep blocking state refreshes separate from optional metadata hydration."""
 
+    if TYPE_CHECKING:
+        # Methods supplied by the concrete coordinator and its other bases.
+        # These declarations do not shadow their runtime implementations.
+        def _record_connectivity_failure(
+            self, error: BaseException | str | None
+        ) -> DreameLawnMowerSnapshot | None: ...
+
+        def _record_connectivity_success(
+            self, snapshot: DreameLawnMowerSnapshot
+        ) -> None: ...
+
+        def _observe_runtime_mission_boundary(
+            self, snapshot: DreameLawnMowerSnapshot
+        ) -> bool | None: ...
+
+        def async_update_listeners(self) -> None: ...
+
+        async def _async_close_client_for_unload(self) -> None: ...
+
+        async def async_refresh_firmware_update_support(
+            self, *, force: bool = False
+        ) -> DreameLawnMowerFirmwareUpdateSupport | None: ...
+
+        async def async_refresh_work_log_totals(
+            self, *, force: bool = False
+        ) -> DreameLawnMowerWorkLogTotals | None: ...
+
+        async def async_refresh_app_map_objects(
+            self, *, force: bool = False, source: str = "app_map_objects_auto"
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_vector_map_details(
+            self, *, force: bool = False, source: str = "vector_map_auto"
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_weather_protection(
+            self, *, force: bool = False, source: str = "weather_protection_auto"
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_maintenance_status(
+            self, *, force: bool = False, source: str = "maintenance_auto"
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_voice_settings(
+            self, *, force: bool = False, source: str = "voice_settings_auto"
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_app_maps(
+            self, *, force: bool = False, source: str = "app_maps_auto"
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_schedules(
+            self, *, force: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        async def async_refresh_batch_device_data(
+            self, *, force: bool = False, source: str = "batch_device_data_auto"
+        ) -> dict[str, Any] | None: ...
+
+    # State supplied by the concrete coordinator; declarations create no resources.
+    hass: HomeAssistant
+    client: DreameLawnMowerClient
+    data: DreameLawnMowerSnapshot
+    app_maps: dict[str, Any] | None
+    app_maps_refreshed_at: datetime | None
+    selected_map_index: int | None
+    runtime_telemetry_cache: DreameLawnMowerRuntimeTelemetryCache
+    runtime_status_blob: DreameLawnMowerStatusBlob | None
+    _shutting_down: bool
+    _metadata_refresh_task: asyncio.Task[None] | None
+    _metadata_shutdown_close_task: asyncio.Task[None] | None
+    _metadata_refresh_semaphore: asyncio.Semaphore
+    _runtime_active_map_index: int | None
+    _runtime_map_index_refreshed_at: datetime | None
+    _batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None
+    _batch_schedule_read_key: tuple[int | None, bool] | None
+    _batch_schedule_read_completed_at: float | None
+
     def _snapshot_is_stale(
         self,
         snapshot: DreameLawnMowerSnapshot,
@@ -92,10 +176,12 @@ class DreameLawnMowerRefreshMixin:
         """Return current coordinator data instead of an older hydrated snapshot."""
         if not self._snapshot_is_stale(snapshot):
             return snapshot
-        current = getattr(self, "data", None)
+        current: DreameLawnMowerSnapshot | None = getattr(self, "data", None)
         if current is not None and not self._snapshot_is_stale(current):
             return current
-        generations = getattr(self, "_device_snapshot_generations", {})
+        generations: dict[int, tuple[DreameLawnMowerSnapshot, int]] = getattr(
+            self, "_device_snapshot_generations", {}
+        )
         published_generation = getattr(
             self,
             "_published_device_snapshot_generation",
@@ -113,7 +199,7 @@ class DreameLawnMowerRefreshMixin:
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch essential state and hydrate optional metadata in the background."""
         if getattr(self, "_shutting_down", False):
-            current = getattr(self, "data", None)
+            current: DreameLawnMowerSnapshot | None = getattr(self, "data", None)
             if current is not None:
                 return current
             raise UpdateFailed("The mower coordinator is shutting down.")
@@ -621,6 +707,7 @@ class DreameLawnMowerRefreshMixin:
             ):
                 if not self._metadata_phase_needs_retry(phase, result):
                     continue
+                retry_operation: Callable[[], Awaitable[Any]]
                 if phase == "app_maps":
                     retry_operation = partial(
                         self.async_refresh_app_maps,
@@ -748,9 +835,10 @@ class DreameLawnMowerRefreshMixin:
     ) -> Any:
         """Verify active map identity even when MQTT postpones normal polling."""
         self._expire_runtime_map_identity()
-        snapshot = getattr(self, "data", None)
+        snapshot: DreameLawnMowerSnapshot | None = getattr(self, "data", None)
         if (
-            getattr(snapshot, "available", False)
+            snapshot is not None
+            and snapshot.available
             and runtime_tracking_active(snapshot)
             and not getattr(self, "_runtime_map_identity_verified", False)
         ):

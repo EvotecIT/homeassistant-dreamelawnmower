@@ -35,6 +35,15 @@
           "password": "Contraseña",
           "country": "Región"
         }
+      },
+      "reconfigure": {
+        "title": "Cambiar la conexión del cortacésped",
+        "description": "Actualiza los datos de acceso o la región de este cortacésped. La cuenta debe seguir incluyendo el cortacésped configurado; se conservan su entrada y sus entidades en Home Assistant.",
+        "data": {
+          "username": "Nombre de usuario",
+          "password": "Contraseña",
+          "country": "Región"
+        }
       }
     },
     "error": {
@@ -46,6 +55,9 @@
       "no_devices": "No se encontraron cortacéspedes compatibles en esta cuenta. Comprueba que la región y el tipo de cuenta coincidan con los de la aplicación del fabricante."
     },
     "abort": {
+      "wrong_device": "El cortacésped encontrado no coincide con esta entrada. No se han cambiado los ajustes de conexión.",
+      "reauth_successful": "Se han actualizado las credenciales del cortacésped.",
+      "reconfigure_successful": "Se ha actualizado la conexión del cortacésped.",
       "already_configured": "Todos los cortacéspedes compatibles de esta cuenta ya están configurados."
     }
   },
@@ -194,6 +206,20 @@
           "repositioning": "Reposicionamiento"
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "No se ha encontrado ninguna entrada de cortacésped Dreame para {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "La entrada del cortacésped Dreame {entry_id} no está cargada."
+    },
+    "no_loaded_entries": {
+      "message": "No hay entradas de cortacésped Dreame cargadas."
+    },
+    "entry_id_required": {
+      "message": "Hay varias entradas de cortacésped Dreame cargadas; indique entry_id."
     }
   }
 }

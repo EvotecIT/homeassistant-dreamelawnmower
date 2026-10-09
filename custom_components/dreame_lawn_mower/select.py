@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_MAP_ROTATION,
     CONF_MAP_ROTATIONS,
     DEFAULT_MAP_ROTATION,
-    DOMAIN,
     MAP_ROTATION_OPTIONS,
 )
 from .control_options import (
@@ -55,15 +53,18 @@ from .preference_select import (
     PREFERENCE_SELECTS,
     DreameLawnMowerPreferenceSelect,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
+
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up current-map mower selects."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerVoiceLanguageSelect(coordinator),
@@ -178,6 +179,8 @@ class DreameLawnMowerVoiceLanguageSelect(DreameLawnMowerSelectEntity):
         if section is None:
             return None
         value = section.get("voice_language_index")
+        if value is None:
+            return None
         return VOICE_LANGUAGE_INDEX_TO_LABEL.get(value)
 
     async def async_select_option(self, option: str) -> None:
@@ -236,7 +239,7 @@ class DreameLawnMowerMapSelect(DreameLawnMowerSelectEntity):
             self.coordinator.batch_device_data,
         ):
             if entry["map_index"] == selected_map_index:
-                return entry["label"]
+                return cast(str, entry["label"])
         if selected_map_index >= 0:
             return map_label(selected_map_index)
         return None
@@ -422,8 +425,8 @@ class DreameLawnMowerMaintenancePointSelect(DreameLawnMowerSelectEntity):
         selected = self.coordinator.selected_maintenance_point_id
         for entry in entries:
             if entry["point_id"] == selected:
-                return entry["label"]
-        return entries[0]["label"] if entries else None
+                return cast(str, entry["label"])
+        return cast(str, entries[0]["label"]) if entries else None
 
     async def async_select_option(self, option: str) -> None:
         """Store the selected maintenance point in coordinator state."""

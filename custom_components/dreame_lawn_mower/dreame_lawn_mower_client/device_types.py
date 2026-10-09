@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable as _Callable
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from .device_context import _DreameMowerDeviceContext
 
 SEGMENT_TYPE_CODE_TO_NAME: Final = {
     0: "Zone",
@@ -923,7 +928,9 @@ DreameMowerActionMapping = {
     DreameMowerAction.STREAM_CODE: {siid: 10001, aiid: 4},
 }
 
-PROPERTY_AVAILABILITY: Final = {
+PROPERTY_AVAILABILITY: Final[
+    dict[str, _Callable[[_DreameMowerDeviceContext], object]]
+] = {
     DreameMowerProperty.CUSTOMIZED_CLEANING.name: lambda device: (
         not device.status.started
         and (device.status.has_saved_map or device.status.current_map is None)
@@ -987,9 +994,8 @@ PROPERTY_AVAILABILITY: Final = {
         and not device.status.spot_cleaning
         and not device.status.zone_cleaning
     ),
-    DreameMowerAutoSwitchProperty.FLOOR_DIRECTION_CLEANING.name: lambda device: (
-        device.status.floor_direction_cleaning_available
-    ),
+    # The inherited vacuum floor-direction operation is unavailable on mowers.
+    DreameMowerAutoSwitchProperty.FLOOR_DIRECTION_CLEANING.name: lambda device: False,
     DreameMowerStrAIProperty.AI_HUMAN_DETECTION.name: lambda device: (
         device.status.ai_obstacle_detection
     ),
@@ -1069,36 +1075,45 @@ PROPERTY_AVAILABILITY: Final = {
         device.status.camera_light_brightness
         and device.status.stream_session is not None
     ),
+    DreameMowerProperty.DND.name: lambda device: device.capability.dnd,
     "dnd_start": lambda device: device.status.dnd,
     "dnd_end": lambda device: device.status.dnd,
+    DreameMowerProperty.OFF_PEAK_CHARGING.name: lambda device: (
+        device.capability.off_peak_charging
+    ),
     "off_peak_charging_start": lambda device: device.status.off_peak_charging,
     "off_peak_charging_end": lambda device: device.status.off_peak_charging,
 }
 
-ACTION_AVAILABILITY: Final = {
+def _consumable_reset_available(life: int | None) -> bool:
+    """An unknown counter cannot establish that a legacy reset is available."""
+    return life is not None and life < 100
+
+
+ACTION_AVAILABILITY: Final[dict[str, _Callable[[Any], Any]]] = {
     DreameMowerAction.RESET_BLADES.name: lambda device: bool(
-        device.status.blades_life < 100
+        _consumable_reset_available(device.status.blades_life)
     ),
     DreameMowerAction.RESET_SIDE_BRUSH.name: lambda device: bool(
-        device.status.side_brush_life < 100
+        _consumable_reset_available(device.status.side_brush_life)
     ),
     DreameMowerAction.RESET_FILTER.name: lambda device: bool(
-        device.status.filter_life < 100
+        _consumable_reset_available(device.status.filter_life)
     ),
     DreameMowerAction.RESET_SENSOR.name: lambda device: bool(
-        device.status.sensor_dirty_life < 100
+        _consumable_reset_available(device.status.sensor_dirty_life)
     ),
     DreameMowerAction.RESET_TANK_FILTER.name: lambda device: bool(
-        device.status.tank_filter_life < 100
+        _consumable_reset_available(device.status.tank_filter_life)
     ),
     DreameMowerAction.RESET_SILVER_ION.name: lambda device: bool(
-        device.status.silver_ion_life < 100
+        _consumable_reset_available(device.status.silver_ion_life)
     ),
     DreameMowerAction.RESET_LENSBRUSH.name: lambda device: bool(
-        device.status.lensbrush_life < 100
+        _consumable_reset_available(device.status.lensbrush_life)
     ),
     DreameMowerAction.RESET_SQUEEGEE.name: lambda device: bool(
-        device.status.squeegee_life < 100
+        _consumable_reset_available(device.status.squeegee_life)
     ),
     DreameMowerAction.CLEAR_WARNING.name: lambda device: device.status.has_warning,
     DreameMowerAction.START_MOWING.name: lambda device: (
@@ -1126,17 +1141,25 @@ ACTION_AVAILABILITY: Final = {
 
 
 def PIID(
-    property: DreameMowerProperty, mapping=DreameMowerPropertyMapping
+    property: DreameMowerProperty,
+    mapping: Mapping[DreameMowerProperty, Mapping[str, int]] = (
+        DreameMowerPropertyMapping
+    ),
 ) -> int | None:
     if property in mapping:
         return mapping[property][piid]
+    return None
 
 
 def DIID(
-    property: DreameMowerProperty, mapping=DreameMowerPropertyMapping
+    property: DreameMowerProperty,
+    mapping: Mapping[DreameMowerProperty, Mapping[str, int]] = (
+        DreameMowerPropertyMapping
+    ),
 ) -> str | None:
     if property in mapping:
         return f"{mapping[property][siid]}.{mapping[property][piid]}"
+    return None
 
 
 class RobotType(IntEnum):
@@ -1273,8 +1296,8 @@ class DeviceCapability(IntEnum):
 
 
 class DreameMowerDeviceCapability:
-    def __init__(self, device) -> None:
-        self.list = None
+    def __init__(self, device: _DreameMowerDeviceContext) -> None:
+        self.list: list[str] | None = None
         self.lidar_navigation = True
         self.multi_floor_map = True
         self.ai_detection = False
@@ -1282,13 +1305,13 @@ class DreameMowerDeviceCapability:
         self.auto_switch_settings = False
         self.wifi_map = False
         self.backup_map = False
-        self.dnd = False
+        self.dnd: bool = False
         self.dnd_task = False
         self.shortcuts = False
         self.fill_light = False
         self.voice_assistant = False
         self.pet_detective = False
-        self.off_peak_charging = False
+        self.off_peak_charging: bool = False
         self.max_suction_power = False
         self.obstacle_image_crop = False
         self.map_object_offset = True
@@ -1319,7 +1342,7 @@ class DreameMowerDeviceCapability:
         self._custom_cleaning_mode = False
         self._device = device
 
-    def refresh(self, device_capabilities):
+    def refresh(self, device_capabilities: Mapping[str, Any]) -> None:
         self.lidar_navigation = bool(
             self._device.get_property(DreameMowerProperty.MAP_SAVING) is None
         )
@@ -1477,30 +1500,30 @@ class DreameMowerDeviceCapability:
 class DirtyData:
     value: Any = None
     previous_value: Any = None
-    update_time: float = None
+    update_time: float | None = None
 
 
 @dataclass
 class Shortcut:
     id: int = -1
-    name: str = None
-    map_id: int = None
+    name: str | None = None
+    map_id: int | None = None
     running: bool = False
-    tasks: list[list[ShortcutTask]] = None
+    tasks: list[list[ShortcutTask]] | None = None
 
 
 @dataclass
 class ShortcutTask:
-    segment_id: int = None
-    cleaning_times: int = None
-    cleaning_mode: int = None
+    segment_id: int | None = None
+    cleaning_times: int | None = None
+    cleaning_mode: int | None = None
 
 
 @dataclass
 class DNDTask:
     id: int = -1
-    start_time: str = None
-    end_time: str = None
+    start_time: str | None = None
+    end_time: str | None = None
     enabled: bool = False
     weekdays: int = 127
     st: int = 0
@@ -1508,10 +1531,10 @@ class DNDTask:
 
 @dataclass
 class GoToZoneSettings:
-    x: int = None
-    y: int = None
+    x: float | None = None
+    y: float | None = None
     stop: bool = False
-    cleaning_mode: int = None
+    cleaning_mode: int | None = None
     size: int = 50
 
 
