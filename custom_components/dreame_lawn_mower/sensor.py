@@ -540,7 +540,6 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{self._descriptor.unique_id}_{description.key}"
-        self._attr_name = description.name
         self._attr_device_class = description.device_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_translation_key = description.translation_key
