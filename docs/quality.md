@@ -18,17 +18,17 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | action-setup | Source verified | Integration-wide actions register in async_setup and persist across entry unload. Real HA setup/registry tests cover discovery without an entry, target errors and last-entry retirement. See services.py and component test_actions.py/test_entry_runtime.py. |
 | appropriate-polling | Partial | Coordinator polling, background metadata and performance instrumentation exist; measure normal, unavailable, and recovery request budgets. |
-| brands | Review | Audit the current supported path and document concrete evidence or a rule-permitted exemption. |
+| brands | Partial | Six bundled PNGs meet the icon/logo geometry requirements. Actual HA 2026.9.4 loader and authenticated brand API return their exact bytes; component test_brand_assets.py protects that path on HA 2026.3+. Earlier supported HA uses the legacy CDN, whose Dreame icon/logo endpoints are currently missing. No branding exemption is claimed. |
 | common-modules | Partial | Bundled client owns protocol behavior; integration owners cover maps, streams, reporting, and entities. Keep modernization in these existing owners. |
 | config-flow-test-coverage | Source verified | The full config_flow.py module has 121/121 covered statements and 36/36 covered branches, with no excluded lines, on HA 2025.1.0 and 2026.9.4. Real HA flow/store tests cover options, credential retry, reauthentication, reconfiguration and preserved device identity. See component test_config_flow.py/test_reconfiguration.py and test_config_flow_auth.py. |
 | config-flow | Partial | UI cloud/device selection, reauthentication and connection reconfiguration exist; qualify installed onboarding and supported account regions. |
 | dependency-transparency | Partial | Manifest and Python requirements declare protocol/native dependencies; reconcile artifact contents, optional runtime downloads, and network behavior. |
 | docs-actions | Partial | Mowing controls, maps, and video guides exist; reconcile parameters with services.yaml and validate supported examples. |
-| docs-triggers | Review | Audit the current supported path and document concrete evidence or a rule-permitted exemption. |
-| docs-conditions | Review | Audit the current supported path and document concrete evidence or a rule-permitted exemption. |
+| docs-triggers | Source verified | No integration-specific trigger types are registered. Standard entity-state automation and person-detection occurrence guidance, editor setup and YAML examples are documented in notifications.md. |
+| docs-conditions | Exempt | No integration-specific conditions are registered. Automations use HA's standard state/template conditions with mower entities; see notifications.md and the [rule-permitted exception](https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/docs-conditions/). |
 | docs-high-level-description | Partial | README describes Dreame/MOVA support; tie advertised capabilities to the supported-model evidence matrix. |
 | docs-installation-instructions | Partial | HACS and manual installation are documented; qualify the actual released artifact and upgrade path. |
-| docs-removal-instructions | Review | Audit the current supported path and document concrete evidence or a rule-permitted exemption. |
+| docs-removal-instructions | Source verified | README Removal describes entry deletion, HACS/manual uninstall, private cache removal and retained shared runtime files. The removal hook and test_observation_storage.py cover private storage retirement. Deleting an entry does not unpair the mower, alter onboard schedules or send a stop command; installed removal proof remains separate. |
 | entity-event-setup | Partial | Shutdown and failed-setup cleanup exist with component tests; audit every push listener, executor task, stream, and native resource. |
 | entity-unique-id | Partial | Entity IDs derive from selected device identity; verify account repair and upgrades preserve registry bindings. |
 | has-entity-name | Review | Audit naming across all platforms, map cameras, and primary mower entities. |

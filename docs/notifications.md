@@ -10,6 +10,10 @@ The integration provides two complementary notification paths:
 
 Both paths are disabled until you choose to use them.
 
+Use Home Assistant's standard state triggers and conditions with the mower's
+entities. The integration supplies no additional trigger or condition types.
+The blueprint below provides the notification choices and timing controls.
+
 ## Integration-managed notifications
 
 Open **Settings → Devices & services → Dreame Lawn Mower → Configure**, then
@@ -43,6 +47,10 @@ redelivery within the connection.
 
 Use the changing `occurrence` attribute to notify on each detection. Replace
 the example entity and notification action with those from your installation:
+
+In the automation editor, add a **State** trigger, select the **Person detection**
+entity, and set its watched attribute to `occurrence`. The example also filters
+restored and unavailable states; retain those conditions in your automation.
 
 ```yaml
 alias: Mower person detected
