@@ -1075,8 +1075,10 @@ PROPERTY_AVAILABILITY: Final[
         device.status.camera_light_brightness
         and device.status.stream_session is not None
     ),
+    DreameMowerProperty.DND.name: lambda device: device.capability.dnd,
     "dnd_start": lambda device: device.status.dnd,
     "dnd_end": lambda device: device.status.dnd,
+    DreameMowerProperty.OFF_PEAK_CHARGING.name: lambda device: device.capability.off_peak_charging,
     "off_peak_charging_start": lambda device: device.status.off_peak_charging,
     "off_peak_charging_end": lambda device: device.status.off_peak_charging,
 }

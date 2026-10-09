@@ -210,10 +210,11 @@ def test_generic_quiet_hours_dispatches_supported_legacy_settings(
 
 
 @pytest.mark.parametrize("name,key,value", [
+    ("OFF_PEAK_CHARGING", "enable", False),
     ("off_peak_charging_start", "startTime", "22:00"),
     ("OFF_PEAK_CHARGING_END", "endTime", "08:00"),
 ])
-def test_generic_charging_window_dispatches_supported_times(mower, name, key, value):
+def test_generic_charging_window_dispatches_supported_settings(mower, name, key, value):
     mower.capability.off_peak_charging = True
     original = {"enable": True, "startTime": "21:00", "endTime": "07:00"}
     mower.status.off_peak_charging_config = original
@@ -230,6 +231,46 @@ def test_generic_charging_window_dispatches_supported_times(mower, name, key, va
         mapping["siid"], mapping["piid"], payload,
     )
     assert json.loads(mower.get_property(prop)) == expected
+
+
+@pytest.mark.parametrize("name,prop", [
+    ("DND", DreameMowerProperty.DND),
+    ("off_peak_charging", DreameMowerProperty.OFF_PEAK_CHARGING),
+])
+@pytest.mark.parametrize("enabled", [True, False])
+def test_generic_schedule_toggle_rejects_unsupported_device(mower, name, prop, enabled):
+    assert mower.get_property(prop) is None
+
+    with pytest.raises(InvalidActionException, match="Property unavailable"):
+        mower.set_property_value(name, enabled)
+
+    mower._protocol.set_property.assert_not_called()
+    assert mower.get_property(prop) is None
+
+
+@pytest.mark.parametrize("name,key,value", [
+    ("DND", "en", False), ("DND_START", "st", "22:00"),
+    ("DND_END", "et", "08:00"),
+])
+def test_generic_quiet_hours_preserves_task_based_backend(mower, name, key, value):
+    mower.capability.dnd = True
+    mower.capability.dnd_task = True
+    original = {"id": 1, "en": True, "st": "21:00", "et": "07:00", "wk": 127, "ss": 0}
+    mower.status.dnd_tasks = [original.copy()]
+    prop = DreameMowerProperty.DND_TASK
+    mower.data[prop.value] = json.dumps([original], separators=(",", ":"))
+    mower._protocol.set_property.return_value = [{"code": 0}]
+
+    assert mower.set_property_value(name, value) is True
+
+    expected = [{**original, key: value}]
+    payload = json.dumps(expected, separators=(",", ":"))
+    mapping = mower.property_mapping[prop]
+    mower._protocol.set_property.assert_called_once_with(
+        mapping["siid"], mapping["piid"], payload,
+    )
+    assert json.loads(mower.get_property(prop)) == expected
+    assert mower.get_property(DreameMowerProperty.DND) is None
 
 
 @pytest.mark.parametrize("name", ["DND_START", "off_peak_charging_end"])
