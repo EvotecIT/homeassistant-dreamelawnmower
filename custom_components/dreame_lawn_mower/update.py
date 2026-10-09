@@ -18,6 +18,9 @@ from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .runtime_data import DreameLawnMowerConfigEntry
 
+# Limit firmware approval and refresh operations through HA's request owner.
+PARALLEL_UPDATES = 1
+
 FIRMWARE_INSTALL_ASSUMED_IN_PROGRESS = timedelta(hours=24)
 
 

@@ -18,6 +18,9 @@ from .device_settings_control import (
 from .entity import DreameLawnMowerEntity
 from .runtime_data import DreameLawnMowerConfigEntry
 
+# Serialize charging-window actions across this platform's entities.
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(
     hass: HomeAssistant,

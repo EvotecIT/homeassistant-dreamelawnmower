@@ -22,6 +22,9 @@ from .schedule_cache import schedule_entry_has_usable_data
 
 _LOGGER = logging.getLogger(__name__)
 
+# Schedule refreshes are owned by the shared coordinator.
+PARALLEL_UPDATES = 0
+
 SCHEDULE_LOOKAHEAD_DAYS = 14
 
 

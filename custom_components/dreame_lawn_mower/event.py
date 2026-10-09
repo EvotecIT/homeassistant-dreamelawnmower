@@ -15,6 +15,9 @@ from .dreame_lawn_mower_client.notice_events import MowerNoticeEventCursor
 from .entity import DreameLawnMowerEntity
 from .runtime_data import DreameLawnMowerConfigEntry
 
+# Announcements are pushed by the coordinator.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
