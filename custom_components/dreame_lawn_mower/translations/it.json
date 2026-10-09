@@ -56,6 +56,7 @@
     },
     "abort": {
       "wrong_device": "Il tagliaerba trovato non corrisponde a questa voce. Le impostazioni di connessione non sono state modificate.",
+      "reauth_successful": "Le credenziali del tagliaerba sono state aggiornate.",
       "reconfigure_successful": "La connessione del tagliaerba è stata aggiornata.",
       "already_configured": "Tutti i robot tagliaerba supportati di questo account sono già configurati."
     }

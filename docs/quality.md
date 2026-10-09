@@ -20,7 +20,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | appropriate-polling | Partial | Coordinator polling, background metadata and performance instrumentation exist; measure normal, unavailable, and recovery request budgets. |
 | brands | Review | Audit the current supported path and document concrete evidence or a rule-permitted exemption. |
 | common-modules | Partial | Bundled client owns protocol behavior; integration owners cover maps, streams, reporting, and entities. Keep modernization in these existing owners. |
-| config-flow-test-coverage | Source verified | The full config_flow.py module has 118/118 covered statements and 34/34 covered branches, with no excluded lines, on HA 2025.1.0 and 2026.9.4. Real HA flow/store tests cover options, credential retry, reauthentication, reconfiguration and preserved device identity. See component test_config_flow.py/test_reconfiguration.py and test_config_flow_auth.py. |
+| config-flow-test-coverage | Source verified | The full config_flow.py module has 121/121 covered statements and 36/36 covered branches, with no excluded lines, on HA 2025.1.0 and 2026.9.4. Real HA flow/store tests cover options, credential retry, reauthentication, reconfiguration and preserved device identity. See component test_config_flow.py/test_reconfiguration.py and test_config_flow_auth.py. |
 | config-flow | Partial | UI cloud/device selection, reauthentication and connection reconfiguration exist; qualify installed onboarding and supported account regions. |
 | dependency-transparency | Partial | Manifest and Python requirements declare protocol/native dependencies; reconcile artifact contents, optional runtime downloads, and network behavior. |
 | docs-actions | Partial | Mowing controls, maps, and video guides exist; reconcile parameters with services.yaml and validate supported examples. |
@@ -49,7 +49,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | integration-owner | Partial | Maintainers and issue tracker are declared; verify support and security-reporting instructions. |
 | log-when-unavailable | Review | Capture disconnect/reconnect behavior and confirm useful non-repeating logs without private data. |
 | parallel-updates | Partial | Eight platforms declare update limits: coordinator/read-only adapters use 0; number, select and switch use 1. Finish the applicability audit for calendar, event, time and update adapters, and measure command concurrency. |
-| reauthentication-flow | Partial | Real HA flow tests cover credential failures, retries, matching-device selection and retained entry identity. Installed account recovery and supported-region proof remain. |
+| reauthentication-flow | Partial | Real HA flow tests cover credential failures, retries, matching-device selection and retained entry identity. Tests with the registered update listener verify one reload for changed or unchanged credentials. Installed account recovery and supported-region proof remain. |
 | test-coverage | Gap | The last whole-source measurement covers 81.69% of statements and 64.69% of branches, including the bundled client. It predates the latest action/config-flow changes. Full flow coverage is verified; whole-source coverage still needs meaningful improvement above 95%. |
 
 ## Gold
@@ -74,7 +74,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | entity-translations | Partial | Strings and translations exist and translation tests pass; verify complete entity names and installed fallback behavior. |
 | exception-translations | Partial | Four shared action-target errors have matching messages/placeholders in strings.json and all nine shipped locales, loaded through HA translation tests. Audit the remaining user-facing errors across platforms and APIs. |
 | icon-translations | Review | Audit device-class icons and state-aware custom icon translation needs. |
-| reconfiguration-flow | Source verified | Reconfigure validates updated credentials/region against the saved mower through the shared HA session before persisting and reloading. Actual HA flow and registry tests cover Dreame/MOVA accounts, unchanged entry/device/entity identity and options, no password prefill, failed discovery, retry, identity mismatch and cancellation. Account type stays fixed; a different mower uses a new entry. Installed UI and cloud/region qualification remain separate. See test_reconfiguration.py and the configuration guide. |
+| reconfiguration-flow | Source verified | Reconfigure validates updated credentials/region against the saved mower through the shared HA session before persisting. The registered update listener owns reloads when data changes; unchanged credentials and entries without a listener schedule one explicit reload. Actual HA flow and registry tests cover Dreame/MOVA accounts, unchanged entry/device/entity identity and options, no password prefill, failed discovery, retry, identity mismatch and cancellation. Account type stays fixed; a different mower uses a new entry. Installed UI and cloud/region qualification remain separate. See test_reconfiguration.py and the configuration guide. |
 | repair-issues | Review | Audit recoverable authentication, native-runtime, device-permission, and configuration problems that need user intervention. |
 | stale-devices | Review | Verify entry/device removal and stale map/area entity cleanup; removal already purges private caches. |
 
@@ -94,8 +94,8 @@ commands, so credential-flow helper tests run once in the component lane.
 
 | Environment | HA component, translation and flow tests | Strict typing |
 | --- | --- | --- |
-| HA 2025.1.0 / Python 3.13.14 | 131 passed; one version-specific skip | 336 modules; no errors |
-| HA 2026.9.4 / Python 3.14.5 | 132 passed | 336 modules; no errors |
+| HA 2025.1.0 / Python 3.13.14 | 135 passed; one version-specific skip | 336 modules; no errors |
+| HA 2026.9.4 / Python 3.14.5 | 136 passed | 336 modules; no errors |
 
 Configured Ruff checks pass in both environments. Test skips remain explicit;
 they do not supply evidence for an unsupported version-dependent feature.

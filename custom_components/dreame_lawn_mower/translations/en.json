@@ -56,6 +56,7 @@
     },
     "abort": {
       "wrong_device": "The discovered mower does not match this entry. No connection settings were changed.",
+      "reauth_successful": "The mower's account credentials were updated.",
       "reconfigure_successful": "The mower connection was updated.",
       "already_configured": "All supported mowers on this account are already configured."
     }

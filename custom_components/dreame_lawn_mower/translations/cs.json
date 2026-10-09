@@ -56,6 +56,7 @@
     },
     "abort": {
       "wrong_device": "Nalezená sekačka neodpovídá tomuto záznamu. Nastavení připojení nebylo změněno.",
+      "reauth_successful": "Přihlašovací údaje sekačky byly aktualizovány.",
       "reconfigure_successful": "Připojení sekačky bylo aktualizováno.",
       "already_configured": "Všechny podporované sekačky tohoto účtu jsou již nakonfigurovány."
     }

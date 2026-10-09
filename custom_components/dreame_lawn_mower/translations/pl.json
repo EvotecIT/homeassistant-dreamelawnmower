@@ -56,6 +56,7 @@
     },
     "abort": {
       "wrong_device": "Wykryta kosiarka nie pasuje do tego wpisu. Ustawienia połączenia nie zostały zmienione.",
+      "reauth_successful": "Dane logowania kosiarki zostały zaktualizowane.",
       "reconfigure_successful": "Połączenie kosiarki zostało zaktualizowane.",
       "already_configured": "Wszystkie obsługiwane kosiarki z tego konta są już skonfigurowane."
     }

@@ -303,9 +303,10 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 else:
                     await self.async_set_unique_id(selected.unique_id)
                     self._abort_if_unique_id_mismatch(reason="wrong_device")
-                    return self.async_update_reload_and_abort(
+                    changed = self.hass.config_entries.async_update_entry(
                         entry,
-                        data_updates={
+                        data={
+                            **entry.data,
                             CONF_USERNAME: user_input[CONF_USERNAME],
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
                             CONF_COUNTRY: user_input[CONF_COUNTRY],
@@ -316,6 +317,12 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                             CONF_TOKEN: selected.token,
                         },
                     )
+                    # The registered update listener owns changed-data reloads.
+                    # Re-enabled accounts with unchanged credentials, and entries
+                    # without a loaded listener, still need one explicit reload.
+                    if not changed or not entry.update_listeners:
+                        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                    return self.async_abort(reason=f"{step_id}_successful")
 
         return self.async_show_form(
             step_id=step_id,

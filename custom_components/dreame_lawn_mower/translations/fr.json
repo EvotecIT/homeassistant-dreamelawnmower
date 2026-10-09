@@ -56,6 +56,7 @@
     },
     "abort": {
       "wrong_device": "La tondeuse trouvée ne correspond pas à cette entrée. Les paramètres de connexion n’ont pas été modifiés.",
+      "reauth_successful": "Les identifiants de la tondeuse ont été mis à jour.",
       "reconfigure_successful": "La connexion de la tondeuse a été mise à jour.",
       "already_configured": "Tous les robots tondeuses compatibles de ce compte sont déjà configurés."
     }

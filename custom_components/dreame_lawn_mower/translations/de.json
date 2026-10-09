@@ -25,6 +25,7 @@
     },
     "abort": {
       "wrong_device": "Der gefundene Mäher stimmt nicht mit diesem Eintrag überein. Die Verbindungseinstellungen wurden nicht geändert.",
+      "reauth_successful": "Die Zugangsdaten des Mähers wurden aktualisiert.",
       "reconfigure_successful": "Die Verbindung des Mähers wurde aktualisiert.",
       "already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."
     }

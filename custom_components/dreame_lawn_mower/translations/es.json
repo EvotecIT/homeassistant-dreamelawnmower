@@ -56,6 +56,7 @@
     },
     "abort": {
       "wrong_device": "El cortacésped encontrado no coincide con esta entrada. No se han cambiado los ajustes de conexión.",
+      "reauth_successful": "Se han actualizado las credenciales del cortacésped.",
       "reconfigure_successful": "Se ha actualizado la conexión del cortacésped.",
       "already_configured": "Todos los cortacéspedes compatibles de esta cuenta ya están configurados."
     }

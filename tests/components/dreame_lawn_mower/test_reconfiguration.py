@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant import config_entries
@@ -14,6 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.dreame_lawn_mower import _async_update_listener
 from custom_components.dreame_lawn_mower.api import (
     DreameLawnMowerAuthError,
     DreameLawnMowerClient,
@@ -37,6 +39,7 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_USERNAME,
     DOMAIN,
 )
+from custom_components.dreame_lawn_mower.option_updates import EntryUpdateSnapshot
 
 try:
     from probatio import to_field_list as serialize_schema
@@ -182,6 +185,60 @@ async def test_reconfiguration_preserves_identity_and_registry(
         session=shared,
     )
     assert not shared.closed
+
+
+@pytest.mark.parametrize("source", ["reauth", "reconfigure"])
+@pytest.mark.parametrize("credentials_changed", [True, False])
+async def test_connection_repair_reloads_once_with_the_registered_listener(
+    hass,
+    monkeypatch,
+    source,
+    credentials_changed,
+):
+    entry = _entry(hass)
+    selected = _device()
+    if not credentials_changed:
+        # A recovered account can validate the same credentials and metadata.
+        hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                **REPLACEMENT,
+                CONF_HOST: selected.host,
+                CONF_MAC: selected.mac,
+                CONF_MODEL: selected.model,
+                CONF_NAME: selected.name,
+                CONF_TOKEN: selected.token,
+            },
+        )
+    entry.runtime_data = SimpleNamespace(
+        applied_entry_update=EntryUpdateSnapshot.capture(entry),
+        async_update_listeners=Mock(),
+    )
+    # Successful integration setup registers this actual listener with HA.
+    remove_listener = entry.add_update_listener(_async_update_listener)
+    entry.async_on_unload(remove_listener)
+    monkeypatch.setattr(
+        DreameLawnMowerClient,
+        "async_discover_devices",
+        AsyncMock(return_value=[selected]),
+    )
+    reload_entry = AsyncMock(return_value=True)
+    monkeypatch.setattr(hass.config_entries, "async_reload", reload_entry)
+    hass.config.components.add("stream")
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": source, "entry_id": entry.entry_id},
+    )
+    result = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        REPLACEMENT,
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == f"{source}_successful"
+    assert entry.data[CONF_PASSWORD] == REPLACEMENT[CONF_PASSWORD]
+    reload_entry.assert_awaited_once_with(entry.entry_id)
 
 
 @pytest.mark.parametrize(
