@@ -35,6 +35,15 @@
           "password": "Heslo",
           "country": "Oblast"
         }
+      },
+      "reconfigure": {
+        "title": "Změnit připojení sekačky",
+        "description": "Aktualizujte přihlašovací údaje nebo region této sekačky. Účet musí stále obsahovat nastavenou sekačku; její záznam a entity v Home Assistant zůstanou zachovány.",
+        "data": {
+          "username": "Uživatelské jméno",
+          "password": "Heslo",
+          "country": "Oblast"
+        }
       }
     },
     "error": {
@@ -46,6 +55,8 @@
       "no_devices": "Pro tento účet nebyly nalezeny žádné podporované robotické sekačky. Zkontrolujte, zda vybraná oblast a typ účtu odpovídají aplikaci výrobce."
     },
     "abort": {
+      "wrong_device": "Nalezená sekačka neodpovídá tomuto záznamu. Nastavení připojení nebylo změněno.",
+      "reconfigure_successful": "Připojení sekačky bylo aktualizováno.",
       "already_configured": "Všechny podporované sekačky tohoto účtu jsou již nakonfigurovány."
     }
   },

@@ -35,6 +35,15 @@
           "password": "Password",
           "country": "Region"
         }
+      },
+      "reconfigure": {
+        "title": "Update mower connection",
+        "description": "Update the login details or region for this mower. The account must still contain the configured mower; its Home Assistant entry and entities are kept.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "country": "Region"
+        }
       }
     },
     "error": {
@@ -46,6 +55,8 @@
       "no_devices": "No supported lawn mower devices were found for this account. Check that the selected region and account type match the vendor app."
     },
     "abort": {
+      "wrong_device": "The discovered mower does not match this entry. No connection settings were changed.",
+      "reconfigure_successful": "The mower connection was updated.",
       "already_configured": "All supported mowers on this account are already configured."
     }
   },

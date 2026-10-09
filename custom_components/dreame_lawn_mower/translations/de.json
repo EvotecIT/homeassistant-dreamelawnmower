@@ -4,7 +4,16 @@
     "step": {
       "user": {"title": "Dreame-Mähroboter verbinden", "description": "Melde dich mit deinem Dreamehome- oder MOVAhome-Konto an, um Mähroboter zu finden.", "data": {"account_type": "Kontotyp", "username": "Benutzername", "password": "Passwort", "country": "Region"}},
       "device": {"title": "Mähroboter auswählen", "description": "Wähle einen Mähroboter zum Hinzufügen aus. Starte die Einrichtung erneut, um einen weiteren Mähroboter desselben Kontos hinzuzufügen.", "data": {"device": "Gefundener Mähroboter"}},
-      "reauth": {"title": "Konto erneut verbinden", "description": "Aktualisiere deine Dreamehome- oder MOVAhome-Zugangsdaten.", "data": {"username": "Benutzername", "password": "Passwort", "country": "Region"}}
+      "reauth": {"title": "Konto erneut verbinden", "description": "Aktualisiere deine Dreamehome- oder MOVAhome-Zugangsdaten.", "data": {"username": "Benutzername", "password": "Passwort", "country": "Region"}},
+      "reconfigure": {
+        "title": "Verbindung des Mähers ändern",
+        "description": "Aktualisieren Sie die Anmeldedaten oder die Region dieses Mähers. Das Konto muss weiterhin den eingerichteten Mäher enthalten; sein Eintrag und seine Entitäten in Home Assistant bleiben erhalten.",
+        "data": {
+          "username": "Benutzername",
+          "password": "Passwort",
+          "country": "Region"
+        }
+      }
     },
     "error": {
       "2fa_required": "Die Zwei-Faktor-Authentifizierung muss in der Hersteller-App oder auf der Hersteller-Website abgeschlossen werden, bevor die Einrichtung fortgesetzt werden kann.",
@@ -14,7 +23,11 @@
       "invalid_region": "Die ausgewählte Region wurde von der Cloud abgelehnt. Prüfe die in der Hersteller-App verwendete Kontoregion.",
       "no_devices": "Für dieses Konto wurden keine unterstützten Mähroboter gefunden. Prüfe, ob Region und Kontotyp mit der Hersteller-App übereinstimmen."
     },
-    "abort": {"already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."}
+    "abort": {
+      "wrong_device": "Der gefundene Mäher stimmt nicht mit diesem Eintrag überein. Die Verbindungseinstellungen wurden nicht geändert.",
+      "reconfigure_successful": "Die Verbindung des Mähers wurde aktualisiert.",
+      "already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."
+    }
   },
   "options": {"step": {"init": {
     "title": "Optionen für Dreame-Mähroboter",

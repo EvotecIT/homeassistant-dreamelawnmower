@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import Any, Literal
 
 import voluptuous as vol
 from aiohttp import ClientSession
@@ -256,8 +256,27 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Handle credential refresh."""
+        return await self._async_connection_step(
+            self._get_reauth_entry(), "reauth", user_input
+        )
+
+    async def async_step_reconfigure(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Update the configured mower's connection without replacing its entry."""
+        return await self._async_connection_step(
+            self._get_reconfigure_entry(), "reconfigure", user_input
+        )
+
+    async def _async_connection_step(
+        self,
+        entry: DreameLawnMowerConfigEntry,
+        step_id: Literal["reauth", "reconfigure"],
+        user_input: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        """Validate replacement credentials against the entry's existing mower."""
         self._errors = {}
-        entry = self._get_reauth_entry()
 
         if user_input is not None:
             try:
@@ -282,6 +301,8 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 if selected is None:
                     self._errors["base"] = "no_devices"
                 else:
+                    await self.async_set_unique_id(selected.unique_id)
+                    self._abort_if_unique_id_mismatch(reason="wrong_device")
                     return self.async_update_reload_and_abort(
                         entry,
                         data_updates={
@@ -297,7 +318,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
 
         return self.async_show_form(
-            step_id="reauth",
+            step_id=step_id,
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
