@@ -122,6 +122,7 @@ See [live video setup](docs/live-video.md) before troubleshooting playback.
 | Send alerts and build automations | [Notifications and automations](docs/notifications.md) |
 | See the dashboard and device page | [Screenshots](docs/screenshots.md) |
 | Diagnose a problem | [Troubleshooting](docs/troubleshooting.md) |
+| Check qualification evidence and remaining quality work | [Quality qualification](docs/quality.md) |
 
 Map display and selection are supported; editing no-go areas, virtual walls,
 or garden geometry is not. Confirm the map and target before any mowing action,
