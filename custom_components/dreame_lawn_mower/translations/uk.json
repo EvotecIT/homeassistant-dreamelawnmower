@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Запис газонокосарки Dreame з ідентифікатором {entry_id} не знайдено."
+    },
+    "entry_not_loaded": {
+      "message": "Запис газонокосарки Dreame {entry_id} не завантажено."
+    },
+    "no_loaded_entries": {
+      "message": "Немає завантажених записів газонокосарок Dreame."
+    },
+    "entry_id_required": {
+      "message": "Завантажено кілька записів газонокосарок Dreame; укажіть entry_id."
+    }
   }
 }

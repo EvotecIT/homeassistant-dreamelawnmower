@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Aucune entrée de tondeuse Dreame trouvée pour {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "L’entrée de tondeuse Dreame {entry_id} n’est pas chargée."
+    },
+    "no_loaded_entries": {
+      "message": "Aucune entrée de tondeuse Dreame n’est chargée."
+    },
+    "entry_id_required": {
+      "message": "Plusieurs entrées de tondeuses Dreame sont chargées ; indiquez entry_id."
+    }
   }
 }

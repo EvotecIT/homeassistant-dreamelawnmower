@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+from homeassistant.config_entries import ConfigEntryState
+
 from custom_components.dreame_lawn_mower.const import DOMAIN
 
 
@@ -9,7 +11,8 @@ def runtime_hass(coordinators, **attributes):
     """Build a small HA boundary with coordinators owned by config entries."""
     entries = {
         entry_id: SimpleNamespace(
-            entry_id=entry_id, domain=DOMAIN, runtime_data=coordinator
+            entry_id=entry_id, domain=DOMAIN, runtime_data=coordinator,
+            state=ConfigEntryState.LOADED,
         )
         for entry_id, coordinator in coordinators.items()
     }

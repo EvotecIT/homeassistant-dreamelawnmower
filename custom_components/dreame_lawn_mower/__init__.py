@@ -9,6 +9,7 @@ from datetime import timedelta
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_DID,
@@ -34,8 +35,8 @@ from .point_cloud_api import (
     DreameLawnMowerPointCloudAPI,
     async_setup_point_cloud_api,
 )
-from .runtime_data import DreameLawnMowerConfigEntry, get_coordinator, iter_coordinators
-from .services import async_setup_services, async_unload_services
+from .runtime_data import DreameLawnMowerConfigEntry, get_coordinator
+from .services import async_setup_services
 from .video_lan_cache import DreameLawnMowerVideoLanCache, async_remove_video_lan_cache
 from .video_provisioning_cache import (
     DreameLawnMowerVideoProvisioningCache,
@@ -44,6 +45,12 @@ from .video_provisioning_cache import (
 
 _LOGGER = logging.getLogger(__name__)
 SLOW_SETUP_SECONDS = 15.0
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Keep integration actions available independently of entry loading."""
+    await async_setup_services(hass)
+    return True
 
 
 async def async_migrate_entry(
@@ -152,7 +159,6 @@ async def async_setup_entry(
         async_setup_point_cloud_api(hass)
         async_setup_mowing_map_api(hass)
         coordinator.loaded_platforms = platforms
-        await setup_cycle.measure("services", lambda: async_setup_services(hass))
         await setup_cycle.measure(
             "platforms",
             lambda: hass.config_entries.async_forward_entry_setups(entry, platforms),
@@ -211,7 +217,7 @@ async def _async_cleanup_failed_setup(
 ) -> None:
     """Drain coordinator resources registered before a failed setup."""
     await _async_close_video_caches(coordinator)
-    released = await _async_release_entry_runtime(hass, entry, coordinator)
+    await _async_release_entry_runtime(hass, entry, coordinator)
     try:
         await coordinator.async_shutdown()
     except Exception as err:  # noqa: BLE001 - preserve the original setup error
@@ -219,8 +225,6 @@ async def _async_cleanup_failed_setup(
             "Failed to fully close Dreame mower after setup error: %s",
             err,
         )
-    if released and not any(iter_coordinators(hass)):
-        await async_unload_services(hass)
 
 
 async def _async_release_entry_runtime(
@@ -253,8 +257,6 @@ async def async_unload_entry(
         await _async_close_video_caches(coordinator)
         await _async_release_entry_runtime(hass, entry, coordinator)
         await coordinator.async_shutdown()
-        if not any(iter_coordinators(hass)):
-            await async_unload_services(hass)
     return unload_ok
 
 

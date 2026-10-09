@@ -469,8 +469,6 @@ async def test_released_video_owners_cannot_recreate_removed_files(tmp_path, cle
                     async_entries=lambda domain: [entry],
                     async_get_entry=lambda entry_id: entry,
                 )),
-                patch("custom_components.dreame_lawn_mower.async_unload_services",
-                      new_callable=AsyncMock),
             ):
                 assert await async_unload_entry(hass, entry)
         else:

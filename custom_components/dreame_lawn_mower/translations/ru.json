@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Запись газонокосилки Dreame с идентификатором {entry_id} не найдена."
+    },
+    "entry_not_loaded": {
+      "message": "Запись газонокосилки Dreame {entry_id} не загружена."
+    },
+    "no_loaded_entries": {
+      "message": "Нет загруженных записей газонокосилок Dreame."
+    },
+    "entry_id_required": {
+      "message": "Загружено несколько записей газонокосилок Dreame; укажите entry_id."
+    }
   }
 }

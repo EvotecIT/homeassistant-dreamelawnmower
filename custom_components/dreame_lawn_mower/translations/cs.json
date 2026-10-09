@@ -196,5 +196,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Položka sekačky Dreame s identifikátorem {entry_id} nebyla nalezena."
+    },
+    "entry_not_loaded": {
+      "message": "Položka sekačky Dreame {entry_id} není načtena."
+    },
+    "no_loaded_entries": {
+      "message": "Žádná položka sekačky Dreame není načtena."
+    },
+    "entry_id_required": {
+      "message": "Je načteno více položek sekaček Dreame; zadejte entry_id."
+    }
   }
 }

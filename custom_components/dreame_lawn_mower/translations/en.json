@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "No Dreame lawn mower entry found for {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Dreame lawn mower entry {entry_id} is not loaded."
+    },
+    "no_loaded_entries": {
+      "message": "No Dreame lawn mower entries are loaded."
+    },
+    "entry_id_required": {
+      "message": "Multiple Dreame lawn mower entries are loaded; pass entry_id."
+    }
   }
 }

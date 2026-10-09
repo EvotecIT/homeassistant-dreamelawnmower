@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Nie znaleziono wpisu kosiarki Dreame o identyfikatorze {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Wpis kosiarki Dreame {entry_id} nie jest załadowany."
+    },
+    "no_loaded_entries": {
+      "message": "Żaden wpis kosiarki Dreame nie jest załadowany."
+    },
+    "entry_id_required": {
+      "message": "Załadowano kilka wpisów kosiarek Dreame; podaj entry_id."
+    }
   }
 }

@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "No se ha encontrado ninguna entrada de cortacésped Dreame para {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "La entrada del cortacésped Dreame {entry_id} no está cargada."
+    },
+    "no_loaded_entries": {
+      "message": "No hay entradas de cortacésped Dreame cargadas."
+    },
+    "entry_id_required": {
+      "message": "Hay varias entradas de cortacésped Dreame cargadas; indique entry_id."
+    }
   }
 }

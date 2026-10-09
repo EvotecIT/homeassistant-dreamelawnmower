@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -19,8 +20,6 @@ from custom_components.dreame_lawn_mower.runtime_data import (
     iter_coordinators,
 )
 from custom_components.dreame_lawn_mower.services import _coordinator_from_call
-
-OWNER = "custom_components.dreame_lawn_mower"
 
 
 @pytest.mark.parametrize("unload_ok", [False, True])
@@ -43,12 +42,10 @@ async def test_unload_retains_owner_until_platforms_release(
             "async_unload_platforms",
             AsyncMock(return_value=unload_ok),
         ),
-        patch(f"{OWNER}.async_unload_services", AsyncMock()) as unload_services,
     ):
         assert await async_unload_entry(hass, entry) is unload_ok
         assert (get_coordinator(hass, entry.entry_id) is coordinator) is not unload_ok
         assert coordinator.async_shutdown.await_count == int(unload_ok)
-        assert unload_services.await_count == int(unload_ok and not another_entry)
 
 
 @pytest.mark.parametrize("assigned", [False, True])
@@ -64,7 +61,7 @@ async def test_failed_setup_releases_only_its_own_runtime(hass, assigned):
 
 
 async def test_service_targets_use_only_current_integration_entries(hass):
-    entry = MockConfigEntry(domain=DOMAIN)
+    entry = MockConfigEntry(domain=DOMAIN, state=ConfigEntryState.LOADED)
     entry.add_to_hass(hass)
     coordinator = Mock(spec=DreameLawnMowerCoordinator)
     entry.runtime_data = coordinator

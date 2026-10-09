@@ -195,5 +195,19 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Nessuna voce del tosaerba Dreame trovata per {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "La voce del tosaerba Dreame {entry_id} non è caricata."
+    },
+    "no_loaded_entries": {
+      "message": "Nessuna voce del tosaerba Dreame è caricata."
+    },
+    "entry_id_required": {
+      "message": "Sono caricate più voci di tosaerba Dreame; specificare entry_id."
+    }
   }
 }

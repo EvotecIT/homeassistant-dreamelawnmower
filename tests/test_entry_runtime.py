@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -59,7 +59,7 @@ def test_services_target_entries_and_require_disambiguation():
         _coordinator_from_call(hass, SimpleNamespace(data={}))
     del hass.config_entries.entries["second"].runtime_data
     assert _coordinator_from_call(hass, SimpleNamespace(data={})) is first
-    with pytest.raises(HomeAssistantError, match="No Dreame"):
+    with pytest.raises(HomeAssistantError, match="not loaded"):
         _coordinator_from_call(hass, call)
     del hass.config_entries.entries["first"].runtime_data
     with pytest.raises(HomeAssistantError, match="No Dreame"):
@@ -76,16 +76,11 @@ def test_failed_setup_withdraws_runtime_and_purges_both_api_owners():
         hass.data[DOMAIN] = {
             POINT_CLOUD_API_DATA_KEY: points, MOWING_MAP_API_KEY: maps,
         }
-        services = AsyncMock()
-        with patch(
-            "custom_components.dreame_lawn_mower.async_unload_services", services,
-        ):
-            await _async_cleanup_failed_setup(hass, entry, coordinator)
+        await _async_cleanup_failed_setup(hass, entry, coordinator)
         assert get_coordinator(hass, "mower") is None
         points.purge_entry.assert_called_once_with("mower")
         maps.purge_entry.assert_awaited_once_with("mower")
         coordinator.async_shutdown.assert_awaited_once_with()
-        services.assert_awaited_once_with(hass)
 
     asyncio.run(run())
 
@@ -94,16 +89,11 @@ def test_failed_old_setup_cannot_withdraw_replacement_runtime():
     async def run():
         old, replacement = owner(), owner()
         hass = runtime_hass({"mower": replacement})
-        services = AsyncMock()
-        with patch(
-            "custom_components.dreame_lawn_mower.async_unload_services", services,
-        ):
-            await _async_cleanup_failed_setup(
-                hass, hass.config_entries.entries["mower"], old,
-            )
+        await _async_cleanup_failed_setup(
+            hass, hass.config_entries.entries["mower"], old,
+        )
         assert get_coordinator(hass, "mower") is replacement
         old.async_shutdown.assert_awaited_once_with()
         replacement.async_shutdown.assert_not_awaited()
-        services.assert_not_awaited()
 
     asyncio.run(run())
