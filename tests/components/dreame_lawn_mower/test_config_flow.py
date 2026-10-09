@@ -635,6 +635,10 @@ async def test_native_discovery_failure_preserves_saved_entry(
         result["flow_id"], verified,
     )
     await hass.async_block_till_done()
+    retry_call = discover.await_args
+    assert retry_call is not None
+    assert retry_call.kwargs["username"] == verified[CONF_USERNAME]
+    assert retry_call.kwargs["password"] == verified[CONF_PASSWORD]
     if source == "user":
         assert recovered["type"] is FlowResultType.CREATE_ENTRY
         assert recovered["data"][CONF_PASSWORD] == "verified"
