@@ -1078,7 +1078,9 @@ PROPERTY_AVAILABILITY: Final[
     DreameMowerProperty.DND.name: lambda device: device.capability.dnd,
     "dnd_start": lambda device: device.status.dnd,
     "dnd_end": lambda device: device.status.dnd,
-    DreameMowerProperty.OFF_PEAK_CHARGING.name: lambda device: device.capability.off_peak_charging,
+    DreameMowerProperty.OFF_PEAK_CHARGING.name: lambda device: (
+        device.capability.off_peak_charging
+    ),
     "off_peak_charging_start": lambda device: device.status.off_peak_charging,
     "off_peak_charging_end": lambda device: device.status.off_peak_charging,
 }
@@ -1303,13 +1305,13 @@ class DreameMowerDeviceCapability:
         self.auto_switch_settings = False
         self.wifi_map = False
         self.backup_map = False
-        self.dnd = False
+        self.dnd: bool = False
         self.dnd_task = False
         self.shortcuts = False
         self.fill_light = False
         self.voice_assistant = False
         self.pet_detective = False
-        self.off_peak_charging = False
+        self.off_peak_charging: bool = False
         self.max_suction_power = False
         self.obstacle_image_crop = False
         self.map_object_offset = True
