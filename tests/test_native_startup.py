@@ -376,7 +376,10 @@ def test_native_privacy_metadata_preserves_startup_and_lifetime(monkeypatch, out
                 ),
             ))
             try:
-                await asyncio.wait_for(entered.wait(), 1)
+                # The total deadline can expire before privacy metadata starts.
+                # Other outcomes require that gate to exercise its response.
+                if outcome != "timeout":
+                    await asyncio.wait_for(entered.wait(), 1)
                 assert not device._ready
                 if outcome == "cancel":
                     startup.cancel()
