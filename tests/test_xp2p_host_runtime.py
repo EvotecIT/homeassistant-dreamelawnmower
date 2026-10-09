@@ -11,6 +11,7 @@ import os
 import platform
 import struct
 import subprocess
+import sys
 import threading
 import zipfile
 from dataclasses import replace
@@ -35,6 +36,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime 
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
+    DreameLawnMowerXp2pProcessRunner,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config import (
     XP2P_PROTOCOL_AUTO,
@@ -1003,3 +1005,79 @@ def test_runtime_bootstrap_repairs_file_shaped_cache(
 
     assert runtime_path.is_dir()
     assert assets.worker_path == runtime_path / "bin" / "dreame-xp2p-host-runner"
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_host_startup_timeout_covers_blocked_request_write(
+    monkeypatch, tmp_path, managed
+):
+    """An accepted large field cannot retain startup when the child stops reading."""
+    real_popen = subprocess.Popen
+    processes = []
+    finished = threading.Event()
+    errors = []
+    stun_file = tmp_path / "stun.txt"
+    stun_file.write_text("", encoding="utf-8")
+
+    def launch(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    assets = SimpleNamespace(
+        command=lambda: (sys.executable, "-c", "import time; time.sleep(30)"),
+        environment=lambda: os.environ.copy(),
+        validate=lambda: None,
+        startup_probe=None,
+        library_path=tmp_path / "unused-library.so",
+    )
+    monkeypatch.setattr(xp2p_host_runtime.subprocess, "Popen", launch)
+    monkeypatch.setattr(xp2p_host_runtime, "_startup_response_timeout", lambda **_: 0.1)
+    monkeypatch.setattr(xp2p_host_runtime, "_write_stun_file", lambda _: stun_file)
+    runtime = (
+        xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+            assets,
+            config_fetcher=lambda _: DreameLawnMowerXp2pDeviceConfig(),
+        )
+        if managed
+        else DreameLawnMowerXp2pProcessRunner(assets.command(), timeout=0.1)
+    )
+    # Below the worker's 1 MiB per-field maximum, above ordinary pipe capacity.
+    inputs = replace(_inputs(), p2p_info="x" * (512 * 1024))
+
+    def start():
+        try:
+            runtime.start_live_stream(inputs)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            finished.set()
+
+    existing_threads = frozenset(threading.enumerate())
+    worker = threading.Thread(target=start, daemon=True)
+    worker.start()
+    try:
+        assert finished.wait(3), "startup remained blocked outside its timeout"
+        assert len(errors) == 1
+        assert isinstance(errors[0], DreameLawnMowerVideoRuntimeError)
+        assert "timed out" in str(errors[0])
+        assert processes and processes[0].poll() is not None
+        if managed:
+            assert not stun_file.exists()
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=2)
+        worker.join(timeout=2)
+        for process in processes:
+            for pipe in (process.stdin, process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
+        assert not worker.is_alive()
+        for thread in threading.enumerate():
+            if thread not in existing_threads and thread.name.startswith(
+                "dreame-xp2p"
+            ):
+                thread.join(timeout=2)
+                assert not thread.is_alive()

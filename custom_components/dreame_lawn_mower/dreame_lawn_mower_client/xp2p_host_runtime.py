@@ -370,12 +370,18 @@ class DreameLawnMowerXp2pHostRuntime:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P host worker stdin is unavailable."
                 )
-            startup_stage = "request_write"
-            process.stdin.write(payload)
-            process.stdin.flush()
-            startup_stage = "response_wait"
+            request_stream = process.stdin
+
+            def write_request() -> None:
+                nonlocal startup_stage
+                startup_stage = "request_write"
+                request_stream.write(payload)
+                request_stream.flush()
+                startup_stage = "response_wait"
+
             worker_status, response = _read_response(
                 process.stdout,
+                write_request=write_request,
                 timeout=_startup_response_timeout(
                     command_timeout_us=command_timeout_us,
                     device_status_attempts=device_status_attempts,
@@ -619,7 +625,13 @@ def _read_response(
     stream: IO[bytes] | None,
     *,
     timeout: float,
+    write_request: Callable[[], None] | None = None,
 ) -> tuple[int, bytes]:
+    """Bound request delivery and response reading within one worker lifetime.
+
+    On timeout the process owner terminates the child, releasing blocked pipe
+    operations. Control queries that have no startup request use the same reader.
+    """
     if stream is None:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P host worker stdout is unavailable."
@@ -628,6 +640,8 @@ def _read_response(
 
     def _read() -> None:
         try:
+            if write_request is not None:
+                write_request()
             header = _read_exact(stream, 12)
             if header[:4] != _RESPONSE_MAGIC:
                 raise DreameLawnMowerVideoRuntimeError(
