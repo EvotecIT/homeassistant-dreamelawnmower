@@ -16,7 +16,7 @@ from homeassistant.helpers.http import HomeAssistantView
 
 from .const import CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE, DOMAIN
 from .control_options import active_map_index
-from .dreame_lawn_mower_client.client_maps import _app_map_inventory_identity
+from .dreame_lawn_mower_client.map_inventory import _app_map_inventory_identity
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .map_presentation import map_style
 from .runtime_data import get_coordinator

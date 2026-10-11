@@ -267,24 +267,45 @@ def test_app_live_path_does_not_publish_invalid_or_retired_telemetry(case):
     assert "runtime_track_point_count" not in view.details
 
 
-def test_replaced_app_geometry_and_new_task_cannot_reuse_an_old_trail():
+@pytest.mark.parametrize("reader", ["camera", "scene"])
+def test_replaced_app_geometry_and_new_task_cannot_reuse_an_old_trail(reader):
     client = tracked_client()
+    scene = client._sync_get_mowing_map_scene(
+        map_index=0, style=map_render_style(), label_scale=1,
+    )
     initial = client._sync_refresh_vector_map_view()
     assert initial.details["runtime_track_point_count"] == 3
     maps = native_maps()
     maps["maps"][0]["payload"]["map"][0]["data"][1][0] = 1100
     client._sync_get_app_maps = lambda **kwargs: maps
-    replaced = client._sync_refresh_vector_map_view()
-    assert not replaced.details["runtime_position_valid"]
-    assert "runtime_track_point_count" not in replaced.details
+    if reader == "camera":
+        replaced = client._sync_refresh_vector_map_view()
+        assert not replaced.details["runtime_position_valid"]
+        assert "runtime_track_point_count" not in replaced.details
+    else:
+        current_scene = client._sync_get_mowing_map_scene(
+            map_index=0, style=map_render_style(), label_scale=1,
+        )
+        assert client.mowing_map_runtime_overlay(current_scene)["position"] is None
     publish(client, hex="new-geometry", candidate_runtime_track_segments=(
         ((100, 100), (200, 100)),
     ))
     updated = client._sync_refresh_vector_map_view()
     assert updated.details["runtime_track_point_count"] == 2
+    stale = client.mowing_map_runtime_overlay(scene)
+    assert stale["position"] is None and stale["trail"] == []
+    # Projecting a cached A scene must preserve both B's fresh trail and pose.
+    after_stale = client._sync_refresh_vector_map_view()
+    assert after_stale.details["runtime_track_point_count"] == 2
+    assert after_stale.details["runtime_position_valid"] is True
     publish(client, hex="new-task", candidate_runtime_task_id=101,
             candidate_runtime_track_segments=(((200, 100), (300, 100)),))
     assert client._sync_get_vector_map_details()["runtime_track_point_count"] == 2
+    client.runtime_map_identity_expires_at = None
+    assert client.mowing_map_runtime_overlay(scene)["position"] is None
+    # Identity retirement leaves history owned by B, even if cached A is revisited.
+    retained = client._sync_refresh_vector_map_view()
+    assert retained.details["position_status"] == "last_known"
 
 
 @pytest.mark.parametrize("object_error", [False, True])

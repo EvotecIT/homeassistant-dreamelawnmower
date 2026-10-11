@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_read_app_action
 from .client_map_helpers import _current_app_map_index
-from .client_mowing_map import bounded_mowing_map_batch, mowing_scene_from_batch
+from .client_mowing_map import bounded_mowing_map_batch
 from .client_refresh import _run_state_worker
 from .client_state_reads import async_read_device_state
 from .client_vector_map_view import vector_map_details, vector_map_view
@@ -39,7 +39,7 @@ async def async_mowing_scene(
                 include_payload=True, include_objects=False,
             )
         return await _run_state_worker(
-            lambda: mowing_scene_from_batch(
+            lambda: client._mowing_map_scene_from_batch(
                 data, map_index=map_index, style=style, label_scale=label_scale,
                 app_maps=app_maps,
             ),
