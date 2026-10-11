@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_read_app_action
 from .client_map_helpers import _current_app_map_index
-from .client_mowing_map import mowing_scene_from_batch
+from .client_mowing_map import bounded_mowing_map_batch, mowing_scene_from_batch
 from .client_refresh import _run_state_worker
 from .client_state_reads import async_read_device_state
 from .client_vector_map_view import vector_map_details, vector_map_view
 from .exceptions import DreameLawnMowerConnectionError
 from .models import DreameLawnMowerMapView
+from .vector_map import parse_batch_vector_map
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -32,9 +33,15 @@ async def async_mowing_scene(
     """Own native geometry retrieval and drain any started rendering worker."""
     async def read(cloud: DreameCloudSession) -> MowingMapScene:
         data = await cloud.async_get_batch_device_datas(client._descriptor.did, [])
+        app_maps = None
+        if await _needs_app_geometry(data, map_index, background=True):
+            app_maps = await client.async_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
         return await _run_state_worker(
             lambda: mowing_scene_from_batch(
-                data, map_index=map_index, style=style, label_scale=label_scale
+                data, map_index=map_index, style=style, label_scale=label_scale,
+                app_maps=app_maps,
             ),
             Event(),
         )
@@ -55,6 +62,19 @@ async def _map_hint(client: DreameLawnMowerClient) -> int | None:
     return None
 
 
+async def _needs_app_geometry(
+    data: dict[str, Any] | None, map_index: int | None, *, background: bool = False,
+) -> bool:
+    """Keep device-sized map parsing off the event loop, draining on cancel."""
+    return await _run_state_worker(
+        lambda: parse_batch_vector_map(
+            bounded_mowing_map_batch(data) if background else data,
+            current_map_index=map_index,
+        ) is None,
+        Event(),
+    )
+
+
 async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
     async def read(cloud: DreameCloudSession) -> dict[str, Any]:
         try:
@@ -62,9 +82,17 @@ async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
         except DreameLawnMowerConnectionError as err:
             return {"available": False, "source": "batch_vector_map", "error": str(err)}
         hint = await _map_hint(client)
+        app_maps = None
+        if await _needs_app_geometry(data, hint):
+            app_maps = await client.async_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
+            hint = app_maps.get("current_map_index")
         return await async_read_device_state(
             client,
-            lambda _device: vector_map_details(data, hint),
+            lambda _device: vector_map_details(
+                data, hint, client=client, app_maps=app_maps,
+            ),
             refresh=False,
         )
 
@@ -90,6 +118,13 @@ async def async_vector_view(
             if current_map_index is not None
             else await _map_hint(client)
         )
+        app_maps = None
+        if await _needs_app_geometry(data, hint):
+            app_maps = await client.async_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
+            if hint is None:
+                hint = app_maps.get("current_map_index")
         return await async_read_device_state(
             client,
             lambda _device: vector_map_view(
@@ -98,6 +133,7 @@ async def async_vector_view(
                 current_map_index=hint,
                 label_scale=label_scale,
                 style=style,
+                app_maps=app_maps,
             ),
             refresh=False,
         )

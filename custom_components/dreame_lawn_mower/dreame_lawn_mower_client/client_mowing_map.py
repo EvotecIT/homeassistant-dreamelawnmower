@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from .app_map_geometry import parse_app_map_geometry
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
@@ -51,17 +52,30 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         # Implemented by the concrete client's map owner.
         def _sync_get_vector_map_batch_data(self) -> Mapping[str, Any] | None: ...
 
+        def _sync_get_app_maps(
+            self, chunk_size: int = 400, include_payload: bool = False,
+            include_objects: bool = True, include_object_urls: bool = False,
+        ) -> dict[str, Any]: ...
+
     def _sync_get_mowing_map_scene(
         self, *, map_index: int, style: MapRenderStyle, label_scale: float
     ) -> MowingMapScene:
         batch = self._sync_get_vector_map_batch_data()
+        app_maps = None
+        geometry = bounded_mowing_map_batch(batch)
+        if parse_batch_vector_map(geometry, current_map_index=map_index) is None:
+            app_maps = self._sync_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
         return mowing_scene_from_batch(
-            batch, map_index=map_index, style=style, label_scale=label_scale
+            batch, map_index=map_index, style=style, label_scale=label_scale,
+            app_maps=app_maps,
         )
 
     def mowing_map_runtime_overlay(self, scene: MowingMapScene) -> dict[str, Any]:
         """Read the existing session cache without requesting mower operations."""
         self._expire_runtime_live_tracking()
+        self._bind_runtime_live_geometry(scene.map_index, scene.position_identity)
         position = self._position_tracker.resolve(
             map_index=scene.map_index,
             geometry=scene.position_identity,
@@ -96,10 +110,13 @@ def mowing_scene_from_batch(
     map_index: int,
     style: MapRenderStyle,
     label_scale: float,
+    app_maps: Mapping[str, Any] | None = None,
 ) -> MowingMapScene:
     """Build a bounded scene using the common synchronous/native render policy."""
     geometry = bounded_mowing_map_batch(batch)
     vector_map = parse_batch_vector_map(geometry, current_map_index=map_index)
+    if vector_map is None:
+        vector_map = parse_app_map_geometry(app_maps, map_index)
     if vector_map is None:
         raise ValueError("No geometry is available for the current map.")
     return build_mowing_map_scene(vector_map, style=style, label_scale=label_scale)

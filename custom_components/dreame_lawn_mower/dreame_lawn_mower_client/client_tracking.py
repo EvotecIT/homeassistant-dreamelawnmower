@@ -23,6 +23,15 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     _runtime_live_task_id: int | None
     _runtime_session_active: bool | None
     _last_runtime_track_blob_hex: str | None
+    _runtime_live_geometry_identity: str | None
+
+    def _bind_runtime_live_geometry(self, map_index: int, geometry: str) -> None:
+        """Discard trails when a verified slot's coordinate frame is replaced."""
+        if self._runtime_live_map_index != map_index:
+            return
+        if self._runtime_live_geometry_identity not in (None, geometry):
+            self._runtime_live_track_segments = ()
+        self._runtime_live_geometry_identity = geometry
 
     @property
     def runtime_map_identity_expires_at(self) -> datetime | None:
@@ -49,6 +58,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         self._runtime_live_track_segments = ()
         self._runtime_live_map_index = None
         self._runtime_live_task_id = None
+        self._runtime_live_geometry_identity = None
 
     def _expire_runtime_live_tracking(self) -> bool:
         """Enforce identity lifetime even when no coordinator callback runs."""
@@ -88,6 +98,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             )
             self._runtime_live_map_index = None
             self._runtime_live_task_id = None
+            self._runtime_live_geometry_identity = None
             return
 
         task_id = getattr(status_blob, "candidate_runtime_task_id", None)
@@ -102,6 +113,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         )
         if context_changed:
             self._runtime_live_track_segments = ()
+            self._runtime_live_geometry_identity = None
         if map_index is not None:
             self._runtime_live_map_index = map_index
         if task_id is not None:

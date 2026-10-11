@@ -597,8 +597,8 @@ def _decode_runtime_task_block(raw: Sequence[int]) -> _RuntimeCandidates | None:
 
     progress_percent = None
     notes: list[str] = []
-    if 0 <= raw_percent <= 1000:
-        progress_percent = round(raw_percent / 10.0, 1)
+    if 0 <= raw_percent <= 10000:
+        progress_percent = round(raw_percent / 100.0, 2)
     elif raw_percent:
         notes.append("unexpected_runtime_progress_value")
 

@@ -26,10 +26,18 @@ def test_native_scene_matches_existing_policy(monkeypatch, account, empty):
     strings = cloud_strings(account)
     payload = {} if empty else _batch_payload()
     calls = []
+    app_calls = []
 
     async def handler(request):
         if request.path == strings[17]:
             return web.json_response(login_response(strings))
+        if request.path != "/" + "/".join(strings[i] for i in (23, 26, 44)):
+            (action,) = (await request.json())["data"]["params"]["in"]
+            app_calls.append(action)
+            assert action == {"m": "g", "t": "MAPL"}
+            return web.json_response(
+                {"code": 0, "data": {"result": {"out": [{"d": []}]}}}
+            )
         assert request.path == "/" + "/".join(strings[i] for i in (23, 26, 44))
         calls.append(await request.json())
         return web.json_response({"code": 0, "data": payload})
@@ -38,6 +46,9 @@ def test_native_scene_matches_existing_policy(monkeypatch, account, empty):
         async with server(monkeypatch, handler), ClientSession() as session:
             client = make_client(session, account)
             client._sync_get_vector_map_batch_data = lambda: payload
+            client._sync_get_app_maps = lambda **kwargs: {
+                "map_list_valid": True, "current_map_index": None, "maps": [],
+            }
             options = dict(map_index=0, style=map_render_style(), label_scale=1.0)
             try:
                 if empty:
@@ -52,6 +63,7 @@ def test_native_scene_matches_existing_policy(monkeypatch, account, empty):
                     assert actual.revision == expected.revision
                     assert actual.projection == expected.projection
                 assert calls == [{"did": "42", strings[35]: []}]
+                assert app_calls == ([{"m": "g", "t": "MAPL"}] if empty else [])
                 assert not client._cloud_read_tasks
             finally:
                 await client.async_close()

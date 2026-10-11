@@ -680,7 +680,7 @@ def test_property_annotations_mark_runtime_status_blob_frame() -> None:
     assert entry["status_blob"]["candidate_runtime_current_area_sqm"] == 72.95
     assert entry["status_blob"]["candidate_runtime_total_area_sqm"] == 531.0
     assert entry["status_blob"]["candidate_runtime_area_progress_percent"] == 13.7
-    assert "candidate_runtime_progress_percent" not in entry["status_blob"]
+    assert entry["status_blob"]["candidate_runtime_progress_percent"] == 13.74
     assert entry["status_blob"]["candidate_runtime_pose_x"] == 5910
     assert entry["status_blob"]["candidate_runtime_pose_y"] == 12400
     assert entry["status_blob"]["candidate_runtime_heading_deg"] == 63.5
@@ -689,7 +689,6 @@ def test_property_annotations_mark_runtime_status_blob_frame() -> None:
     )
     assert entry["status_blob"]["notes"] == (
         "unexpected_length",
-        "unexpected_runtime_progress_value",
     )
 
 

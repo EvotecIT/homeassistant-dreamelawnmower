@@ -589,6 +589,7 @@ class DreameLawnMowerClient(
             ...,
         ] = ()
         self._last_runtime_track_blob_hex: str | None = None
+        self._runtime_live_geometry_identity: str | None = None
         self._runtime_map_identity_expires_at: datetime | None = datetime.max.replace(
             tzinfo=UTC
         )

@@ -83,6 +83,7 @@ from .point_cloud_diagnostics import (
     value_shape,
 )
 from .point_cloud_trace import record_point_cloud_stage
+from .vector_map import parse_batch_vector_map
 
 if TYPE_CHECKING:
     from threading import Lock
@@ -216,7 +217,14 @@ class _DreameLawnMowerClientMapsMixin(
                 "error": str(err),
             }
 
-        return vector_map_details(batch_data, self._sync_get_current_app_map_index())
+        hint = self._sync_get_current_app_map_index()
+        app_maps = None
+        if parse_batch_vector_map(batch_data, current_map_index=hint) is None:
+            app_maps = self._sync_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
+            hint = app_maps.get("current_map_index")
+        return vector_map_details(batch_data, hint, client=self, app_maps=app_maps)
 
     def _sync_refresh_map_summary(
         self,
@@ -298,10 +306,18 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
             )
 
+        hint = (current_map_index if current_map_index is not None
+                else self._sync_get_current_app_map_index())
+        app_maps = None
+        if parse_batch_vector_map(batch_data, current_map_index=hint) is None:
+            app_maps = self._sync_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
+            if hint is None:
+                hint = app_maps.get("current_map_index")
         return vector_map_view(
             self, batch_data, label_scale=label_scale, style=style,
-            current_map_index=(current_map_index if current_map_index is not None
-                               else self._sync_get_current_app_map_index()),
+            current_map_index=hint, app_maps=app_maps,
         )
 
     def _sync_refresh_legacy_map_view(
