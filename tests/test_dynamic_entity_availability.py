@@ -1391,7 +1391,7 @@ def test_app_map_count_sensor_uses_cached_app_map_state() -> None:
                     "trajectory_point_count": 63,
                     "trajectory_length_m": 48.25,
                     "cut_relation_count": 0,
-                    "has_live_path": True,
+                    "has_live_path": False,
                 },
                 {
                     "idx": 1,
@@ -1406,7 +1406,7 @@ def test_app_map_count_sensor_uses_cached_app_map_state() -> None:
                     "trajectory_point_count": 64,
                     "trajectory_length_m": 52.5,
                     "cut_relation_count": 0,
-                    "has_live_path": True,
+                    "has_live_path": False,
                 },
             ],
         },
@@ -1502,7 +1502,7 @@ def test_current_app_map_sensors_use_cached_current_map_state() -> None:
             "trajectory_point_count": 64,
             "trajectory_length_m": 52.5,
             "cut_relation_count": 0,
-            "has_live_path": True,
+            "has_live_path": False,
         },
     }
 
