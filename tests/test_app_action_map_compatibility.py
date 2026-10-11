@@ -12,6 +12,7 @@ from aiohttp import ClientSession, web
 from custom_components.dreame_lawn_mower.control_options import current_zone_entries
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     app_map_geometry,
+    client_map_helpers,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DreameLawnMowerConnectionError,
@@ -25,6 +26,7 @@ from custom_components.dreame_lawn_mower.sensor_map_data import (
 )
 
 from .test_app_action_live_map import native_maps, publish, tracked_client
+from .test_app_maps import _FakeAppMapCloud
 from .test_async_cloud_session import cloud_strings, login_response, server
 from .test_async_map_objects import make_client
 
@@ -99,17 +101,28 @@ def test_lawn_winding_and_open_two_point_pathways_remain_supported(reverse):
 
 
 @pytest.mark.parametrize("object_error", [None, "object lookup failed"])
-def test_sync_live_camera_preserves_primary_object_metadata(object_error):
+@pytest.mark.parametrize("changed_slot", [None, 0, 1])
+def test_sync_live_camera_preserves_primary_object_metadata(object_error, changed_slot):
     client = tracked_client()
 
     def maps_with_objects(**kwargs):
         maps = native_maps()
+        other = deepcopy(maps["maps"][0])
+        other.update(idx=1, current=False)
+        maps["maps"].append(other)
         if kwargs.get("include_objects", True):
             maps["objects"] = {
                 "object_count": 1, "error": object_error,
                 "objects": [{"extension": "bin", "url_present": False,
                              "name": "private-name", "url": "private-url"}],
             }
+        elif changed_slot is not None:
+            entry = maps["maps"][changed_slot]
+            entry["payload"]["name"] = "edited"
+            cloud = _FakeAppMapCloud(entry["payload"])
+            entry["md5"] = cloud.payload_hash
+            entry["info"] = {"hash": cloud.payload_hash,
+                             "size": len(cloud.payload_text.encode("utf-8"))}
         return maps
 
     client._sync_get_app_maps = maps_with_objects
@@ -118,11 +131,37 @@ def test_sync_live_camera_preserves_primary_object_metadata(object_error):
     attributes = map_camera_attributes(
         view, image_cached=False, refreshed_at=None, last_error=None,
     )
-    assert attributes["app_map_object_count"] == 1
-    assert attributes["app_map_object_error"] == object_error
-    assert attributes["app_map_objects"] == [
-        {"extension": "bin", "url_present": False},
-    ]
+    if changed_slot is not None:
+        assert attributes["app_map_object_count"] is None
+        assert attributes["app_map_object_error"] is None
+        assert attributes["app_map_objects"] is None
+    else:
+        assert attributes["app_map_object_count"] == 1
+        assert attributes["app_map_object_error"] == object_error
+        assert attributes["app_map_objects"] == [
+            {"extension": "bin", "url_present": False},
+        ]
+
+
+@pytest.mark.parametrize("generation", ["missing", "unverified", "ambiguous"])
+def test_camera_does_not_borrow_objects_without_verified_generation(generation):
+    client = tracked_client()
+    runtime = client._sync_refresh_vector_map_view(current_map_index=0)
+    maps = native_maps()
+    maps["objects"] = {"objects": [{"extension": "bin"}], "object_count": 1}
+    entry = maps["maps"][0]
+    if generation == "missing":
+        entry["info"].pop("hash")
+    elif generation == "unverified":
+        entry["hash_match"] = False
+    else:
+        maps["map_list_valid"] = False
+        maps["maps"].append(deepcopy(entry))
+    metadata = client_map_helpers._app_maps_view_metadata(maps)
+    primary = DreameLawnMowerMapView(source="app_action_map", app_maps=metadata)
+    composed = client._with_fallback_app_maps(runtime, primary)
+    assert composed.app_maps["objects"] is None
+    assert composed.app_maps["object_count"] is None
 
 
 @pytest.mark.parametrize("metadata", [

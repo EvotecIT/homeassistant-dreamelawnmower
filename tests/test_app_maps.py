@@ -941,6 +941,7 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         "source": "app_action_map",
         "available": True,
         "map_count": 2,
+        "inventory_identity": client._latest_app_map_inventory_identity,
         "current_map_index": 0,
         "available_map_count": 1,
         "created_map_count": 1,

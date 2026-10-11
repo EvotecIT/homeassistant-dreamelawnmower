@@ -65,6 +65,7 @@ from .maintenance_point_records import (
     app_map_point_record_diagnostics,
     app_map_point_type_codes,
 )
+from .map_inventory import _app_map_inventory_identity
 from .models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -698,6 +699,13 @@ def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
         _app_map_entry_view_metadata(item) for item in maps if isinstance(item, Mapping)
     ]
     objects = _app_map_objects_view_metadata(app_maps.get("objects"))
+    verified_inventory = app_maps.get("map_list_valid") is True and all(
+        isinstance(item, Mapping) and (
+            not item.get("created")
+            or (item.get("available") is True and item.get("hash_match") is True)
+        )
+        for item in maps
+    )
     return {
         "source": app_maps.get("source"),
         "available": bool(app_maps.get("available")),
@@ -706,6 +714,9 @@ def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
         "available_map_count": sum(1 for item in entries if item.get("available")),
         "created_map_count": sum(1 for item in entries if item.get("created")),
         "maps": entries,
+        "inventory_identity": (
+            _app_map_inventory_identity(maps) if verified_inventory else None
+        ),
         "objects": objects.get("objects"),
         "object_count": objects.get("object_count"),
         "object_error": objects.get("error"),

@@ -6,8 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_run_app_read
-from .client_maps import _app_map_inventory_identity
 from .exceptions import DreameLawnMowerConnectionError
+from .map_inventory import _app_map_inventory_identity
 from .map_read_plan import read_maps
 
 if TYPE_CHECKING:

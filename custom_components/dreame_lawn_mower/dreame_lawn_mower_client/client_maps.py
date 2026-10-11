@@ -48,6 +48,7 @@ from .exceptions import (
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
+from .map_inventory import _app_map_inventory_identity
 from .map_objects import (
     map_object_description,
     map_object_names,
@@ -73,9 +74,6 @@ from .mowing_tasks import (
     build_map_switch_request,
     client_task_result,
 )
-from .payload_utils import (
-    _json_safe,
-)
 from .point_cloud import (
     DreameLawnMowerPointCloudDownload,
 )
@@ -96,43 +94,6 @@ from .point_cloud_policy import (
     _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS,
     _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY,
 )
-
-
-def _app_map_inventory_identity(
-    maps: Sequence[Mapping[str, Any]],
-) -> str | None:
-    """Return a stable identity only when every created map has MAPI data."""
-    if not maps:
-        return None
-    inventory: list[dict[str, Any]] = []
-    for item in maps:
-        created = bool(item.get("created"))
-        info = item.get("info")
-        map_hash = info.get("hash") if isinstance(info, Mapping) else None
-        map_size = info.get("size") if isinstance(info, Mapping) else None
-        if created and (
-            not isinstance(map_hash, str)
-            or not map_hash
-            or isinstance(map_size, bool)
-            or not isinstance(map_size, int)
-            or map_size <= 0
-        ):
-            return None
-        inventory.append(
-            {
-                "idx": _json_safe(item.get("idx"), max_depth=1),
-                "current": bool(item.get("current")),
-                "created": created,
-                "hash": map_hash if created else None,
-                "size": map_size if created else None,
-            }
-        )
-    return json.dumps(
-        inventory,
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
 
 
 class _DreameLawnMowerClientMapsMixin(

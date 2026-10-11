@@ -926,10 +926,14 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
             and type(metadata.get("current_map_index")) is int
             and metadata.get("current_map_index")
             == app_view.app_maps.get("current_map_index")
+            and isinstance(metadata.get("inventory_identity"), str)
+            and metadata["inventory_identity"]
+            == app_view.app_maps.get("inventory_identity")
             and all(metadata.get(key) is None for key in object_keys)
         ):
             # Geometry-only reads omit objects. Retain the primary camera's
-            # sanitized result without replacing a newer result or map slot.
+            # sanitized result only within the same verified inventory; OBJ
+            # lists objects across maps, so a matching current slot is not enough.
             return replace(map_view, app_maps={
                 **metadata,
                 **{key: app_view.app_maps.get(key) for key in object_keys},

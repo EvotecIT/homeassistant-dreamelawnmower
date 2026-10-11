@@ -85,11 +85,16 @@ def native_payload():
 
 
 def native_maps():
+    payload = native_payload()
+    cloud = _FakeAppMapCloud(payload)
     return {
         "map_list_valid": True, "current_map_index": 0,
         "source": "app_action_map", "available": True,
         "maps": [{"idx": 0, "current": True, "created": True,
-                  "available": True, "hash_match": True, "payload": native_payload()}],
+                  "available": True, "hash_match": True, "payload": payload,
+                  "md5": cloud.payload_hash,
+                  "info": {"hash": cloud.payload_hash,
+                           "size": len(cloud.payload_text.encode("utf-8"))}}],
     }
 
 
@@ -283,8 +288,9 @@ def test_replaced_app_geometry_and_new_task_cannot_reuse_an_old_trail():
 
 
 @pytest.mark.parametrize("object_error", [False, True])
+@pytest.mark.parametrize("map_changed", [False, True])
 def test_native_async_app_only_uses_verified_download_and_cache(
-    monkeypatch, object_error,
+    monkeypatch, object_error, map_changed,
 ):
     strings = cloud_strings("dreame")
     fake = _FakeAppMapCloud(native_payload())
@@ -298,12 +304,17 @@ def test_native_async_app_only_uses_verified_download_and_cache(
                 return web.json_response({"code": 0, "data": {}})
             (action,) = body["data"]["params"]["in"]
             if action["t"] == "OBJ" and object_error:
-                return web.json_response({
-                    "code": 0, "data": {"result": {"out": [{"m": "r", "r": 1}]}},
-                })
-            response = fake.call_app_action(
-                action, redact_response=action["t"] == "OBJ",
-            )
+                response = {"out": [{"m": "r", "r": 1}]}
+            else:
+                response = fake.call_app_action(
+                    action, redact_response=action["t"] == "OBJ",
+                )
+            if action["t"] == "OBJ" and map_changed:
+                # A device-side edit between the primary and fallback reads
+                # changes the verified generation while retaining the slot.
+                replacement = _FakeAppMapCloud({**native_payload(), "name": "edited"})
+                fake.payload_text = replacement.payload_text
+                fake.payload_hash = replacement.payload_hash
             return web.json_response({"code": 0, "data": {"result": response}})
 
         async with server(monkeypatch, handler), ClientSession() as session:
@@ -368,12 +379,16 @@ def test_native_async_app_only_uses_verified_download_and_cache(
                             camera_view, image_cached=True,
                             refreshed_at=None, last_error=None,
                         )
-                        if object_error:
+                        if map_changed:
+                            assert attributes["app_map_object_count"] is None
+                            assert attributes["app_map_object_error"] is None
+                            assert attributes["app_map_objects"] is None
+                        elif object_error:
                             assert attributes["app_map_object_error"]
                         else:
                             assert attributes["app_map_object_count"] == 1
                             assert len(attributes["app_map_objects"]) == 1
-                assert "MAPD" not in [action["t"] for action in fake.calls]
+                assert ("MAPD" in [action["t"] for action in fake.calls]) is map_changed
                 assert all(action["m"] == "g" for action in fake.calls)
             finally:
                 await client.async_close()
