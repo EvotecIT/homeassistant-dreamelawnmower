@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from threading import Event
 from types import SimpleNamespace
@@ -187,3 +188,41 @@ def test_missing_app_geometry_cannot_make_batch_metadata_available():
     }
     client._sync_get_app_maps = lambda **kwargs: {}
     assert client._sync_get_vector_map_details()["available"] is False
+
+
+def test_batch_runtime_trail_expires_consistently_across_views(monkeypatch):
+    client = tracked_client()
+    client._sync_get_vector_map_batch_data = _batch_payload
+    client.update_runtime_live_tracking(None, active=False, map_index=0)
+    observed_at = datetime.now(UTC)
+    publish(
+        client, at=observed_at, hex="fresh-batch", candidate_runtime_pose_x=50,
+        candidate_runtime_pose_y=40,
+        candidate_runtime_track_segments=(((10, 20), (30, 40), (50, 40)),),
+    )
+    fresh = client._sync_refresh_vector_map_view()
+    assert fresh.details["runtime_position_valid"] is True
+    assert fresh.details["runtime_track_point_count"] == 3
+    scene = client._sync_get_mowing_map_scene(
+        map_index=0, style=map_render_style(), label_scale=1,
+    )
+    assert client.mowing_map_runtime_overlay(scene)["trail"]
+
+    class AgedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return observed_at + timedelta(seconds=91)
+
+    package = client._mowing_map_scene_from_batch.__module__.rsplit(".", 1)[0]
+    for name in ("position_tracking", "mowing_map"):
+        monkeypatch.setattr(import_module(f"{package}.{name}"), "datetime", AgedClock)
+    assert client.mowing_map_runtime_overlay(scene)["trail"] == []
+    aged = client._sync_refresh_vector_map_view()
+    details = client._sync_get_vector_map_details()
+    for result in (aged.details, details):
+        assert result["position_status"] == "last_known"
+        assert result["runtime_position_valid"] is False
+        assert result.get("runtime_track_point_count", 0) == 0
+        # Saved batch M_PATH history is independent of the runtime trail.
+        assert result["mow_path_point_count"] == fresh.details["mow_path_point_count"]
+    assert aged.image_png is not None

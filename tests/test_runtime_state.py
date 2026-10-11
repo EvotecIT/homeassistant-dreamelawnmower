@@ -70,6 +70,7 @@ def test_async_status_blob_preserves_realtime_precedence_and_cloud_timestamp(
         _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
     client._device = device
@@ -171,6 +172,7 @@ def test_fresh_legacy_task_does_not_reuse_retained_idle_heartbeat(task_code, act
         last_realtime_message=None,
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = _snapshot().descriptor
@@ -329,6 +331,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
@@ -427,6 +430,7 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
@@ -553,6 +557,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
     client._device = device
@@ -697,6 +702,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
         },
     )
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor

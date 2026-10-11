@@ -162,7 +162,7 @@ def geometry_map_view(
     runtime_pose_y = getattr(runtime_blob, "candidate_runtime_pose_y", None)
     runtime_position = (position.x, position.y) if position is not None else None
     runtime_position_valid = position is not None and position.status == "current"
-    if source == "app_action_map" and not runtime_position_valid:
+    if not runtime_position_valid:
         runtime_track_segments = ()
     runtime_track_point_count = sum(len(segment) for segment in runtime_track_segments)
     summary = apply_position_metadata(
