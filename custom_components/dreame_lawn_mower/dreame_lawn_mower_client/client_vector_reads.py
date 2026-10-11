@@ -32,6 +32,7 @@ async def async_mowing_scene(
 ) -> MowingMapScene:
     """Own native geometry retrieval and drain any started rendering worker."""
     async def read(cloud: DreameCloudSession) -> MowingMapScene:
+        generation = client._runtime_geometry_generation
         data = await cloud.async_get_batch_device_datas(client._descriptor.did, [])
         app_maps = None
         if await _needs_app_geometry(data, map_index, background=True):
@@ -42,6 +43,7 @@ async def async_mowing_scene(
             lambda: client._mowing_map_scene_from_batch(
                 data, map_index=map_index, style=style, label_scale=label_scale,
                 app_maps=app_maps,
+                geometry_generation=generation,
             ),
             Event(),
         )
@@ -77,6 +79,7 @@ async def _needs_app_geometry(
 
 async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
     async def read(cloud: DreameCloudSession) -> dict[str, Any]:
+        generation = client._runtime_geometry_generation
         try:
             data = await cloud.async_get_batch_device_datas(client._descriptor.did, [])
         except DreameLawnMowerConnectionError as err:
@@ -97,6 +100,7 @@ async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
             client,
             lambda _device: vector_map_details(
                 data, hint, client=client, app_maps=app_maps,
+                geometry_generation=generation,
             ),
             refresh=False,
         )
@@ -112,6 +116,7 @@ async def async_vector_view(
     style: MapRenderStyle | None,
 ) -> DreameLawnMowerMapView:
     async def read(cloud: DreameCloudSession) -> DreameLawnMowerMapView:
+        generation = client._runtime_geometry_generation
         try:
             data = await cloud.async_get_batch_device_datas(client._descriptor.did, [])
         except DreameLawnMowerConnectionError as err:
@@ -142,6 +147,7 @@ async def async_vector_view(
                 label_scale=label_scale,
                 style=style,
                 app_maps=app_maps,
+                geometry_generation=generation,
             ),
             refresh=False,
         )

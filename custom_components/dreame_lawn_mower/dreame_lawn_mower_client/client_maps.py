@@ -169,6 +169,7 @@ class _DreameLawnMowerClientMapsMixin(
 
     def _sync_get_vector_map_details(self) -> dict[str, Any]:
         """Return parsed batch vector-map details without rendering an image."""
+        generation = self._runtime_geometry_generation
         try:
             batch_data = self._sync_get_vector_map_batch_data()
         except DreameLawnMowerConnectionError as err:
@@ -190,7 +191,10 @@ class _DreameLawnMowerClientMapsMixin(
                     "available": False, "source": "batch_vector_map", "error": str(err),
                 }
             hint = app_maps.get("current_map_index")
-        return vector_map_details(batch_data, hint, client=self, app_maps=app_maps)
+        return vector_map_details(
+            batch_data, hint, client=self, app_maps=app_maps,
+            geometry_generation=generation,
+        )
 
     def _sync_refresh_map_summary(
         self,
@@ -258,6 +262,7 @@ class _DreameLawnMowerClientMapsMixin(
         current_map_index: int | None = None,
         style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
+        generation = self._runtime_geometry_generation
         source = "batch_vector_map"
         try:
             batch_data = self._sync_get_vector_map_batch_data()
@@ -286,7 +291,7 @@ class _DreameLawnMowerClientMapsMixin(
                 hint = app_maps.get("current_map_index")
         return vector_map_view(
             self, batch_data, label_scale=label_scale, style=style,
-            current_map_index=hint, app_maps=app_maps,
+            current_map_index=hint, app_maps=app_maps, geometry_generation=generation,
         )
 
     def _sync_refresh_legacy_map_view(

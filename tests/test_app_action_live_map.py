@@ -6,7 +6,9 @@ import asyncio
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from io import BytesIO
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -306,6 +308,105 @@ def test_replaced_app_geometry_and_new_task_cannot_reuse_an_old_trail(reader):
     # Identity retirement leaves history owned by B, even if cached A is revisited.
     retained = client._sync_refresh_vector_map_view()
     assert retained.details["position_status"] == "last_known"
+
+
+@pytest.mark.parametrize("reader,native,retired", [
+    ("scene", False, False), ("scene", True, False), ("scene", True, True),
+    ("camera", False, False), ("camera", True, False), ("details", True, False),
+])
+def test_older_inflight_read_cannot_retire_a_newer_camera_frame(
+    monkeypatch, reader, native, retired,
+):
+    client = tracked_client()
+    initial = client._sync_refresh_vector_map_view()
+    assert initial.details["runtime_track_point_count"] == 3
+    entered, release = Event(), Event()
+    scene_owner = import_module(client._mowing_map_scene_from_batch.__module__)
+    vector_owner = import_module(f"{scene_owner.__package__}.client_vector_map_view")
+    read_owner = import_module(f"{scene_owner.__package__}.client_vector_reads")
+    owner = scene_owner if reader == "scene" else vector_owner
+    target = "_mowing_scene_geometry" if reader == "scene" else "parse_app_map_geometry"
+    original = getattr(owner, target)
+
+    def paused(*args, **kwargs):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(owner, target, paused)
+
+    async def scenario():
+        # Load the executor before starting the controlled interleaving.
+        await asyncio.to_thread(lambda: None)
+
+        async def batch(*args):
+            return {}
+
+        async def app_maps(**kwargs):
+            return native_maps()
+
+        async def cloud_read(read):
+            return await read(SimpleNamespace(async_get_batch_device_datas=batch))
+
+        async def state_read(_client, read, **kwargs):
+            return await asyncio.to_thread(read, None)
+
+        async def map_hint(_client):
+            return 0
+
+        monkeypatch.setattr(read_owner, "async_read_device_state", state_read)
+        monkeypatch.setattr(read_owner, "_map_hint", map_hint)
+        client._async_cloud_read = cloud_read
+        client.async_get_app_maps = app_maps
+        if reader == "scene":
+            options = dict(map_index=0, style=map_render_style(), label_scale=1)
+            read = client.async_get_mowing_map_scene if native else (
+                client._sync_get_mowing_map_scene
+            )
+        elif reader == "camera":
+            options = dict(current_map_index=0)
+            read = client.async_refresh_vector_map_view if native else (
+                client._sync_refresh_vector_map_view
+            )
+        else:
+            options = {}
+            read = client.async_get_vector_map_details
+        task = asyncio.create_task(
+            read(**options) if native else asyncio.to_thread(read, **options)
+        )
+        try:
+            if not await asyncio.to_thread(entered.wait, 5):
+                if task.done():
+                    await task
+                pytest.fail("The older scene did not reach its geometry observation")
+            replacement = native_maps()
+            replacement["maps"][0]["payload"]["map"][0]["data"][1][0] = 1100
+            client._sync_get_app_maps = lambda **kwargs: replacement
+            client._sync_refresh_vector_map_view()
+            publish(client, hex="newer-camera", candidate_runtime_track_segments=(
+                ((100, 100), (200, 100)),
+            ))
+            assert client._sync_refresh_vector_map_view().details[
+                "runtime_track_point_count"
+            ] == 2
+            if retired:
+                client.runtime_map_identity_expires_at = None
+            release.set()
+            old_result = await asyncio.wait_for(task, 5)
+            if reader == "scene":
+                assert client.mowing_map_runtime_overlay(old_result)["position"] is None
+            current = client._sync_refresh_vector_map_view()
+            if retired:
+                assert current.details["position_status"] == "last_known"
+            else:
+                assert current.details["runtime_track_point_count"] == 2
+                assert current.details["runtime_position_valid"] is True
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("object_error", [False, True])

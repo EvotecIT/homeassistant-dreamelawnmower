@@ -9,20 +9,21 @@ from .position_tracking import MowerPosition, map_position_identity, snapshot_is
 from .vector_map import position_within_vector_map
 
 if TYPE_CHECKING:
-    from .client_maps import _DreameLawnMowerClientMapsMixin
+    from .client_tracking import _DreameLawnMowerClientTrackingMixin
     from .vector_map import DreameLawnMowerVectorMap
 
 
 def vector_map_position(
-    client: _DreameLawnMowerClientMapsMixin,
+    client: _DreameLawnMowerClientTrackingMixin,
     vector_map: DreameLawnMowerVectorMap,
+    *, expected_generation: int | None = None,
 ) -> MowerPosition | None:
     """Resolve the same geometry-scoped evidence as the interactive overlay."""
-    return client._position_tracker.resolve(
+    return client._observe_runtime_geometry(
         map_index=vector_map.map_index,
         geometry=map_position_identity(vector_map),
         contains=lambda x, y: position_within_vector_map(vector_map, (x, y)),
-        snapshot=client._latest_snapshot,
+        expected_generation=expected_generation,
     )
 
 

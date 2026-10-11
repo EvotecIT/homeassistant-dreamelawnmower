@@ -36,6 +36,7 @@ def vector_map_details(
     *,
     client: _DreameLawnMowerClientMapsMixin | None = None,
     app_maps: Mapping[str, Any] | None = None,
+    geometry_generation: int | None = None,
 ) -> dict[str, Any]:
     vector_map = parse_batch_vector_map(batch_data, current_map_index=current_map_index)
     source = "batch_vector_map"
@@ -51,6 +52,7 @@ def vector_map_details(
     details = (
         dict(geometry_map_view(
             client, vector_map, source=source, render_image=False, app_maps=app_maps,
+            geometry_generation=geometry_generation,
         ).details or {}) if client is not None else vector_map_to_details(vector_map)
     )
     if source == "app_action_map":
@@ -78,6 +80,7 @@ def vector_map_view(
     label_scale: float,
     style: MapRenderStyle | None,
     app_maps: Mapping[str, Any] | None = None,
+    geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Decode and render while the caller owns the device state lock."""
     source = "batch_vector_map"
@@ -101,6 +104,7 @@ def vector_map_view(
     return geometry_map_view(
         client, vector_map, source=source, label_scale=label_scale, style=style,
         app_maps=app_maps,
+        geometry_generation=geometry_generation,
     )
 
 
@@ -113,11 +117,11 @@ def geometry_map_view(
     style: MapRenderStyle | None = None,
     render_image: bool = True,
     app_maps: Mapping[str, Any] | None = None,
+    geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Share position validation, metrics and rendering across map transports."""
-    client._expire_runtime_live_tracking()
-    client._bind_runtime_live_geometry(
-        vector_map.map_index, map_position_identity(vector_map),
+    position = vector_map_position(
+        client, vector_map, expected_generation=geometry_generation,
     )
     runtime_blob = client._latest_runtime_status_blob
     if client._runtime_session_active is False:
@@ -138,7 +142,10 @@ def geometry_map_view(
         # validated runtime segments below can establish a live mowing trail.
         details["has_live_path"] = False
     details["render_rotation"] = style.rotation if style else 0
-    runtime_context_matches = client._runtime_live_map_index == vector_map.map_index
+    runtime_context_matches = (
+        client._runtime_live_map_index == vector_map.map_index
+        and client._runtime_live_geometry_identity == map_position_identity(vector_map)
+    )
     runtime_track_segments = (
         filter_runtime_track_segments(
             vector_map,
@@ -149,7 +156,6 @@ def geometry_map_view(
     )
     runtime_pose_x = getattr(runtime_blob, "candidate_runtime_pose_x", None)
     runtime_pose_y = getattr(runtime_blob, "candidate_runtime_pose_y", None)
-    position = vector_map_position(client, vector_map)
     runtime_position = (position.x, position.y) if position is not None else None
     runtime_position_valid = position is not None and position.status == "current"
     if source == "app_action_map" and not runtime_position_valid:

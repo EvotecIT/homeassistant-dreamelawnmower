@@ -6,11 +6,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from .app_map_geometry import parse_app_map_geometry
+from .client_position import vector_map_position
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
-from .position_tracking import map_position_identity, snapshot_is_docked
-from .vector_map import parse_batch_vector_map, position_within_vector_map
+from .position_tracking import snapshot_is_docked
+from .vector_map import parse_batch_vector_map
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
@@ -61,6 +62,7 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
     def _sync_get_mowing_map_scene(
         self, *, map_index: int, style: MapRenderStyle, label_scale: float
     ) -> MowingMapScene:
+        generation = self._runtime_geometry_generation
         batch = self._sync_get_vector_map_batch_data()
         app_maps = None
         geometry = bounded_mowing_map_batch(batch)
@@ -71,27 +73,28 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         return self._mowing_map_scene_from_batch(
             batch, map_index=map_index, style=style, label_scale=label_scale,
             app_maps=app_maps,
+            geometry_generation=generation,
         )
 
     def _mowing_map_scene_from_batch(
         self, batch: Mapping[str, Any] | None, *, map_index: int,
         style: MapRenderStyle, label_scale: float,
+        geometry_generation: int,
         app_maps: Mapping[str, Any] | None = None,
     ) -> MowingMapScene:
         """Observe a fresh frame before rendering its cacheable background."""
         vector_map = _mowing_scene_geometry(batch, map_index, app_maps)
-        geometry = map_position_identity(vector_map)
-        self._expire_runtime_live_tracking()
-        self._bind_runtime_live_geometry(vector_map.map_index, geometry)
-        self._position_tracker.resolve(
-            map_index=vector_map.map_index, geometry=geometry,
-            contains=lambda x, y: position_within_vector_map(vector_map, (x, y)),
-            snapshot=self._latest_snapshot,
+        vector_map_position(
+            self, vector_map, expected_generation=geometry_generation,
         )
         return build_mowing_map_scene(vector_map, style=style, label_scale=label_scale)
 
     def mowing_map_runtime_overlay(self, scene: MowingMapScene) -> dict[str, Any]:
         """Read the existing session cache without requesting mower operations."""
+        with self._runtime_geometry_lock:
+            return self._mowing_map_runtime_overlay(scene)
+
+    def _mowing_map_runtime_overlay(self, scene: MowingMapScene) -> dict[str, Any]:
         self._expire_runtime_live_tracking()
         if self._runtime_live_geometry_identity not in (None, scene.position_identity):
             return mowing_map_overlay(

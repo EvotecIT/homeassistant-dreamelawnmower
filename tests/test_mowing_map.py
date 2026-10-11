@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from threading import RLock
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +40,12 @@ class _TrackingClient(
     """Exercise the actual trail binding with isolated position evidence."""
 
     _runtime_live_geometry_identity = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._runtime_geometry_lock = RLock()
+        self._runtime_geometry_revision = 0
+        self._observed_map_geometry = None
 
 
 def garden():
