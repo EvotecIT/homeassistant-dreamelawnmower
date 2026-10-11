@@ -113,7 +113,7 @@ def test_input_budget_precedes_map_parsing_and_ignores_unneeded_history(monkeypa
 def test_sync_scene_bounds_the_geometry_probe_before_decoding(monkeypatch):
     monkeypatch.setattr(client_mowing_map, "MAX_SCENE_INPUT_UNITS", 10)
     monkeypatch.setattr(
-        client_mowing_map, "parse_batch_vector_map",
+        client_mowing_map, "_parse_drawable_batch_vector_map",
         lambda *args, **kwargs: pytest.fail("Oversized input reached the parser"),
     )
     client = _TrackingClient(

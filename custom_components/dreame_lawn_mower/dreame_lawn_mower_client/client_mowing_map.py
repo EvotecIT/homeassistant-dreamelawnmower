@@ -11,7 +11,7 @@ from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
-from .vector_map import parse_batch_vector_map
+from .vector_map import _parse_drawable_batch_vector_map
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
@@ -66,7 +66,9 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         batch = self._sync_get_vector_map_batch_data()
         app_maps = None
         geometry = bounded_mowing_map_batch(batch)
-        if parse_batch_vector_map(geometry, current_map_index=map_index) is None:
+        if _parse_drawable_batch_vector_map(
+            geometry, current_map_index=map_index,
+        ) is None:
             app_maps = self._sync_get_app_maps(
                 include_payload=True, include_objects=False,
             )
@@ -149,7 +151,7 @@ def _mowing_scene_geometry(
 ) -> DreameLawnMowerVectorMap:
     """Select one bounded verified frame for both pure and observing builders."""
     geometry = bounded_mowing_map_batch(batch)
-    vector_map = parse_batch_vector_map(geometry, current_map_index=map_index)
+    vector_map = _parse_drawable_batch_vector_map(geometry, current_map_index=map_index)
     if vector_map is None:
         vector_map = parse_app_map_geometry(app_maps, map_index)
     if vector_map is None:

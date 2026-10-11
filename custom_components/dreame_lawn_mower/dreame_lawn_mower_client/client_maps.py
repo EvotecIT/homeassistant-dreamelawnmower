@@ -81,7 +81,7 @@ from .point_cloud_diagnostics import (
     value_shape,
 )
 from .point_cloud_trace import record_point_cloud_stage
-from .vector_map import parse_batch_vector_map
+from .vector_map import _parse_drawable_batch_vector_map
 
 if TYPE_CHECKING:
     from threading import Lock
@@ -181,7 +181,7 @@ class _DreameLawnMowerClientMapsMixin(
 
         hint = self._sync_get_current_app_map_index()
         app_maps = None
-        if parse_batch_vector_map(batch_data, current_map_index=hint) is None:
+        if _parse_drawable_batch_vector_map(batch_data, current_map_index=hint) is None:
             try:
                 app_maps = self._sync_get_app_maps(
                     include_payload=True, include_objects=False,
@@ -280,7 +280,7 @@ class _DreameLawnMowerClientMapsMixin(
         hint = (current_map_index if current_map_index is not None
                 else self._sync_get_current_app_map_index())
         app_maps = None
-        if parse_batch_vector_map(batch_data, current_map_index=hint) is None:
+        if _parse_drawable_batch_vector_map(batch_data, current_map_index=hint) is None:
             try:
                 app_maps = self._sync_get_app_maps(
                     include_payload=True, include_objects=False,

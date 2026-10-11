@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
-from threading import Event
+from threading import Event, RLock
 from typing import TYPE_CHECKING, Any
 
 from .app_protocol import (
@@ -164,6 +164,7 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
         ) -> DreameLawnMowerMapView: ...
 
     _latest_snapshot: DreameLawnMowerSnapshot | None
+    _runtime_geometry_lock: RLock
     _latest_cloud_device_info: Mapping[str, Any] | None
     _cloud_device_info_refreshed_at: float
 
@@ -355,7 +356,8 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
                     observed_at=observed_at,
                     active_state_observed_at=active_state_observed_at,
                 )
-        self._latest_snapshot = snapshot
+        with self._runtime_geometry_lock:
+            self._latest_snapshot = snapshot
         return snapshot
 
     def _sync_get_remote_control_support(

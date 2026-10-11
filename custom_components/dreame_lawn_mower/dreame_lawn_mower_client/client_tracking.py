@@ -44,12 +44,13 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     ) -> MowerPosition | None:
         """Commit one current observation atomically, rejecting overtaken reads."""
         with self._runtime_geometry_lock:
+            frame = (map_index, geometry)
             if (
                 expected_generation is not None
                 and expected_generation != self._runtime_geometry_revision
+                and frame != self._observed_map_geometry
             ):
                 return None
-            frame = (map_index, geometry)
             if frame != self._observed_map_geometry:
                 self._observed_map_geometry = frame
                 self._runtime_geometry_revision += 1

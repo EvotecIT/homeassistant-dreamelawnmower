@@ -14,7 +14,7 @@ from .client_state_reads import async_read_device_state
 from .client_vector_map_view import vector_map_details, vector_map_view
 from .exceptions import DreameLawnMowerConnectionError
 from .models import DreameLawnMowerMapView
-from .vector_map import parse_batch_vector_map
+from .vector_map import _parse_drawable_batch_vector_map
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -69,7 +69,7 @@ async def _needs_app_geometry(
 ) -> bool:
     """Keep device-sized map parsing off the event loop, draining on cancel."""
     return await _run_state_worker(
-        lambda: parse_batch_vector_map(
+        lambda: _parse_drawable_batch_vector_map(
             bounded_mowing_map_batch(data) if background else data,
             current_map_index=map_index,
         ) is None,

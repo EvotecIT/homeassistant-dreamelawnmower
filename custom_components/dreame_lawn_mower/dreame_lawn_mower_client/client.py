@@ -744,7 +744,8 @@ class DreameLawnMowerClient(
             cloud_device_info = self._latest_cloud_device_info
         if isinstance(cloud_device_info, Mapping):
             snapshot = snapshot_with_cloud_presence(snapshot, cloud_device_info)
-        self._latest_snapshot = snapshot
+        with self._runtime_geometry_lock:
+            self._latest_snapshot = snapshot
         return snapshot
 
     @_serialized_task_control

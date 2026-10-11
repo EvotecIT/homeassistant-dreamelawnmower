@@ -137,6 +137,18 @@ class DreameLawnMowerVectorMap:
     )
 
 
+def _parse_drawable_batch_vector_map(
+    batch_data: Mapping[str, Any] | None,
+    *,
+    current_map_index: int | None = None,
+) -> DreameLawnMowerVectorMap | None:
+    """Select geometry usable by the renderer, preserving metadata-only parsing."""
+    vector_map = parse_batch_vector_map(
+        batch_data, current_map_index=current_map_index,
+    )
+    return vector_map if vector_map is not None and vector_map.boundary else None
+
+
 def parse_batch_vector_map(
     batch_data: Mapping[str, Any] | None,
     *,
