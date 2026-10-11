@@ -19,6 +19,14 @@ from .vector_map import (
 MAX_APP_MAP_POINTS = 50000
 
 
+def _has_polygon_area(points: tuple[tuple[int, int], ...]) -> bool:
+    """Require a lawn surface while accepting either native winding order."""
+    return sum(
+        ax * by - bx * ay
+        for (ax, ay), (bx, by) in zip(points, (*points[1:], points[0]), strict=True)
+    ) != 0
+
+
 def parse_app_map_geometry(
     app_maps: Mapping[str, Any] | None, map_index: int | None,
 ) -> DreameLawnMowerVectorMap | None:
@@ -167,7 +175,9 @@ def _geometry(payload: Mapping[str, Any], map_index: int) -> DreameLawnMowerVect
                 else _optional_points(item.get("data"), budget)
             )
             pathway = required and _is_app_map_pathway(item)
-            complete = len(points) >= 2 if pathway else len(set(points)) >= 3
+            complete = len(points) >= 2 if pathway else (
+                len(set(points)) >= 3 and _has_polygon_area(points)
+            )
             if not complete:
                 if required:
                     raise ValueError("Incomplete app-map shape.")

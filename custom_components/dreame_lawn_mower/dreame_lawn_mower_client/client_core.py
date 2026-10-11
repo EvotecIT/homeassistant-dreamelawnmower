@@ -915,9 +915,26 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
         map_view: DreameLawnMowerMapView,
         app_view: DreameLawnMowerMapView,
     ) -> DreameLawnMowerMapView:
-        if map_view.app_maps is not None or app_view.app_maps is None:
+        if app_view.app_maps is None:
             return map_view
-        return replace(map_view, app_maps=app_view.app_maps)
+        if map_view.app_maps is None:
+            return replace(map_view, app_maps=app_view.app_maps)
+        metadata = map_view.app_maps
+        object_keys = ("objects", "object_count", "object_error")
+        if (
+            map_view.source == "app_action_map"
+            and type(metadata.get("current_map_index")) is int
+            and metadata.get("current_map_index")
+            == app_view.app_maps.get("current_map_index")
+            and all(metadata.get(key) is None for key in object_keys)
+        ):
+            # Geometry-only reads omit objects. Retain the primary camera's
+            # sanitized result without replacing a newer result or map slot.
+            return replace(map_view, app_maps={
+                **metadata,
+                **{key: app_view.app_maps.get(key) for key in object_keys},
+            })
+        return map_view
 
     @staticmethod
     def _with_runtime_position_details(

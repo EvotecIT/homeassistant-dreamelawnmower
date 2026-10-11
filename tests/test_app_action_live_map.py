@@ -27,6 +27,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_protocol i
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
+from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 from custom_components.dreame_lawn_mower.map_cache import DreameLawnMowerMapCameraCache
 from custom_components.dreame_lawn_mower.sensor_map_data import (
     _available_vector_map_count,
@@ -281,7 +282,10 @@ def test_replaced_app_geometry_and_new_task_cannot_reuse_an_old_trail():
     assert client._sync_get_vector_map_details()["runtime_track_point_count"] == 2
 
 
-def test_native_async_app_only_uses_verified_download_and_cache(monkeypatch):
+@pytest.mark.parametrize("object_error", [False, True])
+def test_native_async_app_only_uses_verified_download_and_cache(
+    monkeypatch, object_error,
+):
     strings = cloud_strings("dreame")
     fake = _FakeAppMapCloud(native_payload())
 
@@ -293,6 +297,10 @@ def test_native_async_app_only_uses_verified_download_and_cache(monkeypatch):
             if request.path == "/" + "/".join(strings[i] for i in (23, 26, 44)):
                 return web.json_response({"code": 0, "data": {}})
             (action,) = body["data"]["params"]["in"]
+            if action["t"] == "OBJ" and object_error:
+                return web.json_response({
+                    "code": 0, "data": {"result": {"out": [{"m": "r", "r": 1}]}},
+                })
             response = fake.call_app_action(
                 action, redact_response=action["t"] == "OBJ",
             )
@@ -355,6 +363,16 @@ def test_native_async_app_only_uses_verified_download_and_cache(monkeypatch):
                     assert camera_view.details["runtime_track_point_count"] == 3
                     assert jpeg.startswith(b"\xff\xd8")
                     assert not camera._map_cache.last_image_is_placeholder
+                    if camera_type is DreameLawnMowerMapCamera:
+                        attributes = map_camera_attributes(
+                            camera_view, image_cached=True,
+                            refreshed_at=None, last_error=None,
+                        )
+                        if object_error:
+                            assert attributes["app_map_object_error"]
+                        else:
+                            assert attributes["app_map_object_count"] == 1
+                            assert len(attributes["app_map_objects"]) == 1
                 assert "MAPD" not in [action["t"] for action in fake.calls]
                 assert all(action["m"] == "g" for action in fake.calls)
             finally:

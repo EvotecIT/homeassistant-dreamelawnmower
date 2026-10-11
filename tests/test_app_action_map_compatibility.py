@@ -19,6 +19,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerMapView,
 )
+from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 from custom_components.dreame_lawn_mower.sensor_map_data import (
     current_app_map_attributes,
 )
@@ -55,6 +56,91 @@ def test_duplicate_explicit_lawn_ids_cannot_establish_a_position_frame():
     payload = maps["maps"][0]["payload"]
     payload["map"].append(deepcopy(payload["map"][0]))
     assert app_map_geometry.parse_app_map_geometry(maps, 0) is None
+
+
+@pytest.mark.parametrize("valid_sibling", [False, True])
+def test_zero_area_lawn_cannot_establish_a_runtime_frame(valid_sibling):
+    maps = native_maps()
+    lawns = maps["maps"][0]["payload"]["map"]
+    invalid = {"id": 2, "data": [[0, 0], [500, 500], [1000, 1000]]}
+    if valid_sibling:
+        lawns.append(invalid)
+    else:
+        lawns[0] = invalid
+    assert app_map_geometry.parse_app_map_geometry(maps, 0) is None
+    client = tracked_client()
+    client._sync_get_app_maps = lambda **kwargs: maps
+    view = client._sync_refresh_vector_map_view(current_map_index=0)
+    assert not view.available
+    assert not (view.details or {}).get("runtime_position_valid")
+
+
+def test_zero_area_optional_spot_cannot_enlarge_the_runtime_frame():
+    maps = native_maps()
+    maps["maps"][0]["payload"]["spot"] = [
+        {"id": 9, "data": [[0, 0], [10000, 10000], [20000, 20000]]},
+    ]
+    geometry = app_map_geometry.parse_app_map_geometry(maps, 0)
+    assert geometry is not None
+    assert not geometry.spot_areas
+    assert geometry.boundary.x2 == 1000 and geometry.boundary.y2 == 500
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_lawn_winding_and_open_two_point_pathways_remain_supported(reverse):
+    maps = native_maps()
+    lawns = maps["maps"][0]["payload"]["map"]
+    if reverse:
+        lawns[0]["data"].reverse()
+    lawns[1]["data"] = [[800, 100], [900, 200]]
+    geometry = app_map_geometry.parse_app_map_geometry(maps, 0)
+    assert geometry is not None
+    assert len(geometry.zones) == 1 and len(geometry.paths[0].points) == 2
+
+
+@pytest.mark.parametrize("object_error", [None, "object lookup failed"])
+def test_sync_live_camera_preserves_primary_object_metadata(object_error):
+    client = tracked_client()
+
+    def maps_with_objects(**kwargs):
+        maps = native_maps()
+        if kwargs.get("include_objects", True):
+            maps["objects"] = {
+                "object_count": 1, "error": object_error,
+                "objects": [{"extension": "bin", "url_present": False,
+                             "name": "private-name", "url": "private-url"}],
+            }
+        return maps
+
+    client._sync_get_app_maps = maps_with_objects
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+    assert view.details["runtime_track_point_count"] == 3
+    attributes = map_camera_attributes(
+        view, image_cached=False, refreshed_at=None, last_error=None,
+    )
+    assert attributes["app_map_object_count"] == 1
+    assert attributes["app_map_object_error"] == object_error
+    assert attributes["app_map_objects"] == [
+        {"extension": "bin", "url_present": False},
+    ]
+
+
+@pytest.mark.parametrize("metadata", [
+    {"current_map_index": 1},
+    {"current_map_index": 0, "objects": [], "object_count": 0},
+    {"current_map_index": 0, "object_error": "newer lookup failed"},
+])
+def test_camera_does_not_replace_newer_or_different_map_object_metadata(metadata):
+    client = tracked_client()
+    runtime = DreameLawnMowerMapView(source="app_action_map", app_maps=metadata)
+    primary = DreameLawnMowerMapView(
+        source="app_action_map", app_maps={
+            "current_map_index": 0, "objects": [{"extension": "bin"}],
+            "object_count": 1, "object_error": None,
+        },
+    )
+    composed = client._with_fallback_app_maps(runtime, primary)
+    assert composed.app_maps == metadata
 
 
 @pytest.mark.parametrize("key,record", [
