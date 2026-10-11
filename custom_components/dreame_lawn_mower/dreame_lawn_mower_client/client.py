@@ -586,6 +586,7 @@ class DreameLawnMowerClient(
         self._position_tracker = _MowerPositionTracker()
         self._runtime_geometry_lock = _threading.RLock()
         self._runtime_geometry_revision = 0
+        self._runtime_geometry_map_index: int | None = None
         self._observed_map_geometry: tuple[int, str] | None = None
         self._runtime_live_track_segments: tuple[
             tuple[tuple[int, int], ...],

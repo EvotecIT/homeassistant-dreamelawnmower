@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from threading import Event
@@ -20,7 +21,7 @@ from .test_app_action_live_map import (
 from .test_vector_map import _batch_payload
 
 
-def _native_reads(monkeypatch, client, batch, maps):
+def _native_reads(monkeypatch, client, batch, maps, *, map_hint=lambda: 0):
     owner = import_module(
         f"{client._mowing_map_scene_from_batch.__module__.rsplit('.', 1)[0]}"
         ".client_vector_reads"
@@ -39,7 +40,7 @@ def _native_reads(monkeypatch, client, batch, maps):
         return await asyncio.to_thread(read, None)
 
     async def hint(_client):
-        return 0
+        return map_hint()
 
     client._async_cloud_read = cloud_read
     client.async_get_app_maps = app_maps
@@ -131,11 +132,22 @@ def test_view_keeps_position_telemetry_and_trail_from_one_observation(
 
 @pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize("reader", ["camera", "details", "scene"])
-def test_batch_metadata_without_boundary_uses_verified_app_geometry(
-    monkeypatch, native, reader,
+@pytest.mark.parametrize(
+    "metadata_kind", ["no_boundary", "boundary_only", "empty_shapes"],
+)
+def test_batch_metadata_uses_verified_app_geometry(
+    monkeypatch, native, reader, metadata_kind,
 ):
     client = tracked_client()
-    batch = {"MAP.0": json.dumps([json.dumps({"mapIndex": 0, "name": "Metadata"})])}
+    metadata = {"mapIndex": 0, "name": "Metadata"}
+    if metadata_kind != "no_boundary":
+        metadata["boundary"] = {"x1": 0, "y1": 0, "x2": 1000, "y2": 500}
+    if metadata_kind == "empty_shapes":
+        for field in ("mowingAreas", "paths", "spotAreas"):
+            metadata[field] = {"dataType": "Map", "value": [[1, {"path": []}]]}
+    batch = {"MAP.0": json.dumps([json.dumps(metadata)])}
+    if metadata_kind == "empty_shapes":
+        batch["M_PATH.0"] = "[[1,1]]"
     client._sync_get_vector_map_batch_data = lambda: batch
     _native_reads(monkeypatch, client, lambda: batch, native_maps)
     options = {}
@@ -179,6 +191,33 @@ def test_drawable_batch_stays_preferred():
 
     client._sync_get_app_maps = unexpected
     assert client._sync_refresh_vector_map_view().source == "batch_vector_map"
+
+
+@pytest.mark.parametrize("shape", ["mowingAreas", "paths", "spotAreas", "M_PATH"])
+def test_individual_drawable_batch_shapes_keep_the_existing_source(shape):
+    client = tracked_client()
+    full_batch = _batch_payload()
+    raw_map = "".join(full_batch[f"MAP.{index}"] for index in range(3))
+    entries = json.loads(raw_map[:int(full_batch["MAP.info"])])
+    record = json.loads(entries[0])
+    for field in ("mowingAreas", "paths", "spotAreas"):
+        if field != shape:
+            record.pop(field, None)
+    batch = {"MAP.0": json.dumps([json.dumps(record)])}
+    if shape == "M_PATH":
+        batch.update({
+            key: value for key, value in full_batch.items() if key.startswith("M_PATH")
+        })
+    client._sync_get_vector_map_batch_data = lambda: batch
+
+    def unexpected(**kwargs):
+        pytest.fail("Usable partial batch geometry must retain its existing source")
+
+    client._sync_get_app_maps = unexpected
+    result = client._sync_refresh_vector_map_view()
+    assert result.source == "batch_vector_map"
+    assert result.summary.available
+    assert result.image_png is not None
 
 
 def test_missing_app_geometry_cannot_make_batch_metadata_available():
@@ -226,3 +265,96 @@ def test_batch_runtime_trail_expires_consistently_across_views(monkeypatch):
         # Saved batch M_PATH history is independent of the runtime trail.
         assert result["mow_path_point_count"] == fresh.details["mow_path_point_count"]
     assert aged.image_png is not None
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("reader", ["camera", "details", "scene"])
+def test_map_switch_fences_old_read_before_new_geometry_arrives(
+    monkeypatch, native, reader,
+):
+    client = tracked_client()
+    maps = native_maps()
+    client._sync_get_app_maps = lambda **kwargs: maps
+    client._sync_get_current_app_map_index = lambda: maps["current_map_index"]
+    _native_reads(
+        monkeypatch, client, lambda: {}, lambda: maps,
+        map_hint=lambda: maps["current_map_index"],
+    )
+    package = client._mowing_map_scene_from_batch.__module__.rsplit(".", 1)[0]
+    owner = import_module(f"{package}.client_mowing_map" if reader == "scene" else (
+        f"{package}.client_vector_map_view"
+    ))
+    target = "_mowing_scene_geometry" if reader == "scene" else "parse_app_map_geometry"
+    parse = getattr(owner, target)
+    entered = (Event(), Event())
+    release = (Event(), Event())
+
+    def pause(*args, **kwargs):
+        app_maps = args[2] if reader == "scene" else args[0]
+        index = app_maps["current_map_index"]
+        entered[index].set()
+        assert release[index].wait(10)
+        return parse(*args, **kwargs)
+
+    monkeypatch.setattr(owner, target, pause)
+
+    async def read(index):
+        if reader == "scene":
+            method = client.async_get_mowing_map_scene if native else (
+                client._sync_get_mowing_map_scene
+            )
+            options = dict(map_index=index, style=map_render_style(), label_scale=1)
+        elif reader == "camera":
+            method = client.async_refresh_vector_map_view if native else (
+                client._sync_refresh_vector_map_view
+            )
+            options = dict(current_map_index=index)
+        else:
+            method = client.async_get_vector_map_details if native else (
+                client._sync_get_vector_map_details
+            )
+            options = {}
+        return await method(**options) if native else await asyncio.to_thread(
+            method, **options,
+        )
+
+    async def scenario():
+        old = asyncio.create_task(read(0))
+        current = None
+        try:
+            assert await asyncio.to_thread(entered[0].wait, 10)
+            maps = native_maps()
+            maps["current_map_index"] = maps["maps"][0]["idx"] = 1
+            client._sync_get_app_maps = lambda **kwargs: maps
+            client._sync_get_current_app_map_index = lambda: 1
+            _native_reads(
+                monkeypatch, client, lambda: {}, lambda: maps, map_hint=lambda: 1,
+            )
+            blob = replace(
+                client._latest_runtime_status_blob, hex="map-switch",
+                received_at=datetime.now(UTC).isoformat(),
+            )
+            client.update_runtime_live_tracking(blob, active=True, map_index=1)
+            current = asyncio.create_task(read(1))
+            assert await asyncio.to_thread(entered[1].wait, 10)
+            release[0].set()
+            await asyncio.wait_for(old, 10)
+            release[1].set()
+            result = await asyncio.wait_for(current, 10)
+            if reader == "scene":
+                overlay = client.mowing_map_runtime_overlay(result)
+                assert overlay["position"] is not None
+                assert overlay["trail"]
+            else:
+                details = result if reader == "details" else result.details
+                assert details["runtime_position_valid"] is True
+                assert details["runtime_track_point_count"] == 3
+        finally:
+            for event in release:
+                event.set()
+            await asyncio.gather(
+                old, *([current] if current is not None else []),
+                return_exceptions=True,
+            )
+
+    asyncio.run(scenario())

@@ -146,7 +146,24 @@ def _parse_drawable_batch_vector_map(
     vector_map = parse_batch_vector_map(
         batch_data, current_map_index=current_map_index,
     )
-    return vector_map if vector_map is not None and vector_map.boundary else None
+    return vector_map if _vector_map_has_drawable_geometry(vector_map) else None
+
+
+def _vector_map_has_drawable_geometry(
+    vector_map: DreameLawnMowerVectorMap | None,
+) -> bool:
+    """Share availability with selection, matching the renderer's shape minima."""
+    return bool(
+        vector_map is not None and vector_map.boundary is not None and (
+            any(len(zone.points) >= 3 for zone in vector_map.zones)
+            or any(len(path.points) >= 2 for path in vector_map.paths)
+            or any(len(area.points) >= 3 for area in vector_map.spot_areas)
+            or any(
+                len(segment) >= 2
+                for mow_path in vector_map.mow_paths for segment in mow_path.segments
+            )
+        )
+    )
 
 
 def parse_batch_vector_map(
@@ -451,15 +468,7 @@ def vector_map_to_summary(
         for segment in mow_path.segments
     )
     return DreameLawnMowerMapSummary(
-        available=bool(
-            boundary is not None
-            and (
-                vector_map.zones
-                or vector_map.paths
-                or vector_map.mow_paths
-                or vector_map.spot_areas
-            )
-        ),
+        available=_vector_map_has_drawable_geometry(vector_map),
         map_id=vector_map.map_index,
         width=boundary.width if boundary is not None else None,
         height=boundary.height if boundary is not None else None,

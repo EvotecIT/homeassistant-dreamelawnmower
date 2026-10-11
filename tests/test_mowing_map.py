@@ -45,6 +45,7 @@ class _TrackingClient(
         super().__init__(**kwargs)
         self._runtime_geometry_lock = RLock()
         self._runtime_geometry_revision = 0
+        self._runtime_geometry_map_index = None
         self._observed_map_geometry = None
 
 

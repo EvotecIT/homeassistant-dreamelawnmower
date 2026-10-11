@@ -29,6 +29,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     _runtime_live_geometry_identity: str | None
     _runtime_geometry_lock: RLock
     _runtime_geometry_revision: int
+    _runtime_geometry_map_index: int | None
     _observed_map_geometry: tuple[int, str] | None
     _latest_snapshot: DreameLawnMowerSnapshot | None
 
@@ -44,6 +45,11 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     ) -> MowerPosition | None:
         """Commit one current observation atomically, rejecting overtaken reads."""
         with self._runtime_geometry_lock:
+            self._expire_runtime_live_tracking()
+            if self._runtime_geometry_map_index not in (None, map_index):
+                # Reading another slot cannot claim the verified current scope,
+                # even before that scope's first geometry read has completed.
+                return None
             frame = (map_index, geometry)
             if (
                 expected_generation is not None
@@ -54,7 +60,6 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             if frame != self._observed_map_geometry:
                 self._observed_map_geometry = frame
                 self._runtime_geometry_revision += 1
-            self._expire_runtime_live_tracking()
             self._bind_runtime_live_geometry(map_index, geometry)
             return self._position_tracker.resolve(
                 map_index=map_index, geometry=geometry, contains=contains,
@@ -94,14 +99,25 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._retire_runtime_live_tracking_locked()
 
     def _retire_runtime_live_tracking_locked(self) -> None:
-        # Keep the observed frame and generation: retirement cannot reopen
-        # admission for a read that an authoritative observation overtook.
+        # Keep the observed frame for history, but fence reads from the retired
+        # scope. Repeated retirement cannot reopen or continually advance it.
+        self._scope_runtime_geometry(None)
         self._position_tracker.invalidate_current()
         self._latest_runtime_status_blob = None
         self._runtime_live_track_segments = ()
         self._runtime_live_map_index = None
         self._runtime_live_task_id = None
         self._runtime_live_geometry_identity = None
+
+    def _scope_runtime_geometry(self, map_index: int | None) -> None:
+        """Fence pending reads when verified identity changes, under owner lock.
+
+        Geometry scope survives an idle session: trail publication and coordinate
+        frame ownership have distinct lifetimes.
+        """
+        if self._runtime_geometry_map_index != map_index:
+            self._runtime_geometry_map_index = map_index
+            self._runtime_geometry_revision += 1
 
     def _expire_runtime_live_tracking(self) -> bool:
         """Enforce identity lifetime even when no coordinator callback runs."""
@@ -136,6 +152,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         """
         if self._expire_runtime_live_tracking():
             map_index = None
+        self._scope_runtime_geometry(map_index)
         if map_index is None or self._runtime_live_map_index not in (None, map_index):
             self._position_tracker.invalidate_current()
         self._position_tracker.record(status_blob, map_index=map_index)
