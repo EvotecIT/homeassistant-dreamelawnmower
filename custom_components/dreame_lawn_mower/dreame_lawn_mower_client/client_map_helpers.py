@@ -828,7 +828,7 @@ def _app_map_view_details(
         "trajectory_point_count": payload_summary.get("trajectory_point_count"),
         "trajectory_length_m": payload_summary.get("trajectory_length_m"),
         "cut_relation_count": payload_summary.get("cut_relation_count"),
-        "has_live_path": bool(payload_summary.get("trajectory_point_count")),
+        "has_live_path": False,
         "current": bool(selected.get("current")),
         "created": bool(selected.get("created")),
     }

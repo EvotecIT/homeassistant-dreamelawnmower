@@ -56,6 +56,8 @@ def vector_map_details(
     if source == "app_action_map":
         # Native geometry is usable without claiming batch vector availability.
         details.update(available_map_count=0, available_maps=[], maps=[])
+        if client is None:
+            details["has_live_path"] = False
     else:
         for entry in details.get("maps", []):
             if entry.get("map_index") == vector_map.map_index:
@@ -131,6 +133,10 @@ def geometry_map_view(
                 **details,
             }
         app_metadata = _app_maps_view_metadata(app_maps)
+    if source == "app_action_map":
+        # Saved native trajectories include mapping/boundary passes. Only the
+        # validated runtime segments below can establish a live mowing trail.
+        details["has_live_path"] = False
     details["render_rotation"] = style.rotation if style else 0
     runtime_context_matches = client._runtime_live_map_index == vector_map.map_index
     runtime_track_segments = (

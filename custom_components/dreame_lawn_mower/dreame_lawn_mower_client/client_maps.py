@@ -220,9 +220,14 @@ class _DreameLawnMowerClientMapsMixin(
         hint = self._sync_get_current_app_map_index()
         app_maps = None
         if parse_batch_vector_map(batch_data, current_map_index=hint) is None:
-            app_maps = self._sync_get_app_maps(
-                include_payload=True, include_objects=False,
-            )
+            try:
+                app_maps = self._sync_get_app_maps(
+                    include_payload=True, include_objects=False,
+                )
+            except Exception as err:  # noqa: BLE001 - optional map source
+                return {
+                    "available": False, "source": "batch_vector_map", "error": str(err),
+                }
             hint = app_maps.get("current_map_index")
         return vector_map_details(batch_data, hint, client=self, app_maps=app_maps)
 
@@ -310,9 +315,12 @@ class _DreameLawnMowerClientMapsMixin(
                 else self._sync_get_current_app_map_index())
         app_maps = None
         if parse_batch_vector_map(batch_data, current_map_index=hint) is None:
-            app_maps = self._sync_get_app_maps(
-                include_payload=True, include_objects=False,
-            )
+            try:
+                app_maps = self._sync_get_app_maps(
+                    include_payload=True, include_objects=False,
+                )
+            except Exception as err:  # noqa: BLE001 - retain other camera sources
+                return DreameLawnMowerMapView(source=source, error=str(err))
             if hint is None:
                 hint = app_maps.get("current_map_index")
         return vector_map_view(

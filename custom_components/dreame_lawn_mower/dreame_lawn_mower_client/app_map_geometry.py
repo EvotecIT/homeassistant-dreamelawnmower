@@ -77,11 +77,27 @@ def _points(value: Any, budget: list[int]) -> tuple[tuple[int, int], ...]:
     return tuple(result)
 
 
-def _records(payload: Mapping[str, Any], key: str) -> list[Any]:
+def _records(
+    payload: Mapping[str, Any], key: str, *, required: bool = False,
+) -> list[Any]:
     records = payload.get(key, [])
-    if not isinstance(records, list) or len(records) > MAX_APP_MAP_POINTS:
+    if not isinstance(records, list):
+        if not required:
+            return []
+        raise ValueError("Invalid app-map records.")
+    if len(records) > MAX_APP_MAP_POINTS:
         raise ValueError("Invalid app-map records.")
     return records
+
+
+def _optional_points(value: Any, budget: list[int]) -> tuple[tuple[int, int], ...]:
+    """Ignore incomplete optional shapes without bypassing the shared budget."""
+    try:
+        return _points(value, budget)
+    except (ValueError, OverflowError):
+        if budget[0] > MAX_APP_MAP_POINTS:
+            raise
+        return ()
 
 
 def _maintenance_points(
@@ -122,22 +138,46 @@ def _geometry(payload: Mapping[str, Any], map_index: int) -> DreameLawnMowerVect
     paths = []
     spots: list[DreameLawnMowerVectorZone] = []
     for key, target in (("map", zones), ("spot", spots)):
+        required = key == "map"
+        records = _records(payload, key, required=required)
+        # These negative IDs only bind rendering/tracking. Controls require a
+        # positive native ID; reserve explicit IDs to avoid collisions.
+        reserved = {
+            item["id"] for item in records if isinstance(item, Mapping)
+            and type(item.get("id")) is int
+        }
+        synthetic_id = min({0, *reserved}) - 1
         seen = set()
-        for item in _records(payload, key):
+        for item in records:
             if not isinstance(item, Mapping):
-                raise ValueError("Invalid app-map area.")
-            area_id = item.get("id")
-            if type(area_id) is not int or area_id in seen:
+                if required:
+                    raise ValueError("Invalid app-map area.")
+                continue
+            if "id" in item:
+                area_id = item["id"]
+                if type(area_id) is not int:
+                    if required:
+                        raise ValueError("Invalid app-map area identity.")
+                    continue
+            else:
+                area_id = synthetic_id
+                synthetic_id -= 1
+            points = (
+                _points(item.get("data"), budget) if required
+                else _optional_points(item.get("data"), budget)
+            )
+            pathway = required and _is_app_map_pathway(item)
+            complete = len(points) >= 2 if pathway else len(set(points)) >= 3
+            if not complete:
+                if required:
+                    raise ValueError("Incomplete app-map shape.")
+                continue
+            if area_id in seen:
                 raise ValueError("Ambiguous app-map area identity.")
             seen.add(area_id)
-            points = _points(item.get("data"), budget)
-            if key == "map" and _is_app_map_pathway(item):
-                if len(points) < 2:
-                    raise ValueError("Incomplete app-map pathway.")
+            if pathway:
                 paths.append(DreameLawnMowerVectorPath(area_id, points))
             else:
-                if len(set(points)) < 3:
-                    raise ValueError("Incomplete app-map polygon.")
                 name = item.get("name")
                 area = item.get("area")
                 target.append(DreameLawnMowerVectorZone(
@@ -160,7 +200,7 @@ def _geometry(payload: Mapping[str, Any], map_index: int) -> DreameLawnMowerVect
         raise ValueError("Empty app-map boundary.")
     trajectories = []
     for item in _records(payload, "trajectory"):
-        points = _points(
+        points = _optional_points(
             item.get("data") if isinstance(item, Mapping) else item, budget,
         )
         if len(points) >= 2:

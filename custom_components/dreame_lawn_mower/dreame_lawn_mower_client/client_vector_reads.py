@@ -84,9 +84,14 @@ async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
         hint = await _map_hint(client)
         app_maps = None
         if await _needs_app_geometry(data, hint):
-            app_maps = await client.async_get_app_maps(
-                include_payload=True, include_objects=False,
-            )
+            try:
+                app_maps = await client.async_get_app_maps(
+                    include_payload=True, include_objects=False,
+                )
+            except Exception as err:  # noqa: BLE001 - optional map source
+                return {
+                    "available": False, "source": "batch_vector_map", "error": str(err),
+                }
             hint = app_maps.get("current_map_index")
         return await async_read_device_state(
             client,
@@ -120,9 +125,12 @@ async def async_vector_view(
         )
         app_maps = None
         if await _needs_app_geometry(data, hint):
-            app_maps = await client.async_get_app_maps(
-                include_payload=True, include_objects=False,
-            )
+            try:
+                app_maps = await client.async_get_app_maps(
+                    include_payload=True, include_objects=False,
+                )
+            except Exception as err:  # noqa: BLE001 - retain other camera sources
+                return DreameLawnMowerMapView(source="batch_vector_map", error=str(err))
             if hint is None:
                 hint = app_maps.get("current_map_index")
         return await async_read_device_state(
