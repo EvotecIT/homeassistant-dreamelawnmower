@@ -19,6 +19,7 @@ from .position_tracking import map_position_identity
 from .vector_map import (
     DreameLawnMowerVectorMap,
     _parse_drawable_batch_vector_map,
+    _vector_map_has_drawable_geometry,
     filter_runtime_track_segments,
     render_vector_map_png,
     vector_map_to_details,
@@ -131,12 +132,21 @@ def geometry_map_view(
     geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Share position validation, metrics and rendering across map transports."""
+    history_only = not _vector_map_has_drawable_geometry(
+        vector_map, include_history=False,
+    )
     # Capture one coherent observation; filtering/composition/rendering below
     # must not read mutable runtime publication fields again.
     with client._runtime_geometry_lock:
-        position = vector_map_position(
-            client, vector_map, expected_generation=geometry_generation,
-        )
+        if history_only:
+            # Saved movement can be displayed without claiming the live frame.
+            # An optional app-read failure must not reset its trail or poses.
+            client._expire_runtime_live_tracking()
+            position = None
+        else:
+            position = vector_map_position(
+                client, vector_map, expected_generation=geometry_generation,
+            )
         runtime_blob = client._latest_runtime_status_blob
         snapshot = client._latest_snapshot
         session_active = client._runtime_session_active
@@ -146,9 +156,10 @@ def geometry_map_view(
             == map_position_identity(vector_map)
         )
         segments = (
-            client._runtime_live_track_segments if runtime_context_matches else ()
+            client._runtime_live_track_segments
+            if runtime_context_matches and not history_only else ()
         )
-    if session_active is False:
+    if session_active is False and not history_only:
         vector_map.mow_paths = ()
     summary = vector_map_to_summary(vector_map)
     details = vector_map_to_details(vector_map)
@@ -161,9 +172,9 @@ def geometry_map_view(
                 **details,
             }
         app_metadata = _app_maps_view_metadata(app_maps)
-    if source == "app_action_map":
-        # Saved native trajectories include mapping/boundary passes. Only the
-        # validated runtime segments below can establish a live mowing trail.
+    if source == "app_action_map" or history_only:
+        # Saved trajectories are historical. Only the validated runtime segments
+        # below can establish a live mowing trail.
         details["has_live_path"] = False
     details["render_rotation"] = style.rotation if style else 0
     runtime_track_segments = filter_runtime_track_segments(vector_map, segments)

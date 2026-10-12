@@ -123,3 +123,84 @@ def test_history_only_batch_remains_viewable_when_app_geometry_is_missing(
     )
     assert details["available"]
     assert details["mow_path_point_count"] > 0
+
+
+@pytest.mark.parametrize("matching", [False, True])
+def test_restored_checkpoint_position_uses_the_trackers_verified_frame(matching):
+    previous = tracked_client()
+    previous._sync_refresh_vector_map_view()
+    record = previous._position_tracker.checkpoint()
+    client = tracked_client()
+    client.runtime_map_identity_expires_at = None
+    client._position_tracker.restore_checkpoint(record)
+    maps = native_maps()
+    if not matching:
+        maps["maps"][0]["payload"]["map"][0]["data"][1][0] = 1100
+    client._sync_get_app_maps = lambda **kwargs: maps
+    camera = client._sync_refresh_vector_map_view()
+    details = client._sync_get_vector_map_details()
+    expected = "last_known" if matching else "unavailable"
+    assert camera.details["position_status"] == expected
+    assert details["position_status"] == expected
+    assert not camera.details.get("runtime_track_point_count")
+    scene = client._sync_get_mowing_map_scene(
+        map_index=0, style=map_render_style(), label_scale=1,
+    )
+    overlay = client.mowing_map_runtime_overlay(scene)
+    if matching:
+        assert overlay["position_status"] == expected
+    else:
+        assert overlay["position"] is None
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_history_fallback_after_app_failure_cannot_replace_the_live_frame(
+    monkeypatch, native,
+):
+    client = tracked_client()
+    client._sync_get_vector_map_batch_data = history_batch
+    _native_reads(monkeypatch, client, history_batch, native_maps)
+
+    async def scenario():
+        async def camera():
+            return await client.async_refresh_vector_map_view() if native else (
+                client._sync_refresh_vector_map_view()
+            )
+
+        first = await camera()
+        scene = client._sync_get_mowing_map_scene(
+            map_index=0, style=map_render_style(), label_scale=1,
+        )
+
+        def unavailable(**kwargs):
+            raise TimeoutError("Transient optional app-map failure")
+
+        client._sync_get_app_maps = unavailable
+        _native_reads(monkeypatch, client, history_batch, unavailable)
+        history = await camera()
+        assert history.source == "batch_vector_map"
+        assert history.details["mow_path_point_count"] == 4
+        assert not history.details.get("runtime_track_point_count")
+        overlay = client.mowing_map_runtime_overlay(scene)
+        assert overlay["position_status"] == "current"
+        assert len(overlay["trail"][0]) == 3
+        client._sync_get_app_maps = lambda **kwargs: native_maps()
+        _native_reads(monkeypatch, client, history_batch, native_maps)
+        recovered = await camera()
+        assert recovered.details["runtime_track_point_count"] == 3
+        assert recovered.image_png == first.image_png
+
+    asyncio.run(scenario())
+
+
+def test_idle_history_fallback_stays_historical_without_claiming_live_geometry():
+    client = tracked_client()
+    client.update_runtime_live_tracking(None, active=False, map_index=0)
+    client._sync_get_vector_map_batch_data = history_batch
+    client._sync_get_app_maps = lambda **kwargs: {}
+    view = client._sync_refresh_vector_map_view()
+    assert view.summary.available
+    assert view.details["mow_path_point_count"] == 4
+    assert view.details["has_live_path"] is False
+    assert view.details["position_status"] == "unavailable"
+    assert view.image_png is not None

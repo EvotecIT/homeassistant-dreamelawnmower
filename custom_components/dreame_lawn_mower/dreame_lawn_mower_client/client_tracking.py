@@ -53,7 +53,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 return self._position_tracker.resolve(
                     map_index=map_index, geometry=geometry, contains=contains,
                     snapshot=self._latest_snapshot, allow_geometry_change=False,
-                ) if frame == self._observed_map_geometry else None
+                )
             if self._runtime_geometry_map_index not in (None, map_index):
                 # Reading another slot cannot claim the verified current scope,
                 # even before that scope's first geometry read has completed.
