@@ -128,9 +128,15 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             <= POSITION_MAX_AGE_SECONDS
             or map_index != checkpoint.map_index
             or geometry != checkpoint.geometry
-            or self._runtime_live_task_id != checkpoint.task_id
             or self._runtime_session_active is not True
         ):
+            self._runtime_trail_checkpoint = None
+            return
+        # Supported short pose packets and missing/invalid callbacks cannot
+        # establish a task change. Wait for task-bearing evidence to recover.
+        if self._runtime_live_task_id is None:
+            return
+        if self._runtime_live_task_id != checkpoint.task_id:
             self._runtime_trail_checkpoint = None
             return
         blob = self._latest_runtime_status_blob
@@ -159,10 +165,12 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     @runtime_map_identity_expires_at.setter
     def runtime_map_identity_expires_at(self, deadline: datetime | None) -> None:
         with self._runtime_geometry_lock:
-            self._runtime_map_identity_expires_at = deadline
             if deadline is None:
-                self._retire_runtime_live_tracking()
-            else:
+                # Retire against the previous deadline: coordinator revocation
+                # must not restart an already elapsed recovery window.
+                self._retire_runtime_live_tracking_locked()
+            self._runtime_map_identity_expires_at = deadline
+            if deadline is not None:
                 self._expire_runtime_live_tracking()
 
     def update_runtime_map_identity(
@@ -298,6 +306,12 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         if status_blob is None:
             return
 
+        observed = self._observed_map_geometry
+        if observed is not None and observed[0] == map_index:
+            # Fresh reception can restore a cached scene even when raw bytes
+            # repeat. Trace append deduplication remains independent below.
+            self._bind_runtime_live_geometry(map_index, observed[1])
+
         blob_hex = getattr(status_blob, "hex", None)
         if blob_hex and blob_hex == self._last_runtime_track_blob_hex:
             return
@@ -316,8 +330,3 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._runtime_live_track_segments = self._runtime_live_track_segments[-64:]
         if blob_hex:
             self._last_runtime_track_blob_hex = blob_hex
-        observed = self._observed_map_geometry
-        if observed is not None and observed[0] == map_index:
-            # Cached interactive scenes use this same observed frame. Fresh,
-            # scoped telemetry can resume it without another geometry download.
-            self._bind_runtime_live_geometry(map_index, observed[1])

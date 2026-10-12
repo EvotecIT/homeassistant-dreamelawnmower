@@ -1,6 +1,7 @@
 """Current-session trails survive verification gaps without borrowing new scope."""
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from types import SimpleNamespace
@@ -8,11 +9,20 @@ from unittest.mock import patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_protocol import (
+    decode_mower_status_blob,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
 
-from .test_app_action_live_map import native_maps, publish, tracked_client
+from .test_app_action_live_map import (
+    a1_pro_packet,
+    native_maps,
+    publish,
+    tracked_client,
+)
+from .test_runtime_map_identity import _coordinator
 
 
 def _scene(client):
@@ -133,13 +143,61 @@ def test_cached_unscoped_packet_does_not_restore_a_suspended_trail():
     assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 5
 
 
-def test_lazy_expiry_does_not_restart_an_already_elapsed_recovery_window():
+@pytest.mark.parametrize("reader", ["renewal", "coordinator"])
+def test_lazy_expiry_does_not_restart_an_already_elapsed_recovery_window(reader):
     client = tracked_client()
     scene = _scene(client)
     client._runtime_map_identity_expires_at = datetime.now(UTC) - timedelta(seconds=120)
+    if reader == "coordinator":
+        host = _coordinator()
+        host.client = client
+        host._runtime_map_identity_verified = True
+        host._runtime_map_index_refreshed_at = (
+            datetime.now(UTC) - timedelta(seconds=180)
+        )
+        host._expire_runtime_map_identity()
     _renew(client)
     _next_packet(client)
     assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 2
+
+
+@pytest.mark.parametrize("packet", ["short13", "short22", "invalid", "missing"])
+def test_incomplete_task_evidence_waits_for_fresh_same_task_confirmation(packet):
+    client = tracked_client()
+    scene = _scene(client)
+    original_trail = client.mowing_map_runtime_overlay(scene)["trail"]
+    _expire(client)
+    _renew(client)
+    raw = [0xCE] + [0] * (20 if packet == "short22" else 11) + [0xCE]
+    if packet == "invalid":
+        raw[-1] = 0
+    blob = replace(
+        decode_mower_status_blob(raw), received_at=datetime.now(UTC).isoformat(),
+    )
+    if packet == "missing":
+        blob = None
+    client.update_runtime_live_tracking(blob, active=True, map_index=0)
+    # A normal camera observation must not treat missing task evidence as a
+    # different task, whether a short pose, malformed frame or absent callback.
+    client._sync_get_vector_map_details()
+    _next_packet(client)
+    recovered = client.mowing_map_runtime_overlay(scene)["trail"]
+    assert recovered[:len(original_trail)] == original_trail
+    assert len(recovered[-1]) == 2
+
+
+def test_fresh_unchanged_packet_recovers_cached_scene_without_duplicate_points():
+    client = tracked_client()
+    scene = _scene(client)
+    _expire(client)
+    _renew(client)
+    client.update_runtime_live_tracking(
+        replace(a1_pro_packet(), received_at=datetime.now(UTC).isoformat()),
+        active=True, map_index=0,
+    )
+    overlay = client.mowing_map_runtime_overlay(scene)
+    assert overlay["position_status"] == "current"
+    assert sum(map(len, overlay["trail"])) == 3
 
 
 def test_native_camera_and_scene_share_recovered_session_trail(monkeypatch):
