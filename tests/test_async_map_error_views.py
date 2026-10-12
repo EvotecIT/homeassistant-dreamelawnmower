@@ -42,6 +42,7 @@ def test_source_error_does_not_require_contended_state(monkeypatch, source):
                     DreameCloudSession, "async_get_batch_device_datas",
                     AsyncMock(side_effect=error),
                 )
+                client.async_get_app_maps = AsyncMock(side_effect=error)
             locked, release = Event(), Event()
 
             def hold_state():

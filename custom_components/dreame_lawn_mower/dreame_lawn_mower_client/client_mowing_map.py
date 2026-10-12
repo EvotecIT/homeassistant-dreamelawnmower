@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from .app_map_geometry import parse_app_map_geometry
 from .client_position import vector_map_position
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
+from .exceptions import DreameLawnMowerConnectionError
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
@@ -63,15 +64,29 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         self, *, map_index: int, style: MapRenderStyle, label_scale: float
     ) -> MowingMapScene:
         generation = self._runtime_geometry_generation
-        batch = self._sync_get_vector_map_batch_data()
+        batch_error = None
+        try:
+            batch = self._sync_get_vector_map_batch_data()
+        except DreameLawnMowerConnectionError as err:
+            batch = None
+            batch_error = err
         app_maps = None
         geometry = bounded_mowing_map_batch(batch)
         if _parse_drawable_batch_vector_map(
             geometry, current_map_index=map_index,
         ) is None:
-            app_maps = self._sync_get_app_maps(
-                include_payload=True, include_objects=False,
-            )
+            try:
+                app_maps = self._sync_get_app_maps(
+                    include_payload=True, include_objects=False,
+                )
+            except Exception as app_error:
+                if batch_error is not None:
+                    raise batch_error from app_error
+                raise
+        if batch_error is not None and parse_app_map_geometry(
+            app_maps, map_index,
+        ) is None:
+            raise batch_error
         return self._mowing_map_scene_from_batch(
             batch, map_index=map_index, style=style, label_scale=label_scale,
             app_maps=app_maps,

@@ -170,14 +170,12 @@ class _DreameLawnMowerClientMapsMixin(
     def _sync_get_vector_map_details(self) -> dict[str, Any]:
         """Return parsed batch vector-map details without rendering an image."""
         generation = self._runtime_geometry_generation
+        batch_error = None
         try:
             batch_data = self._sync_get_vector_map_batch_data()
         except DreameLawnMowerConnectionError as err:
-            return {
-                "available": False,
-                "source": "batch_vector_map",
-                "error": str(err),
-            }
+            batch_data = None
+            batch_error = str(err)
 
         hint = self._sync_get_current_app_map_index()
         app_maps = None
@@ -195,8 +193,8 @@ class _DreameLawnMowerClientMapsMixin(
             batch_data, hint, client=self, app_maps=app_maps,
             geometry_generation=generation,
         )
-        if not details["available"] and app_error is not None:
-            details["error"] = app_error
+        if not details["available"] and (batch_error or app_error) is not None:
+            details["error"] = batch_error or app_error
         return details
 
     def _sync_refresh_map_summary(
@@ -267,18 +265,12 @@ class _DreameLawnMowerClientMapsMixin(
     ) -> DreameLawnMowerMapView:
         generation = self._runtime_geometry_generation
         source = "batch_vector_map"
+        batch_error = None
         try:
             batch_data = self._sync_get_vector_map_batch_data()
         except DreameLawnMowerConnectionError as err:
-            error = str(err)
-            return DreameLawnMowerMapView(
-                source=source,
-                error=error,
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason=error,
-                ),
-            )
+            batch_data = None
+            batch_error = str(err)
 
         hint = (current_map_index if current_map_index is not None
                 else self._sync_get_current_app_map_index())
@@ -293,6 +285,15 @@ class _DreameLawnMowerClientMapsMixin(
                 app_error = str(err)
             if hint is None and app_maps is not None:
                 hint = app_maps.get("current_map_index")
+        if batch_error is not None and not vector_map_details(
+            batch_data, hint, app_maps=app_maps,
+        )["available"]:
+            return DreameLawnMowerMapView(
+                source=source, error=batch_error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source, reason=batch_error,
+                ),
+            )
         view = vector_map_view(
             self, batch_data, label_scale=label_scale, style=style,
             current_map_index=hint, app_maps=app_maps, geometry_generation=generation,

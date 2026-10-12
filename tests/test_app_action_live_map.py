@@ -411,8 +411,9 @@ def test_older_inflight_read_cannot_retire_a_newer_camera_frame(
 
 @pytest.mark.parametrize("object_error", [False, True])
 @pytest.mark.parametrize("map_changed", [False, True])
+@pytest.mark.parametrize("batch_failed", [False, True])
 def test_native_async_app_only_uses_verified_download_and_cache(
-    monkeypatch, object_error, map_changed,
+    monkeypatch, object_error, map_changed, batch_failed,
 ):
     strings = cloud_strings("dreame")
     fake = _FakeAppMapCloud(native_payload())
@@ -423,7 +424,9 @@ def test_native_async_app_only_uses_verified_download_and_cache(
                 return web.json_response(login_response(strings))
             body = await request.json()
             if request.path == "/" + "/".join(strings[i] for i in (23, 26, 44)):
-                return web.json_response({"code": 0, "data": {}})
+                return web.json_response({
+                    "code": 500 if batch_failed else 0, "data": {},
+                })
             (action,) = body["data"]["params"]["in"]
             if action["t"] == "OBJ" and object_error:
                 response = {"out": [{"m": "r", "r": 1}]}
