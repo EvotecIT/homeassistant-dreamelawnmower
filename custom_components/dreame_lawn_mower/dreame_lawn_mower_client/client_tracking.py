@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import RLock
 from typing import TYPE_CHECKING
 
 from .client_transport import _DreameLawnMowerClientTransport
 from .models import DreameLawnMowerStatusBlob
+from .position_tracking import POSITION_MAX_AGE_SECONDS, position_timestamp
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
     from .position_tracking import MowerPosition, MowerPositionTracker
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeTrailCheckpoint:
+    """Bounded, unpublished history awaiting the same verified session/frame."""
+
+    map_index: int
+    task_id: int
+    geometry: str
+    segments: tuple[tuple[tuple[int, int], ...], ...]
+    suspended_at: float
 
 
 class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
@@ -24,6 +37,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     _runtime_live_track_segments: tuple[tuple[tuple[int, int], ...], ...]
     _runtime_live_map_index: int | None
     _runtime_live_task_id: int | None
+    _runtime_trail_checkpoint: _RuntimeTrailCheckpoint | None = None
     _runtime_session_active: bool | None
     _last_runtime_track_blob_hex: str | None
     _runtime_live_geometry_identity: str | None
@@ -80,6 +94,57 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         if self._runtime_live_geometry_identity not in (None, geometry):
             self._runtime_live_track_segments = ()
         self._runtime_live_geometry_identity = geometry
+        self._restore_runtime_trail(map_index, geometry)
+
+    def _remember_runtime_trail(self) -> None:
+        """Suspend only an observed trail; repeated retirement cannot renew it."""
+        if (
+            self._runtime_session_active is True
+            and self._runtime_live_map_index is not None
+            and self._runtime_live_task_id is not None
+            and self._runtime_live_geometry_identity is not None
+            and self._runtime_live_track_segments
+        ):
+            suspended_at = datetime.now(UTC).timestamp()
+            if self._runtime_map_identity_expires_at is not None:
+                # Lazy expiry must not grant a new recovery window to a lease
+                # that actually ended long before this reader noticed it.
+                suspended_at = min(
+                    suspended_at, self._runtime_map_identity_expires_at.timestamp(),
+                )
+            self._runtime_trail_checkpoint = _RuntimeTrailCheckpoint(
+                self._runtime_live_map_index, self._runtime_live_task_id,
+                self._runtime_live_geometry_identity, self._runtime_live_track_segments,
+                suspended_at,
+            )
+
+    def _restore_runtime_trail(self, map_index: int, geometry: str) -> None:
+        """Recover history only with fresh telemetry in its original context."""
+        checkpoint = self._runtime_trail_checkpoint
+        if checkpoint is None:
+            return
+        if (
+            not 0 <= datetime.now(UTC).timestamp() - checkpoint.suspended_at
+            <= POSITION_MAX_AGE_SECONDS
+            or map_index != checkpoint.map_index
+            or geometry != checkpoint.geometry
+            or self._runtime_live_task_id != checkpoint.task_id
+            or self._runtime_session_active is not True
+        ):
+            self._runtime_trail_checkpoint = None
+            return
+        blob = self._latest_runtime_status_blob
+        observed_at = position_timestamp(getattr(blob, "received_at", None))
+        if (
+            not getattr(blob, "frame_valid", False)
+            or observed_at is None
+            or observed_at <= checkpoint.suspended_at
+        ):
+            return
+        self._runtime_live_track_segments = (
+            *checkpoint.segments, *self._runtime_live_track_segments,
+        )[-64:]
+        self._runtime_trail_checkpoint = None
 
     @property
     def runtime_map_identity_expires_at(self) -> datetime | None:
@@ -124,6 +189,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._retire_runtime_live_tracking_locked()
 
     def _retire_runtime_live_tracking_locked(self) -> None:
+        self._remember_runtime_trail()
         # Keep the observed frame for history, but fence reads from the retired
         # scope. Repeated retirement cannot reopen or continually advance it.
         self._scope_runtime_geometry(None)
@@ -140,6 +206,12 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         Geometry scope survives an idle session: trail publication and coordinate
         frame ownership have distinct lifetimes.
         """
+        checkpoint = self._runtime_trail_checkpoint
+        if (
+            checkpoint is not None and map_index is not None
+            and checkpoint.map_index != map_index
+        ):
+            self._runtime_trail_checkpoint = None
         if self._runtime_geometry_map_index != map_index:
             self._runtime_geometry_map_index = map_index
             self._runtime_geometry_revision += 1
@@ -189,6 +261,10 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         )
         self._runtime_session_active = active
         if not active or map_index is None:
+            if active:
+                self._remember_runtime_trail()
+            else:
+                self._runtime_trail_checkpoint = None
             self._runtime_live_track_segments = ()
             # Consume unscoped packets so recovery cannot rebind their cached
             # coordinates to a map discovered only after they arrived.
@@ -213,6 +289,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         if context_changed:
             self._runtime_live_track_segments = ()
             self._runtime_live_geometry_identity = None
+            self._runtime_trail_checkpoint = None
         if map_index is not None:
             self._runtime_live_map_index = map_index
         if task_id is not None:
@@ -226,16 +303,21 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             return
 
         segments = getattr(status_blob, "candidate_runtime_track_segments", ()) or ()
-        if not segments:
-            if blob_hex:
-                self._last_runtime_track_blob_hex = blob_hex
-            return
-
+        # Isolated points cannot form a line. Their explicit breaks must remain
+        # disconnected, and they must not evict useful segments from the budget.
         self._runtime_live_track_segments = (
             *self._runtime_live_track_segments,
-            *tuple(tuple(tuple(point) for point in segment) for segment in segments),
+            *tuple(
+                tuple(tuple(point) for point in segment)
+                for segment in segments if len(segment) >= 2
+            ),
         )
         if len(self._runtime_live_track_segments) > 64:
             self._runtime_live_track_segments = self._runtime_live_track_segments[-64:]
         if blob_hex:
             self._last_runtime_track_blob_hex = blob_hex
+        observed = self._observed_map_geometry
+        if observed is not None and observed[0] == map_index:
+            # Cached interactive scenes use this same observed frame. Fresh,
+            # scoped telemetry can resume it without another geometry download.
+            self._bind_runtime_live_geometry(map_index, observed[1])
