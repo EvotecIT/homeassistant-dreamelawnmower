@@ -230,7 +230,7 @@ def test_saved_trajectory_without_fresh_runtime_keeps_primary_app_render(stale):
     assert vector.details["trajectory_point_count"] == 2
     assert "runtime_track_point_count" not in vector.details
     assert client._sync_get_vector_map_details()["has_live_path"] is False
-    app = client._sync_refresh_app_map_view(
+    app, _ = client._sync_read_app_map_view(
         legacy_error=None, legacy_reason="test", label_scale=1, style=None,
     )
     assert app.details["has_live_path"] is False

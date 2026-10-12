@@ -46,6 +46,9 @@ class _FakeAppMapCloud:
         siid: int = 2,
         aiid: int = 50,
         redact_response: bool = False,
+        retry_count: int = 0,
+        timeout: float = 5.0,
+        deadline: float | None = None,
     ) -> dict[str, object]:
         assert siid == 2
         assert aiid == 50
@@ -314,7 +317,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
             "cut_relation": [],
         }
     )
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     result = client._sync_get_app_maps(chunk_size=40, include_payload=True)
 
@@ -431,7 +434,7 @@ def test_app_maps_mark_missing_map_list_response_invalid() -> None:
 def test_app_maps_reject_multiple_current_created_maps() -> None:
     client = _client()
 
-    def app_action(payload):
+    def app_action(payload, **kwargs):
         if payload["t"] == "MAPL":
             return {"r": 0, "d": [[0, 1, 1, 1], [1, 1, 1, 1]]}
         return None
@@ -448,7 +451,7 @@ def test_app_maps_reject_multiple_current_created_maps() -> None:
 def test_app_maps_ignore_current_flag_on_uncreated_map() -> None:
     client = _client()
 
-    def app_action(payload):
+    def app_action(payload, **kwargs):
         if payload["t"] == "MAPL":
             return {"r": 0, "d": [[0, 0, 1, 1], [1, 1, 0, 0]]}
         return None
@@ -473,7 +476,7 @@ def test_app_maps_reject_malformed_status_flags() -> None:
 
     for rows in malformed_rows:
         client._sync_call_app_action = (
-            lambda payload, rows=rows: {"r": 0, "d": rows}
+            lambda payload, rows=rows, **kwargs: {"r": 0, "d": rows}
             if payload["t"] == "MAPL"
             else None
         )
@@ -506,7 +509,7 @@ def test_app_maps_explain_rejected_point_values_without_exposing_them() -> None:
             ]
         }
     )
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     result = client._sync_get_app_maps(include_payload=False)
 
@@ -593,7 +596,7 @@ def test_app_maps_accept_three_value_maintenance_point_vectors() -> None:
             ]
         }
     )
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     result = client._sync_get_app_maps(include_payload=False)
 
@@ -647,7 +650,7 @@ def test_app_maps_reject_hash_mismatched_payload() -> None:
         payload,
         chunk_overrides={0: (corrupt_payload_text, len(payload_text))},
     )
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     result = client._sync_get_app_maps(
         chunk_size=400,
@@ -663,7 +666,7 @@ def test_app_maps_reject_hash_mismatched_payload() -> None:
 
 def test_app_map_text_rejects_oversized_chunk() -> None:
     client = _client()
-    client._sync_call_app_action = lambda payload: {
+    client._sync_call_app_action = lambda payload, **kwargs: {
         "r": 0,
         "d": {"data": "abcdef"},
     }
@@ -679,7 +682,7 @@ def test_app_map_text_rejects_oversized_chunk() -> None:
 def test_app_maps_can_omit_sensitive_payload_coordinates() -> None:
     client = _client()
     cloud = _FakeAppMapCloud({"map": [{"area": 1, "data": [[1, 2]]}]})
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     result = client._sync_get_app_maps(chunk_size=400, include_payload=False)
 
@@ -692,7 +695,7 @@ def test_app_maps_reuse_verified_payload_without_redownloading_or_leaking_mutati
     client = _client()
     payload = {"map": [{"area": 1, "data": [[1, 2]]}]}
     cloud = _FakeAppMapCloud(payload)
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     first = client._sync_get_app_maps(include_payload=False, include_objects=False)
     assert first["maps"][0]["hash_match"] is True
     assert first["maps"][0]["payload_cached"] is False
@@ -715,7 +718,7 @@ def test_app_maps_reuse_verified_payload_without_redownloading_or_leaking_mutati
 def test_app_maps_refresh_changed_payload_and_never_reuse_failed_download():
     client = _client()
     cloud = _FakeAppMapCloud({"map": [{"area": 1, "data": [[1, 2]]}]})
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     assert client._sync_get_app_maps(include_objects=False)["available"]
     changed = {"map": [{"area": 2, "data": [[3, 4]]}]}
     cloud.payload_text = json.dumps(changed, separators=(",", ":"))
@@ -743,7 +746,7 @@ def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
         ],
     }
     cloud = _FakeAppMapCloud(payload)
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     vector_details = {"map_index": 0, "zones": [
         {"zone_id": 7, "name": "Front"},
         {"zone_id": 300, "name": "Stale orchard name"},
@@ -789,7 +792,7 @@ def test_native_zone_name_fallback_distinguishes_missing_from_explicit_clear(
 ):
     client = _client()
     cloud = _FakeAppMapCloud({"map": [{"id": 7, "data": [[1, 2]], **name_fields}]})
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     maps = client._sync_get_app_maps(include_payload=False, include_objects=False)
     vector = {"map_index": 0, "zones": [{"zone_id": 7, "name": "Front"}]}
     assert current_zone_entries(None, maps, vector)[0]["label"] == expected
@@ -799,7 +802,7 @@ def test_app_maps_without_hash_are_downloaded_on_every_refresh():
     client = _client()
     cloud = _FakeAppMapCloud({"map": []})
     cloud.payload_hash = None
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     for _ in range(2):
         cloud.calls.clear()
         result = client._sync_get_app_maps(include_objects=False)
@@ -811,7 +814,7 @@ def test_app_maps_without_hash_are_downloaded_on_every_refresh():
 def test_app_map_cache_tracks_slots_and_preserves_fresh_current_map_selection():
     client = _client()
     cloud = _FakeAppMapCloud({"map": []})
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     native_call = cloud.call_app_action
     slots = [[0, 1, 1, 1, 0], [1, 0, 1, 0, 0]]
 
@@ -843,7 +846,7 @@ def test_app_map_cache_tracks_slots_and_preserves_fresh_current_map_selection():
 def test_app_map_object_urls_are_opt_in() -> None:
     client = _client()
     cloud = _FakeAppMapCloud({"map": [{"area": 1, "data": [[1, 2]]}]})
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     objects = client._sync_get_app_map_objects(include_urls=True)
 
@@ -870,7 +873,7 @@ def test_app_map_object_state_omits_names_and_redacts_action_logs() -> None:
         }
 
     client._sync_call_app_action = call_app_action
-    client._sync_get_cloud_protocol = lambda: object()
+    client._sync_get_cloud_protocol = lambda **kwargs: object()
 
     objects = client._sync_get_app_map_objects(include_urls=False)
 
@@ -914,7 +917,7 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
             "trajectory": [{"data": [[0, 0], [50, 50], [100, 100]]}],
         }
     )
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     client._sync_get_vector_map_batch_data = lambda: None
 
     def fail_if_legacy_map_is_called(timeout, interval):  # noqa: ARG001
@@ -1036,7 +1039,7 @@ def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
         details={"has_live_path": True, "mow_path_point_count": 42},
     )
 
-    client._sync_refresh_app_map_view = lambda **kwargs: app_view
+    client._sync_read_app_map_view = lambda **kwargs: (app_view, None)
     client._sync_refresh_vector_map_view = lambda **kwargs: (
         vector_refresh_kwargs.update(kwargs) or vector_view
     )
@@ -1075,7 +1078,7 @@ def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
         details={"has_live_path": False, "mow_path_point_count": 0},
     )
 
-    client._sync_refresh_app_map_view = lambda **kwargs: app_view
+    client._sync_read_app_map_view = lambda **kwargs: (app_view, None)
     client._sync_refresh_vector_map_view = lambda **kwargs: vector_view
     client._sync_refresh_legacy_map_view = lambda timeout, interval: (
         _ for _ in ()
@@ -1112,7 +1115,7 @@ def test_map_view_preserves_runtime_pose_when_app_render_wins() -> None:
         },
     )
 
-    client._sync_refresh_app_map_view = lambda **kwargs: app_view
+    client._sync_read_app_map_view = lambda **kwargs: (app_view, None)
     client._sync_refresh_vector_map_view = lambda **kwargs: vector_view
     client._sync_refresh_legacy_map_view = lambda timeout, interval: (
         _ for _ in ()
@@ -1157,9 +1160,8 @@ def test_map_view_threads_presentation_options_to_legacy_fallback() -> None:
     client = _client()
     captured: dict[str, object] = {}
     style = object()
-    client._sync_refresh_app_map_view = lambda **kwargs: DreameLawnMowerMapView(
-        source="app_action_map",
-        error="no app map",
+    client._sync_read_app_map_view = lambda **kwargs: (
+        DreameLawnMowerMapView(source="app_action_map", error="no app map"), None,
     )
     client._sync_refresh_vector_map_view = lambda **kwargs: DreameLawnMowerMapView(
         source="batch_vector_map",

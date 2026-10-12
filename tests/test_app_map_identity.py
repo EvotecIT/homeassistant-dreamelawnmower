@@ -45,7 +45,7 @@ def test_incomplete_map_read_restarts_from_mapi_once() -> None:
         return original(payload, **kwargs)
 
     cloud.call_app_action = transient_chunk
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     result = client._sync_get_app_maps(include_payload=True, include_objects=False)
     entry = result["maps"][0]
     assert entry["available"] is True
@@ -58,7 +58,7 @@ def test_incomplete_map_read_restarts_from_mapi_once() -> None:
 @pytest.mark.parametrize("reported_size", [0, -1, True, 20, "3"])
 def test_invalid_chunk_sizes_are_not_used_as_offsets(reported_size) -> None:
     client = _client()
-    client._sync_call_app_action = lambda payload: {
+    client._sync_call_app_action = lambda payload, **kwargs: {
         "d": {"data": "abc", "size": reported_size}
     }
     with pytest.raises(DreameLawnMowerConnectionError, match="chunk size mismatch"):
@@ -69,7 +69,7 @@ def test_escaped_chunk_overhead_uses_transport_offsets() -> None:
     client = _client()
     calls = []
 
-    def chunk(payload):
+    def chunk(payload, **kwargs):
         calls.append(payload["d"]["start"])
         if payload["d"]["start"] == 0:
             return {"d": {"data": '{"a":', "size": 7}}
@@ -85,7 +85,7 @@ def test_map_integrity_hash_covers_decoded_text_not_transport_escape_overhead() 
     text = '{"map":[]}'
     wire_size = len(text) + 2
 
-    def read(payload):
+    def read(payload, **kwargs):
         if payload["t"] == "MAPI":
             return {
                 "d": {"size": wire_size, "hash": hashlib.md5(text.encode()).hexdigest()}
@@ -131,7 +131,7 @@ def test_concurrent_readers_do_not_interleave_selected_map_downloads() -> None:
         return result
 
     cloud.call_app_action = observe
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     first_finished = threading.Event()
 
     def read_first():

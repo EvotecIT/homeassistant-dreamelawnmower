@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from .client_app_map_view import app_map_view, preferred_map_view
 from .client_map_helpers import _map_view_current_app_map_index
 from .client_state_reads import async_read_device_state
+from .client_vector_reads import async_vector_view
 from .exceptions import DeviceException, DreameLawnMowerConnectionError
 from .models import DreameLawnMowerMapView
 
@@ -29,6 +30,8 @@ async def async_map_view(
     style: MapRenderStyle | None,
 ) -> DreameLawnMowerMapView:
     async def read(_cloud: DreameCloudSession) -> DreameLawnMowerMapView:
+        generation = client._runtime_geometry_generation
+        maps = None
         try:
             maps = await client.async_get_app_maps(include_payload=True)
             app_view = await async_read_device_state(
@@ -48,14 +51,18 @@ async def async_map_view(
             app_view = DreameLawnMowerMapView(
                 source="app_action_map", error=error,
             )
-        vector_view = client._with_fallback_app_maps(
-            await client.async_refresh_vector_map_view(
+        vector = (
+            await async_vector_view(
+                client, label_scale=label_scale, style=style,
+                current_map_index=_map_view_current_app_map_index(app_view),
+                prefetched_app_maps=maps, geometry_generation=generation,
+            ) if maps is not None else await client.async_refresh_vector_map_view(
                 label_scale=label_scale,
                 style=style,
                 current_map_index=_map_view_current_app_map_index(app_view),
-            ),
-            app_view,
+            )
         )
+        vector_view = client._with_fallback_app_maps(vector, app_view)
         preferred = preferred_map_view(client, app_view, vector_view)
         if preferred is not None:
             return preferred

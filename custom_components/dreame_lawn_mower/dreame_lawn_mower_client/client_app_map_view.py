@@ -14,11 +14,26 @@ from .client_map_helpers import (
     _render_app_map_payload_png,
     _select_app_map_payload,
 )
+from .map_inventory import _app_map_inventory_identity
 from .models import DreameLawnMowerMapView
 
 if TYPE_CHECKING:
     from .client_maps import _DreameLawnMowerClientMapsMixin
     from .map_visuals import MapRenderStyle
+
+
+def current_prefetched_app_maps(
+    client: _DreameLawnMowerClientMapsMixin,
+    app_maps: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Reuse an operation's payload only while its verified inventory is current."""
+    if app_maps is None or not isinstance(app_maps.get("maps"), list):
+        return None
+    identity = _app_map_inventory_identity(app_maps["maps"])
+    with client._app_map_object_cache_lock:
+        if identity is None or identity != client._latest_app_map_inventory_identity:
+            return None
+    return app_maps
 
 
 def app_map_view(

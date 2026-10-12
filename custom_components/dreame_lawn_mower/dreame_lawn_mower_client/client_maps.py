@@ -25,7 +25,11 @@ from .app_protocol import (
     mower_state_key,
     mower_state_label,
 )
-from .client_app_map_view import app_map_view, preferred_map_view
+from .client_app_map_view import (
+    app_map_view,
+    current_prefetched_app_maps,
+    preferred_map_view,
+)
 from .client_app_maps import _DreameLawnMowerClientAppMapsMixin
 from .client_map_helpers import (
     _current_app_map_index,
@@ -225,7 +229,8 @@ class _DreameLawnMowerClientMapsMixin(
         label_scale: float = 1.0,
         style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
-        app_view = self._sync_refresh_app_map_view(
+        generation = self._runtime_geometry_generation
+        app_view, app_maps = self._sync_read_app_map_view(
             legacy_error=None,
             legacy_reason="app_action_map_primary",
             label_scale=label_scale,
@@ -237,6 +242,8 @@ class _DreameLawnMowerClientMapsMixin(
                 label_scale=label_scale,
                 current_map_index=_map_view_current_app_map_index(app_view),
                 style=style,
+                prefetched_app_maps=app_maps,
+                geometry_generation=generation,
             ),
             app_view,
         )
@@ -262,8 +269,13 @@ class _DreameLawnMowerClientMapsMixin(
         label_scale: float = 1.0,
         current_map_index: int | None = None,
         style: MapRenderStyle | None = None,
+        prefetched_app_maps: dict[str, Any] | None = None,
+        geometry_generation: int | None = None,
     ) -> DreameLawnMowerMapView:
-        generation = self._runtime_geometry_generation
+        generation = (
+            self._runtime_geometry_generation
+            if geometry_generation is None else geometry_generation
+        )
         source = "batch_vector_map"
         batch_error = None
         try:
@@ -283,6 +295,8 @@ class _DreameLawnMowerClientMapsMixin(
                 )
             except Exception as err:  # noqa: BLE001 - retain other camera sources
                 app_error = str(err)
+            if app_maps is None:
+                app_maps = current_prefetched_app_maps(self, prefetched_app_maps)
             if hint is None and app_maps is not None:
                 hint = app_maps.get("current_map_index")
         if batch_error is not None and not vector_map_details(
@@ -382,14 +396,14 @@ class _DreameLawnMowerClientMapsMixin(
             ),
         )
 
-    def _sync_refresh_app_map_view(
+    def _sync_read_app_map_view(
         self,
         *,
         legacy_error: str | None,
         legacy_reason: str,
         label_scale: float = 1.0,
         style: MapRenderStyle | None = None,
-    ) -> DreameLawnMowerMapView:
+    ) -> tuple[DreameLawnMowerMapView, dict[str, Any] | None]:
         source = "app_action_map"
         try:
             app_maps = self._sync_get_app_maps(
@@ -401,7 +415,7 @@ class _DreameLawnMowerClientMapsMixin(
             return app_map_view(
                 self, app_maps, legacy_error=legacy_error, legacy_reason=legacy_reason,
                 label_scale=label_scale, style=style,
-            )
+            ), app_maps
         except Exception as err:  # noqa: BLE001 - map view keeps diagnostics visible
             error = f"{legacy_error or 'Legacy map unavailable'}; app map failed: {err}"
             return DreameLawnMowerMapView(
@@ -411,7 +425,7 @@ class _DreameLawnMowerClientMapsMixin(
                     source=source,
                     reason="app_action_map_failed",
                 ),
-            )
+            ), None
 
     def _sync_get_vector_map_batch_data(self) -> Mapping[str, Any] | None:
         # An empty property list requests every available batch key. M_PATH

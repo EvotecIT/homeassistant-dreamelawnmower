@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_run_app_read
 from .exceptions import DreameLawnMowerConnectionError
 from .map_inventory import _app_map_inventory_identity
-from .map_read_plan import read_maps
+from .map_read_plan import (
+    APP_MAP_LOCK_TIMEOUT_SECONDS,
+    APP_MAP_READ_TIMEOUT_SECONDS,
+    read_maps,
+)
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -26,11 +31,12 @@ async def async_read_maps(
     """Hold map selection through chunks, cache commits and object inventory."""
 
     async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
+        deadline = time.monotonic() + APP_MAP_READ_TIMEOUT_SECONDS
         lock = client._app_map_download_lock
         acquired = False
         try:
             try:
-                async with asyncio.timeout(15):
+                async with asyncio.timeout(APP_MAP_LOCK_TIMEOUT_SECONDS):
                     while not lock.acquire(blocking=False):
                         await asyncio.sleep(0.01)
                     acquired = True
@@ -40,7 +46,11 @@ async def async_read_maps(
                 ) from err
             result = await async_run_app_read(
                 client,
-                read_maps(client._app_map_payload_cache, chunk_size, include_payload),
+                read_maps(
+                    client._app_map_payload_cache, chunk_size, include_payload,
+                    deadline=deadline,
+                ),
+                deadline=deadline,
             )
             identity = _app_map_inventory_identity(result["maps"])
             cache_lock = client._app_map_object_cache_lock

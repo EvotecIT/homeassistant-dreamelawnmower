@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any
 
 from .app_read_transport import run_app_read
 from .client_transport import _DreameLawnMowerClientTransport
-from .map_read_plan import download_map, read_map_text, read_maps
+from .exceptions import DreameLawnMowerConnectionError
+from .map_read_plan import (
+    APP_MAP_LOCK_TIMEOUT_SECONDS,
+    APP_MAP_READ_TIMEOUT_SECONDS,
+    download_map,
+    read_map_text,
+    read_maps,
+)
 
 
 class _DreameLawnMowerClientAppMapsMixin(_DreameLawnMowerClientTransport):
@@ -21,13 +29,23 @@ class _DreameLawnMowerClientAppMapsMixin(_DreameLawnMowerClientTransport):
         include_object_urls: bool = False,
     ) -> dict[str, Any]:
         """Keep each MAPI-selected download isolated from other map readers."""
-        with self._app_map_download_lock:
+        deadline = time.monotonic() + APP_MAP_READ_TIMEOUT_SECONDS
+        if not self._app_map_download_lock.acquire(
+            timeout=APP_MAP_LOCK_TIMEOUT_SECONDS,
+        ):
+            raise DreameLawnMowerConnectionError(
+                "Map read timed out waiting for another operation"
+            )
+        try:
             return self._sync_get_app_maps_locked(
                 chunk_size,
                 include_payload,
                 include_objects,
                 include_object_urls,
+                deadline,
             )
+        finally:
+            self._app_map_download_lock.release()
 
     def _sync_get_app_maps_locked(
         self,
@@ -35,9 +53,13 @@ class _DreameLawnMowerClientAppMapsMixin(_DreameLawnMowerClientTransport):
         include_payload: bool,
         include_objects: bool,
         include_object_urls: bool,
+        deadline: float,
     ) -> dict[str, Any]:
         result = run_app_read(
-            read_maps(self._app_map_payload_cache, chunk_size, include_payload),
+            read_maps(
+                self._app_map_payload_cache, chunk_size, include_payload,
+                deadline=deadline,
+            ),
             self._dispatch_map_read,
         )
         self._sync_update_app_map_inventory_identity(result["maps"])
@@ -53,8 +75,7 @@ class _DreameLawnMowerClientAppMapsMixin(_DreameLawnMowerClientTransport):
     def _dispatch_map_read(
         self, action: Mapping[str, Any], **kwargs: Any,
     ) -> Any:
-        # Preserve the established synchronous dispatch defaults and overrides.
-        return self._sync_call_app_action(action)
+        return self._sync_call_app_action(action, **kwargs)
 
     def _sync_download_app_map(
         self,

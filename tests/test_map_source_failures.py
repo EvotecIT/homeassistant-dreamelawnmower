@@ -1,6 +1,7 @@
 """An optional map transport failure must not discard another verified frame."""
 
 import asyncio
+import json
 from importlib import import_module
 
 import pytest
@@ -139,3 +140,73 @@ def test_cancelled_batch_read_does_not_start_app_fallback(monkeypatch, reader):
     configure_reads(monkeypatch, client, cancelled, maps)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(read_map(client, True, reader))
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("batch_failed", [False, True])
+@pytest.mark.parametrize("inventory_changed", [False, True])
+def test_normal_composition_retains_its_verified_primary_app_payload(
+    monkeypatch, native, batch_failed, inventory_changed,
+):
+    client = tracked_client()
+    first_maps = native_maps()
+    app_calls = 0
+
+    def maps():
+        nonlocal app_calls
+        app_calls += 1
+        if app_calls > 1:
+            raise DreameLawnMowerConnectionError("Second app read failed")
+        client._sync_update_app_map_inventory_identity(first_maps["maps"])
+        return first_maps
+
+    def batch():
+        if inventory_changed:
+            newer = native_maps()
+            newer["maps"][0]["info"]["hash"] = "newer-authoritative-inventory"
+            client._sync_update_app_map_inventory_identity(newer["maps"])
+        if batch_failed:
+            raise DreameLawnMowerConnectionError("Batch read failed")
+        return {}
+
+    configure_reads(monkeypatch, client, batch, maps)
+    view = asyncio.run(read_map(client, native, "normal"))
+    if inventory_changed:
+        assert not view.details.get("runtime_position_valid", False)
+    else:
+        assert view.details["runtime_position_valid"] is True
+        assert view.details["runtime_track_point_count"] == 3
+
+
+@pytest.mark.parametrize("reader", ["vector", "details"])
+@pytest.mark.parametrize("batch_metadata", [False, True])
+@pytest.mark.parametrize("app_failed", [False, True])
+def test_empty_sources_do_not_wait_for_native_device_state(
+    monkeypatch, reader, batch_metadata, app_failed,
+):
+    client = tracked_client()
+    batch = {"MAP.0": json.dumps([json.dumps({"mapIndex": 0})])} if (
+        batch_metadata
+    ) else {}
+
+    def maps():
+        if app_failed:
+            raise DreameLawnMowerConnectionError("App fallback unavailable")
+        return {}
+
+    configure_reads(monkeypatch, client, lambda: batch, maps)
+    owner = import_module(
+        client._mowing_map_scene_from_batch.__module__.rsplit(".", 1)[0]
+        + ".client_vector_reads"
+    )
+
+    async def no_state(*args, **kwargs):
+        pytest.fail("Unusable sources must not acquire device state")
+
+    monkeypatch.setattr(owner, "async_read_device_state", no_state)
+    result = asyncio.run(read_map(client, True, reader))
+    assert not (result["available"] if reader == "details" else result.available)
+    if app_failed:
+        assert (result["error"] if reader == "details" else result.error) == (
+            "App fallback unavailable"
+        )
