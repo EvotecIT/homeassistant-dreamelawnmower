@@ -143,6 +143,28 @@ def test_cached_unscoped_packet_does_not_restore_a_suspended_trail():
     assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 5
 
 
+def test_rejected_cached_packet_cannot_bypass_trail_recovery_timeout():
+    client = tracked_client()
+    scene = _scene(client)
+    _expire(client)
+    packet = _next_packet(client)
+    _renew(client)
+    client.update_runtime_live_tracking(packet, active=True, map_index=0)
+    assert client.mowing_map_runtime_overlay(scene)["trail"] == []
+    client.update_runtime_map_identity(
+        0, expires_at=datetime.now(UTC) + timedelta(seconds=180),
+    )
+    # Replaying an event consumed without a verified map cannot count as fresh
+    # scoped evidence, even if genuinely new telemetry arrives much later.
+    owner = import_module(client.update_runtime_live_tracking.__module__)
+    with patch.object(owner, "datetime") as clock:
+        clock.now.return_value = datetime.now(UTC) + timedelta(seconds=91)
+        publish(client, hex="fresh-after-long-gap", candidate_runtime_track_segments=(
+            ((300, 100), (400, 100)),
+        ))
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 2
+
+
 @pytest.mark.parametrize("reader", ["renewal", "coordinator"])
 def test_lazy_expiry_does_not_restart_an_already_elapsed_recovery_window(reader):
     client = tracked_client()

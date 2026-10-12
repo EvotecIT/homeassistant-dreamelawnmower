@@ -38,6 +38,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     _runtime_live_map_index: int | None
     _runtime_live_task_id: int | None
     _runtime_trail_checkpoint: _RuntimeTrailCheckpoint | None = None
+    _runtime_live_packet_admitted: bool = False
     _runtime_session_active: bool | None
     _last_runtime_track_blob_hex: str | None
     _runtime_live_geometry_identity: str | None
@@ -142,7 +143,8 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         blob = self._latest_runtime_status_blob
         observed_at = position_timestamp(getattr(blob, "received_at", None))
         if (
-            not getattr(blob, "frame_valid", False)
+            not self._runtime_live_packet_admitted
+            or not getattr(blob, "frame_valid", False)
             or observed_at is None
             or observed_at <= checkpoint.suspended_at
         ):
@@ -203,6 +205,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         self._scope_runtime_geometry(None)
         self._position_tracker.invalidate_current()
         self._latest_runtime_status_blob = None
+        self._runtime_live_packet_admitted = False
         self._runtime_live_track_segments = ()
         self._runtime_live_map_index = None
         self._runtime_live_task_id = None
@@ -263,7 +266,11 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._scope_runtime_geometry(map_index)
         if map_index is None or self._runtime_live_map_index not in (None, map_index):
             self._position_tracker.invalidate_current()
-        self._position_tracker.record(status_blob, map_index=map_index)
+        # The position owner consumes unscoped and repeated events. Timestamp
+        # freshness alone cannot promote a rejected replay into recovery proof.
+        self._runtime_live_packet_admitted = self._position_tracker.record(
+            status_blob, map_index=map_index,
+        )
         self._latest_runtime_status_blob = (
             status_blob if map_index is not None else None
         )
