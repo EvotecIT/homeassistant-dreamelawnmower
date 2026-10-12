@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import time
 from importlib import import_module
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,7 @@ from dreame_lawn_mower_client import DreameLawnMowerConnectionError
 
 from .test_app_action_live_map import map_render_style, native_maps, tracked_client
 from .test_app_map_read_consistency import _native_reads
+from .test_app_maps import _FakeAppMapCloud
 
 
 async def read_map(client, native, reader):
@@ -210,3 +213,63 @@ def test_empty_sources_do_not_wait_for_native_device_state(
         assert (result["error"] if reader == "details" else result.error) == (
             "App fallback unavailable"
         )
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("contradicted", [False, True])
+def test_partial_map_read_publishes_contradictory_inventory_before_fallback(
+    monkeypatch, native, contradicted,
+):
+    client = tracked_client()
+    package = client._mowing_map_scene_from_batch.__module__.rsplit(".", 1)[0]
+    plan_owner = import_module(package + ".map_read_plan")
+    view_owner = import_module(package + ".client_app_map_view")
+    driver_owner = import_module(package + ".client_app_reads")
+    now = time.monotonic()
+    monkeypatch.setattr(plan_owner, "time", SimpleNamespace(monotonic=lambda: now))
+    fake = _FakeAppMapCloud(native_maps()["maps"][0]["payload"])
+    second_read = False
+
+    def dispatch(action, **kwargs):
+        nonlocal now
+        if second_read:
+            if action["t"] == "MAPL" and contradicted:
+                return {"d": [[0, 0, 1, 1], [1, 1, 1, 1]]}
+            now = time.monotonic() + 61
+            raise DreameLawnMowerConnectionError("Interrupted later map read")
+        return fake.call_app_action(action)["out"][0]
+
+    async def native_dispatch(_client, action, **kwargs):
+        return dispatch(action)
+
+    async def cloud_read(read):
+        return await read(None)
+
+    client._sync_call_app_action = dispatch
+    client._async_cloud_read = cloud_read
+    monkeypatch.setattr(driver_owner, "async_read_app_action", native_dispatch)
+
+    async def read():
+        if native:
+            return await client.async_get_app_maps(
+                include_payload=True, include_objects=False,
+            )
+        return type(client)._sync_get_app_maps(
+            client, include_payload=True, include_objects=False,
+        )
+
+    async def scenario():
+        nonlocal second_read
+        first = await read()
+        assert first["available"] is True
+        second_read = True
+        try:
+            await read()
+        except DreameLawnMowerConnectionError:
+            pass
+        retained = view_owner.current_prefetched_app_maps(client, first)
+        assert (retained is None) is contradicted
+        assert client._app_map_download_lock.acquire(blocking=False)
+        client._app_map_download_lock.release()
+
+    asyncio.run(scenario())

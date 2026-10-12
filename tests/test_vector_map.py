@@ -895,12 +895,13 @@ def test_map_view_prefers_valid_runtime_position_before_track_exists() -> None:
 
     client = _client()
     client._latest_snapshot = SimpleNamespace(available=True, activity="mowing")
-    client._sync_refresh_app_map_view = lambda **kwargs: DreameLawnMowerMapView(  # type: ignore[method-assign]  # noqa: ARG005
+    app_view = DreameLawnMowerMapView(
         source="app_action_map",
         summary=DreameLawnMowerMapSummary(available=True),
         image_png=b"app-map",
         app_maps={"current_map_index": 0},
     )
+    client._sync_read_app_map_view = lambda **kwargs: (app_view, None)
     client._sync_get_vector_map_batch_data = lambda: _batch_payload()
     client._safe_map_diagnostics = lambda **kwargs: None
     client.update_runtime_live_tracking(

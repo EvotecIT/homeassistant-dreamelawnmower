@@ -75,7 +75,6 @@ def read_maps(
         "errors": [],
     }
     for entry in map_entries:
-        _read_deadline(deadline)
         if (
             map_list_valid
             and entry.get("created") is not False
@@ -88,6 +87,10 @@ def read_maps(
 
         map_result = dict(entry)
         try:
+            # Finish the authoritative inventory with per-map failure evidence.
+            # Aborting here would leave an earlier completed inventory installed
+            # after MAPL has already contradicted it.
+            _read_deadline(deadline)
             for attempt in range(2):
                 try:
                     yield from download_map(
