@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
-from threading import Event
+from threading import Event, RLock
 from typing import TYPE_CHECKING, Any
 
 from .app_protocol import (
@@ -164,6 +164,7 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
         ) -> DreameLawnMowerMapView: ...
 
     _latest_snapshot: DreameLawnMowerSnapshot | None
+    _runtime_geometry_lock: RLock
     _latest_cloud_device_info: Mapping[str, Any] | None
     _cloud_device_info_refreshed_at: float
 
@@ -355,7 +356,8 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
                     observed_at=observed_at,
                     active_state_observed_at=active_state_observed_at,
                 )
-        self._latest_snapshot = snapshot
+        with self._runtime_geometry_lock:
+            self._latest_snapshot = snapshot
         return snapshot
 
     def _sync_get_remote_control_support(
@@ -915,9 +917,30 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
         map_view: DreameLawnMowerMapView,
         app_view: DreameLawnMowerMapView,
     ) -> DreameLawnMowerMapView:
-        if map_view.app_maps is not None or app_view.app_maps is None:
+        if app_view.app_maps is None:
             return map_view
-        return replace(map_view, app_maps=app_view.app_maps)
+        if map_view.app_maps is None:
+            return replace(map_view, app_maps=app_view.app_maps)
+        metadata = map_view.app_maps
+        object_keys = ("objects", "object_count", "object_error")
+        if (
+            map_view.source == "app_action_map"
+            and type(metadata.get("current_map_index")) is int
+            and metadata.get("current_map_index")
+            == app_view.app_maps.get("current_map_index")
+            and isinstance(metadata.get("inventory_identity"), str)
+            and metadata["inventory_identity"]
+            == app_view.app_maps.get("inventory_identity")
+            and all(metadata.get(key) is None for key in object_keys)
+        ):
+            # Geometry-only reads omit objects. Retain the primary camera's
+            # sanitized result only within the same verified inventory; OBJ
+            # lists objects across maps, so a matching current slot is not enough.
+            return replace(map_view, app_maps={
+                **metadata,
+                **{key: app_view.app_maps.get(key) for key in object_keys},
+            })
+        return map_view
 
     @staticmethod
     def _with_runtime_position_details(

@@ -530,6 +530,7 @@ def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
     fault = _snapshot(0, "drop")
     device = _ErrorDevice(0, "drop", state="MOWING")
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     device._state_lock = RLock()
     device._plan_cleanup = device_plan_cleanup._DevicePlanCleanup()
     client._closing = False
@@ -574,6 +575,7 @@ def test_remote_control_support_reuses_recovered_fault_context() -> None:
     device.status.fast_mapping = False
     device._remote_control = False
     client = object.__new__(DreameLawnMowerClient)
+    client._runtime_geometry_lock = RLock()
     client._descriptor = descriptor
     client._latest_snapshot = fault
     client._ensure_device = lambda: device

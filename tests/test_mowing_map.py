@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from threading import RLock
 from types import SimpleNamespace
 
 import pytest
@@ -31,6 +32,21 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map imp
 )
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
+
+
+class _TrackingClient(
+    SimpleNamespace, client_mowing_map._DreameLawnMowerClientMowingMapMixin,
+):
+    """Exercise the actual trail binding with isolated position evidence."""
+
+    _runtime_live_geometry_identity = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._runtime_geometry_lock = RLock()
+        self._runtime_geometry_revision = 0
+        self._runtime_geometry_map_index = None
+        self._observed_map_geometry = None
 
 
 def garden():
@@ -93,6 +109,21 @@ def test_input_budget_precedes_map_parsing_and_ignores_unneeded_history(monkeypa
     monkeypatch.setattr(client_mowing_map, "MAX_SCENE_CHUNKS", 1)
     with pytest.raises(ValueError, match="chunk budget"):
         client_mowing_map.bounded_mowing_map_batch({"MAP.0": "a", "MAP.1": "b"})
+
+
+def test_sync_scene_bounds_the_geometry_probe_before_decoding(monkeypatch):
+    monkeypatch.setattr(client_mowing_map, "MAX_SCENE_INPUT_UNITS", 10)
+    monkeypatch.setattr(
+        client_mowing_map, "_parse_drawable_batch_vector_map",
+        lambda *args, **kwargs: pytest.fail("Oversized input reached the parser"),
+    )
+    client = _TrackingClient(
+        _sync_get_vector_map_batch_data=lambda: {"MAP.0": "x" * 11},
+    )
+    with pytest.raises(ValueError, match="input budget"):
+        client._sync_get_mowing_map_scene(
+            map_index=0, style=map_render_style(), label_scale=1,
+        )
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
@@ -198,7 +229,7 @@ def test_camera_and_interactive_overlay_share_dock_evidence_after_session_ends()
     now = datetime.now(UTC)
     tracker = position_tracking.MowerPositionTracker()
     tracker.record(replace(telemetry(), received_at=now.isoformat()), map_index=2)
-    client = SimpleNamespace(
+    client = _TrackingClient(
         _position_tracker=tracker,
         _expire_runtime_live_tracking=lambda: False,
         _latest_snapshot=SimpleNamespace(
@@ -233,7 +264,7 @@ def test_interactive_client_does_not_bypass_replaced_geometry_rejection():
     blob = replace(telemetry(), received_at=now.isoformat())
     tracker = position_tracking.MowerPositionTracker()
     tracker.record(blob, map_index=2)
-    client = SimpleNamespace(
+    client = _TrackingClient(
         _position_tracker=tracker,
         _expire_runtime_live_tracking=lambda: False,
         _latest_snapshot=SimpleNamespace(available=True, activity="mowing"),

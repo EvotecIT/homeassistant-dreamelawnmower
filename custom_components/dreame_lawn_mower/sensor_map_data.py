@@ -877,7 +877,7 @@ def _app_map_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "trajectory_point_count": summary.get("trajectory_point_count"),
         "trajectory_length_m": summary.get("trajectory_length_m"),
         "cut_relation_count": summary.get("cut_relation_count"),
-        "has_live_path": bool(summary.get("trajectory_point_count")),
+        "has_live_path": False,
         "error": entry.get("error"),
     }
     return {key: item for key, item in result.items() if item not in (None, [], {})}

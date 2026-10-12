@@ -17,6 +17,19 @@ session, including the mower position and live path when the device reports
 them. `Live Path Map`, `All Maps`, and `Map Diagnostics` remain optional,
 disabled-by-default cameras for troubleshooting or specialized dashboards.
 
+Live positions and runtime trails also work when the mower supplies only an
+app-action map, including A1 Pro models without batch vector maps. The map must
+match the current app slot and pass hash verification before it can validate
+runtime coordinates. The Map camera, Live Path Map camera, interactive overlay,
+and runtime track sensors share that geometry. Stale or unscoped telemetry does
+not establish a live position or trail; retained positions keep their status.
+
+A failed batch-map request does not discard a verified app map or its live
+overlay. App-map downloads accept up to 4 MiB and 16,384 chunks per map, with a
+16 MiB total byte budget and one 60-second budget shared across map selection,
+downloads and retries. A download that exceeds these limits is reported as
+unavailable and does not supply live geometry.
+
 Locally rendered vector maps hide saved spot-mowing rectangles by default and
 draw completed mowing passes subtly. This keeps the everyday map close to the
 vendor app while preserving the live route and mower marker. The source spot

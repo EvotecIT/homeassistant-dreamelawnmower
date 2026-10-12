@@ -584,11 +584,16 @@ class DreameLawnMowerClient(
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self._position_tracker = _MowerPositionTracker()
+        self._runtime_geometry_lock = _threading.RLock()
+        self._runtime_geometry_revision = 0
+        self._runtime_geometry_map_index: int | None = None
+        self._observed_map_geometry: tuple[int, str] | None = None
         self._runtime_live_track_segments: tuple[
             tuple[tuple[int, int], ...],
             ...,
         ] = ()
         self._last_runtime_track_blob_hex: str | None = None
+        self._runtime_live_geometry_identity: str | None = None
         self._runtime_map_identity_expires_at: datetime | None = datetime.max.replace(
             tzinfo=UTC
         )
@@ -740,7 +745,8 @@ class DreameLawnMowerClient(
             cloud_device_info = self._latest_cloud_device_info
         if isinstance(cloud_device_info, Mapping):
             snapshot = snapshot_with_cloud_presence(snapshot, cloud_device_info)
-        self._latest_snapshot = snapshot
+        with self._runtime_geometry_lock:
+            self._latest_snapshot = snapshot
         return snapshot
 
     @_serialized_task_control

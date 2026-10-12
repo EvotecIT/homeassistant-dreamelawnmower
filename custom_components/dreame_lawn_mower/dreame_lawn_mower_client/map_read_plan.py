@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Generator, Mapping
 from copy import deepcopy
 from typing import Any
@@ -19,15 +20,32 @@ from .client_shared_helpers import _app_action_data
 from .exceptions import DreameLawnMowerConnectionError
 from .payload_utils import _json_safe
 
+MAX_APP_MAP_BYTES = 4 * 1024 * 1024
+MAX_APP_MAP_TOTAL_BYTES = 16 * 1024 * 1024
+MAX_APP_MAP_CHUNKS = 16384
+APP_MAP_READ_TIMEOUT_SECONDS = 60.0
+APP_MAP_LOCK_TIMEOUT_SECONDS = 15.0
+
+
+def _read_deadline(deadline: float | None) -> float:
+    if deadline is None:
+        deadline = time.monotonic() + APP_MAP_READ_TIMEOUT_SECONDS
+    if time.monotonic() >= deadline:
+        raise DreameLawnMowerConnectionError("App map read deadline expired.")
+    return deadline
+
 
 def read_maps(
     cache: dict[int, dict[str, Any]],
     chunk_size: int,
     include_payload: bool,
+    *, deadline: float | None = None,
 ) -> Generator[AppReadRequest, Any, dict[str, Any]]:
+    deadline = _read_deadline(deadline)
     chunk_size = _validate_app_map_chunk_size(chunk_size)
+    remaining_bytes = [MAX_APP_MAP_TOTAL_BYTES]
     map_list_result = yield AppReadRequest(
-        {"m": "g", "t": "MAPL"}, retry_count=2, timeout=20
+        {"m": "g", "t": "MAPL"}, retry_count=2, timeout=20, deadline=deadline,
     )
     map_entries = _normalize_app_map_entries(map_list_result)
     map_list_valid = _app_map_entries_are_valid(
@@ -69,6 +87,10 @@ def read_maps(
 
         map_result = dict(entry)
         try:
+            # Finish the authoritative inventory with per-map failure evidence.
+            # Aborting here would leave an earlier completed inventory installed
+            # after MAPL has already contradicted it.
+            _read_deadline(deadline)
             for attempt in range(2):
                 try:
                     yield from download_map(
@@ -76,6 +98,8 @@ def read_maps(
                         map_result,
                         chunk_size=chunk_size,
                         include_payload=include_payload,
+                        deadline=deadline,
+                        remaining_bytes=remaining_bytes,
                     )
                     map_result["download_attempts"] = attempt + 1
                     break
@@ -107,10 +131,14 @@ def download_map(
     *,
     chunk_size: int,
     include_payload: bool,
+    deadline: float | None = None,
+    remaining_bytes: list[int] | None = None,
 ) -> Generator[AppReadRequest, Any]:
     """Read and verify one selected map before exposing its geometry."""
+    deadline = _read_deadline(deadline)
     info_result = yield AppReadRequest(
-        {"m": "g", "t": "MAPI", "d": {"idx": entry["idx"]}}, retry_count=2, timeout=20
+        {"m": "g", "t": "MAPI", "d": {"idx": entry["idx"]}},
+        retry_count=2, timeout=20, deadline=deadline,
     )
     info = _app_action_data(info_result)
     entry["info"] = _json_safe(info, max_depth=4)
@@ -118,6 +146,15 @@ def download_map(
     expected_hash = info.get("hash") if isinstance(info, Mapping) else None
     if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
         raise DreameLawnMowerConnectionError("map_info_missing_size")
+    if size > MAX_APP_MAP_BYTES:
+        raise DreameLawnMowerConnectionError("App map exceeds the byte budget.")
+    if remaining_bytes is not None:
+        if size > remaining_bytes[0]:
+            raise DreameLawnMowerConnectionError(
+                "App maps exceed the total byte budget."
+            )
+        # Charge cached projections and retries as well as cold downloads.
+        remaining_bytes[0] -= size
     if isinstance(info.get("idx"), int) and info["idx"] != entry["idx"]:
         raise DreameLawnMowerConnectionError("App map metadata index mismatch.")
     entry["reported_size"] = size
@@ -136,7 +173,7 @@ def download_map(
         return
     cache.pop(entry["idx"], None)
     payload_text, chunk_count, received_size = yield from read_map_text(
-        size=size, chunk_size=chunk_size
+        size=size, chunk_size=chunk_size, deadline=deadline,
     )
     encoded = payload_text.encode("utf-8")
     payload_hash = hashlib.md5(encoded).hexdigest()
@@ -199,11 +236,22 @@ def read_map_text(
     *,
     size: int,
     chunk_size: int,
+    deadline: float | None = None,
 ) -> Generator[AppReadRequest, Any, tuple[str, int, int]]:
+    deadline = _read_deadline(deadline)
+    chunk_size = _validate_app_map_chunk_size(chunk_size)
+    if (
+        not isinstance(size, int) or isinstance(size, bool)
+        or not 0 < size <= MAX_APP_MAP_BYTES
+    ):
+        raise DreameLawnMowerConnectionError("App map exceeds the byte budget.")
     chunks = bytearray()
     offset = 0
     chunk_count = 0
     while offset < size:
+        _read_deadline(deadline)
+        if chunk_count >= MAX_APP_MAP_CHUNKS:
+            raise DreameLawnMowerConnectionError("App map exceeds the chunk budget.")
         requested_size = min(size - offset, chunk_size)
         chunk_result = yield AppReadRequest(
             {
@@ -213,6 +261,7 @@ def read_map_text(
             },
             retry_count=2,
             timeout=20,
+            deadline=deadline,
         )
         data = _app_action_data(chunk_result)
         if not isinstance(data, Mapping):
@@ -224,6 +273,10 @@ def read_map_text(
         if not isinstance(text, str) or text == "":
             raise DreameLawnMowerConnectionError(
                 f"MAPD returned empty data at offset {offset}."
+            )
+        if len(text) > requested_size:
+            raise DreameLawnMowerConnectionError(
+                f"MAPD returned too much data at offset {offset}."
             )
         chunk_bytes = text.encode("utf-8")
         actual_size = len(chunk_bytes)
@@ -246,4 +299,5 @@ def read_map_text(
         chunks.extend(chunk_bytes)
         offset += returned_size if returned_size is not None else actual_size
         chunk_count += 1
+    _read_deadline(deadline)
     return chunks.decode("utf-8"), chunk_count, offset

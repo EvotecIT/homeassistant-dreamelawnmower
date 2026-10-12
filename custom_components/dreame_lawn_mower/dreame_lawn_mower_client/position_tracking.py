@@ -208,8 +208,12 @@ class MowerPositionTracker:
         contains: Callable[[int, int], bool],
         snapshot: Any,
         now: datetime | None = None,
+        allow_geometry_change: bool = True,
     ) -> MowerPosition | None:
-        """Prefer current telemetry, or proven docking, then labelled history."""
+        """Prefer current telemetry, or proven docking, then labelled history.
+
+        Cached consumers disable geometry changes to preserve newer evidence.
+        """
         current = (now or datetime.now(UTC)).timestamp()
         with self._lock:
             owned_position = self._input or self._last or self._dock
@@ -218,6 +222,9 @@ class MowerPositionTracker:
                 # can move the live owner and its historical geometry context.
                 return None
             if self._geometry != geometry:
+                if not allow_geometry_change and self._geometry is not None:
+                    # Cached projections cannot retire a newer frame's poses.
+                    return None
                 if self._geometry is not None:
                     self._geometry_changed_at = current
                 self._geometry = geometry

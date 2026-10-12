@@ -157,6 +157,7 @@ def test_background_map_read_cannot_revive_an_evicted_snapshot(transition):
             async_get_current_app_map_index=read_map,
             async_get_runtime_status_blob=AsyncMock(return_value=blob),
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
         coordinator._async_refresh_runtime_status = AsyncMock(
             wraps=coordinator._async_refresh_runtime_status

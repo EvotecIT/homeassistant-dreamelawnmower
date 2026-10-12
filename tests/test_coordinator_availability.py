@@ -595,6 +595,7 @@ def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
         coordinator.app_maps_refresh_succeeded = True
         return 2
 
+    coordinator.client.update_runtime_map_identity = Mock()
     coordinator.client.async_get_current_app_map_index = refresh_map_index
     for name in (
         "async_refresh_batch_device_data",
@@ -646,6 +647,7 @@ def test_active_runtime_tracking_survives_status_blob_failure() -> None:
         coordinator.app_maps_refresh_succeeded = True
         return 2
 
+    coordinator.client.update_runtime_map_identity = Mock()
     coordinator.client.async_get_current_app_map_index = refresh_map_index
     for name in (
         "async_refresh_batch_device_data",
