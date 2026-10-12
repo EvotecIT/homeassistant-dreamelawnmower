@@ -45,12 +45,19 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     ) -> MowerPosition | None:
         """Commit one current observation atomically, rejecting overtaken reads."""
         with self._runtime_geometry_lock:
-            self._expire_runtime_live_tracking()
+            expired = self._expire_runtime_live_tracking()
+            frame = (map_index, geometry)
+            if expired:
+                # Revoked identity permits labelled projection of the retained
+                # frame, never a new frame that could erase its history.
+                return self._position_tracker.resolve(
+                    map_index=map_index, geometry=geometry, contains=contains,
+                    snapshot=self._latest_snapshot, allow_geometry_change=False,
+                ) if frame == self._observed_map_geometry else None
             if self._runtime_geometry_map_index not in (None, map_index):
                 # Reading another slot cannot claim the verified current scope,
                 # even before that scope's first geometry read has completed.
                 return None
-            frame = (map_index, geometry)
             if (
                 expected_generation is not None
                 and expected_generation != self._runtime_geometry_revision
@@ -92,6 +99,24 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 self._retire_runtime_live_tracking()
             else:
                 self._expire_runtime_live_tracking()
+
+    def update_runtime_map_identity(
+        self, map_index: int | None, *, expires_at: datetime,
+    ) -> None:
+        """Atomically bind a host-verified MAPL lease before telemetry arrives.
+
+        A changed or expired scope retires live inputs while preserving labelled
+        history. Geometry reads cannot borrow the interval before the next pose.
+        """
+        with self._runtime_geometry_lock:
+            expired = self._expire_runtime_live_tracking()
+            if expired or map_index != self._runtime_geometry_map_index:
+                self._retire_runtime_live_tracking_locked()
+            self._runtime_map_identity_expires_at = (
+                expires_at if map_index is not None else None
+            )
+            self._scope_runtime_geometry(map_index)
+            self._expire_runtime_live_tracking()
 
     def _retire_runtime_live_tracking(self) -> None:
         """Revoke live publication, preserving history and consumed packets."""
@@ -152,7 +177,10 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         """
         if self._expire_runtime_live_tracking():
             map_index = None
-        self._scope_runtime_geometry(map_index)
+        if map_index is not None:
+            # An unscoped telemetry callback cannot revoke a fresh MAPL lease.
+            # Explicit identity revocation and expiry own that transition.
+            self._scope_runtime_geometry(map_index)
         if map_index is None or self._runtime_live_map_index not in (None, map_index):
             self._position_tracker.invalidate_current()
         self._position_tracker.record(status_blob, map_index=map_index)

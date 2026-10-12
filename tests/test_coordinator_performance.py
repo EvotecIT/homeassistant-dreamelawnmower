@@ -348,6 +348,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
             async_get_current_app_map_index=AsyncMock(return_value=2),
             async_get_runtime_status_blob=refresh_runtime,
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
         coordinator.async_refresh_app_maps = refresh_app_maps
         coordinator._schedule_metadata_refresh = Mock()
@@ -410,6 +411,7 @@ def test_command_boundary_blocks_delayed_foreground_runtime_side_effects() -> No
             async_get_current_app_map_index=AsyncMock(return_value=2),
             async_get_runtime_status_blob=refresh_runtime,
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
 
         refresh_task = asyncio.create_task(
@@ -478,6 +480,7 @@ def test_first_refresh_does_not_wait_for_optional_metadata(
         coordinator.client = SimpleNamespace(
             async_refresh=AsyncMock(return_value=snapshot),
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
         coordinator._async_refresh_metadata = metadata_refresh
 
@@ -824,6 +827,7 @@ def test_active_session_reuses_verified_map_identity_between_polls() -> None:
             async_get_current_app_map_index=AsyncMock(side_effect=TimeoutError),
             async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
         coordinator.async_refresh_app_maps = AsyncMock(
             return_value=coordinator.app_maps
@@ -865,6 +869,7 @@ def test_failed_due_map_refresh_does_not_stamp_runtime_with_stale_identity() -> 
             async_get_current_app_map_index=AsyncMock(side_effect=TimeoutError),
             async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
         coordinator.async_refresh_app_maps = AsyncMock(
             return_value=coordinator.app_maps

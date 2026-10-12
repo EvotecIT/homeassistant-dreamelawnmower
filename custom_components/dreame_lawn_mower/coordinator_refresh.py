@@ -76,6 +76,8 @@ def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
 class DreameLawnMowerRefreshMixin:
     """Keep blocking state refreshes separate from optional metadata hydration."""
 
+    _runtime_map_identity_generation: int
+
     if TYPE_CHECKING:
         # Methods supplied by the concrete coordinator and its other bases.
         # These declarations do not shadow their runtime implementations.
@@ -427,12 +429,17 @@ class DreameLawnMowerRefreshMixin:
                 or not self._runtime_map_identity_is_fresh()
             ):
                 # Supersede telemetry still awaiting the previous map's result.
-                self._invalidate_runtime_map_identity()
+                # The client publishes the replacement scope atomically below;
+                # revoking it first would expose an unscoped admission window.
+                self._runtime_map_identity_generation = identity_generation + 1
+                self._runtime_map_identity_verified = False
                 identity_generation = self._runtime_map_identity_generation
             self._runtime_active_map_index = index
             self._runtime_map_index_refreshed_at = datetime.now(UTC)
-            self.client.runtime_map_identity_expires_at = (
-                self._runtime_map_index_refreshed_at + RUNTIME_MAP_IDENTITY_INTERVAL
+            self.client.update_runtime_map_identity(
+                index, expires_at=(
+                    self._runtime_map_index_refreshed_at + RUNTIME_MAP_IDENTITY_INTERVAL
+                ),
             )
             # The complete map cache belongs to background hydration. Expire it
             # promptly on a switch without publishing old geometry as current.

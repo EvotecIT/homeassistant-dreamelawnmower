@@ -181,20 +181,23 @@ class _DreameLawnMowerClientMapsMixin(
 
         hint = self._sync_get_current_app_map_index()
         app_maps = None
+        app_error = None
         if _parse_drawable_batch_vector_map(batch_data, current_map_index=hint) is None:
             try:
                 app_maps = self._sync_get_app_maps(
                     include_payload=True, include_objects=False,
                 )
             except Exception as err:  # noqa: BLE001 - optional map source
-                return {
-                    "available": False, "source": "batch_vector_map", "error": str(err),
-                }
-            hint = app_maps.get("current_map_index")
-        return vector_map_details(
+                app_error = str(err)
+            if hint is None and app_maps is not None:
+                hint = app_maps.get("current_map_index")
+        details = vector_map_details(
             batch_data, hint, client=self, app_maps=app_maps,
             geometry_generation=generation,
         )
+        if not details["available"] and app_error is not None:
+            details["error"] = app_error
+        return details
 
     def _sync_refresh_map_summary(
         self,
@@ -280,19 +283,23 @@ class _DreameLawnMowerClientMapsMixin(
         hint = (current_map_index if current_map_index is not None
                 else self._sync_get_current_app_map_index())
         app_maps = None
+        app_error = None
         if _parse_drawable_batch_vector_map(batch_data, current_map_index=hint) is None:
             try:
                 app_maps = self._sync_get_app_maps(
                     include_payload=True, include_objects=False,
                 )
             except Exception as err:  # noqa: BLE001 - retain other camera sources
-                return DreameLawnMowerMapView(source=source, error=str(err))
-            if hint is None:
+                app_error = str(err)
+            if hint is None and app_maps is not None:
                 hint = app_maps.get("current_map_index")
-        return vector_map_view(
+        view = vector_map_view(
             self, batch_data, label_scale=label_scale, style=style,
             current_map_index=hint, app_maps=app_maps, geometry_generation=generation,
         )
+        return replace(view, error=app_error) if (
+            not view.available and app_error is not None
+        ) else view
 
     def _sync_refresh_legacy_map_view(
         self,

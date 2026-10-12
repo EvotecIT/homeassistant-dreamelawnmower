@@ -30,6 +30,24 @@ if TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
 
 
+def _select_vector_map_geometry(
+    batch_data: Mapping[str, Any] | None, current_map_index: int | None,
+    app_maps: Mapping[str, Any] | None,
+) -> tuple[DreameLawnMowerVectorMap | None, str]:
+    """Share static-frame preference without discarding standalone saved history."""
+    vector_map = _parse_drawable_batch_vector_map(
+        batch_data, current_map_index=current_map_index,
+    )
+    if vector_map is not None:
+        return vector_map, "batch_vector_map"
+    vector_map = parse_app_map_geometry(app_maps, current_map_index)
+    if vector_map is not None:
+        return vector_map, "app_action_map"
+    return _parse_drawable_batch_vector_map(
+        batch_data, current_map_index=current_map_index, include_history=True,
+    ), "batch_vector_map"
+
+
 def vector_map_details(
     batch_data: Mapping[str, Any] | None,
     current_map_index: int | None,
@@ -38,13 +56,9 @@ def vector_map_details(
     app_maps: Mapping[str, Any] | None = None,
     geometry_generation: int | None = None,
 ) -> dict[str, Any]:
-    vector_map = _parse_drawable_batch_vector_map(
-        batch_data, current_map_index=current_map_index,
+    vector_map, source = _select_vector_map_geometry(
+        batch_data, current_map_index, app_maps,
     )
-    source = "batch_vector_map"
-    if vector_map is None:
-        vector_map = parse_app_map_geometry(app_maps, current_map_index)
-        source = "app_action_map"
     if vector_map is None:
         return {
             "available": False,
@@ -85,14 +99,9 @@ def vector_map_view(
     geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Decode and render while the caller owns the device state lock."""
-    source = "batch_vector_map"
-    vector_map = _parse_drawable_batch_vector_map(
-        batch_data,
-        current_map_index=current_map_index,
+    vector_map, source = _select_vector_map_geometry(
+        batch_data, current_map_index, app_maps,
     )
-    if vector_map is None:
-        vector_map = parse_app_map_geometry(app_maps, current_map_index)
-        source = "app_action_map" if vector_map is not None else source
     if vector_map is None:
         return DreameLawnMowerMapView(
             source=source,

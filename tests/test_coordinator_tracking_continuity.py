@@ -113,6 +113,7 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
             async_get_current_app_map_index=read_map,
             async_get_runtime_status_blob=AsyncMock(side_effect=read_runtime),
             update_runtime_live_tracking=Mock(),
+            update_runtime_map_identity=Mock(),
         )
         tracker = DreameLawnMowerPerformanceTracker()
         result = await coordinator._async_refresh_active_runtime(

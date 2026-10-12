@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
@@ -86,17 +87,17 @@ async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
             return {"available": False, "source": "batch_vector_map", "error": str(err)}
         hint = await _map_hint(client)
         app_maps = None
+        app_error = None
         if await _needs_app_geometry(data, hint):
             try:
                 app_maps = await client.async_get_app_maps(
                     include_payload=True, include_objects=False,
                 )
             except Exception as err:  # noqa: BLE001 - optional map source
-                return {
-                    "available": False, "source": "batch_vector_map", "error": str(err),
-                }
-            hint = app_maps.get("current_map_index")
-        return await async_read_device_state(
+                app_error = str(err)
+            if hint is None and app_maps is not None:
+                hint = app_maps.get("current_map_index")
+        details = await async_read_device_state(
             client,
             lambda _device: vector_map_details(
                 data, hint, client=client, app_maps=app_maps,
@@ -104,6 +105,9 @@ async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
             ),
             refresh=False,
         )
+        if not details["available"] and app_error is not None:
+            details["error"] = app_error
+        return details
 
     return await client._async_cloud_read(read)
 
@@ -129,16 +133,17 @@ async def async_vector_view(
             else await _map_hint(client)
         )
         app_maps = None
+        app_error = None
         if await _needs_app_geometry(data, hint):
             try:
                 app_maps = await client.async_get_app_maps(
                     include_payload=True, include_objects=False,
                 )
             except Exception as err:  # noqa: BLE001 - retain other camera sources
-                return DreameLawnMowerMapView(source="batch_vector_map", error=str(err))
-            if hint is None:
+                app_error = str(err)
+            if hint is None and app_maps is not None:
                 hint = app_maps.get("current_map_index")
-        return await async_read_device_state(
+        view = await async_read_device_state(
             client,
             lambda _device: vector_map_view(
                 client,
@@ -151,5 +156,8 @@ async def async_vector_view(
             ),
             refresh=False,
         )
+        return replace(view, error=app_error) if (
+            not view.available and app_error is not None
+        ) else view
 
     return await client._async_cloud_read(read)

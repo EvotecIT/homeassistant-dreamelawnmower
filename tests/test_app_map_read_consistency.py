@@ -193,7 +193,7 @@ def test_drawable_batch_stays_preferred():
     assert client._sync_refresh_vector_map_view().source == "batch_vector_map"
 
 
-@pytest.mark.parametrize("shape", ["mowingAreas", "paths", "spotAreas", "M_PATH"])
+@pytest.mark.parametrize("shape", ["mowingAreas", "paths", "spotAreas"])
 def test_individual_drawable_batch_shapes_keep_the_existing_source(shape):
     client = tracked_client()
     full_batch = _batch_payload()
@@ -204,10 +204,6 @@ def test_individual_drawable_batch_shapes_keep_the_existing_source(shape):
         if field != shape:
             record.pop(field, None)
     batch = {"MAP.0": json.dumps([json.dumps(record)])}
-    if shape == "M_PATH":
-        batch.update({
-            key: value for key, value in full_batch.items() if key.startswith("M_PATH")
-        })
     client._sync_get_vector_map_batch_data = lambda: batch
 
     def unexpected(**kwargs):
