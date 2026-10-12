@@ -863,30 +863,31 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
 
 def test_vector_map_view_exposes_runtime_position_without_track_points() -> None:
     client = _client()
+    observed_at = datetime.now(UTC).isoformat()
     client._sync_get_vector_map_batch_data = lambda: _batch_payload()
     client._safe_map_diagnostics = lambda **kwargs: None
     client.update_runtime_live_tracking(
-        SimpleNamespace(
+        _runtime_track_packet(
             hex="runtime-pose-only",
             candidate_runtime_track_segments=(),
             candidate_runtime_pose_x=50,
             candidate_runtime_pose_y=40,
             candidate_runtime_heading_deg=90.0,
             candidate_runtime_region_id=7,
-            received_at="2026-07-16T10:02:09+00:00",
+            received_at=observed_at,
         ),
         active=True,
         map_index=0,
     )
 
-    view = client._sync_refresh_vector_map_view()
+    view = client._sync_refresh_vector_map_view(current_map_index=0)
 
     assert view.details is not None
     assert view.details["runtime_pose_x"] == 50
     assert view.details["runtime_pose_y"] == 40
     assert view.details["runtime_heading_deg"] == 90.0
     assert view.details["runtime_region_id"] == 7
-    assert view.details["runtime_position_updated_at"] == ("2026-07-16T10:02:09+00:00")
+    assert view.details["runtime_position_updated_at"] == observed_at
     assert "runtime_track_point_count" not in view.details
 
 
@@ -940,14 +941,24 @@ def test_vector_map_filters_transient_geometry_to_selected_boundary() -> None:
     )
 
 
+def _runtime_track_packet(**values):
+    """Give tracking fixtures the valid pose/time envelope required on the wire."""
+    fields = {
+        "frame_valid": True, "received_at": datetime.now(UTC).isoformat(),
+        "candidate_runtime_pose_x": 10, "candidate_runtime_pose_y": 20,
+    }
+    fields.update(values)
+    return SimpleNamespace(**fields)
+
+
 def test_runtime_track_resets_when_map_or_task_changes() -> None:
     client = _client()
-    first = SimpleNamespace(
+    first = _runtime_track_packet(
         hex="runtime-1",
         candidate_runtime_task_id=4,
         candidate_runtime_track_segments=(((10, 20), (30, 40)),),
     )
-    second = SimpleNamespace(
+    second = _runtime_track_packet(
         hex="runtime-2",
         candidate_runtime_task_id=5,
         candidate_runtime_track_segments=(((40, 40), (50, 50)),),
@@ -964,12 +975,12 @@ def test_runtime_track_resets_when_map_or_task_changes() -> None:
 @pytest.mark.parametrize("missing_blob", [False, True])
 def test_unverified_runtime_clears_retained_map_context(missing_blob):
     client = _client()
-    first = SimpleNamespace(
+    first = _runtime_track_packet(
         hex="verified", candidate_runtime_task_id=4,
         candidate_runtime_track_segments=(((10, 20), (30, 40)),),
     )
     client.update_runtime_live_tracking(first, active=True, map_index=0)
-    unverified = SimpleNamespace(
+    unverified = _runtime_track_packet(
         hex="unverified", candidate_runtime_task_id=4,
         candidate_runtime_track_segments=(((40, 40), (50, 50)),),
     )
@@ -984,13 +995,14 @@ def test_unverified_runtime_clears_retained_map_context(missing_blob):
     if not missing_blob:
         assert client._runtime_live_track_segments == ()
         unverified.hex = "fresh-verified"
+        unverified.received_at = datetime.now(UTC).isoformat()
         client.update_runtime_live_tracking(unverified, active=True, map_index=1)
     assert client._runtime_live_track_segments == (((40, 40), (50, 50)),)
 
 
 def test_cached_packet_cannot_move_between_verified_maps():
     client = _client()
-    packet = SimpleNamespace(
+    packet = _runtime_track_packet(
         hex="same-packet", candidate_runtime_track_segments=(((10, 20), (30, 40)),),
     )
     client.update_runtime_live_tracking(packet, active=True, map_index=0)
@@ -1001,7 +1013,7 @@ def test_cached_packet_cannot_move_between_verified_maps():
 
 def test_fetching_runtime_status_does_not_publish_unverified_overlay_input():
     client = _client()
-    verified = SimpleNamespace(hex="verified")
+    verified = _runtime_track_packet(hex="verified")
     client.update_runtime_live_tracking(verified, active=True, map_index=0)
     unverified = SimpleNamespace(hex="unverified")
     client._sync_get_decoded_status_blob = lambda *args, **kwargs: unverified
@@ -1023,10 +1035,10 @@ def test_coordinator_unverified_packets_cannot_extend_real_client_track(publishe
 
     async def scenario():
         client = _client()
-        client.update_runtime_live_tracking(SimpleNamespace(
+        client.update_runtime_live_tracking(_runtime_track_packet(
             hex="prior", candidate_runtime_track_segments=(((10, 20), (30, 40)),),
         ), active=True, map_index=0)
-        packet = SimpleNamespace(
+        packet = _runtime_track_packet(
             hex="unverified", candidate_runtime_track_segments=(((40, 40), (50, 50)),),
         )
         snapshot = SimpleNamespace(
@@ -1058,7 +1070,7 @@ def test_coordinator_unverified_packets_cannot_extend_real_client_track(publishe
 
 def test_verified_map_change_without_blob_retires_previous_track():
     client = _client()
-    client.update_runtime_live_tracking(SimpleNamespace(
+    client.update_runtime_live_tracking(_runtime_track_packet(
         hex="verified", candidate_runtime_track_segments=(((10, 20), (30, 40)),),
     ), active=True, map_index=0)
     client.update_runtime_live_tracking(None, active=True, map_index=1)
@@ -1071,7 +1083,7 @@ def test_rendering_another_map_does_not_retarget_live_tracking():
     client._sync_get_vector_map_batch_data = lambda: _batch_payload()
     client._safe_map_diagnostics = lambda **kwargs: None
     segments = (((10, 20), (30, 40)),)
-    client.update_runtime_live_tracking(SimpleNamespace(
+    client.update_runtime_live_tracking(_runtime_track_packet(
         hex="verified", candidate_runtime_track_segments=segments,
     ), active=True, map_index=1)
     view = client._sync_refresh_vector_map_view(current_map_index=0)
@@ -1085,7 +1097,7 @@ def test_vector_map_view_withholds_position_from_another_map() -> None:
     client._sync_get_vector_map_batch_data = lambda: _batch_payload()
     client._safe_map_diagnostics = lambda **kwargs: None
     client.update_runtime_live_tracking(
-        SimpleNamespace(
+        _runtime_track_packet(
             hex="runtime-map-1",
             candidate_runtime_task_id=8,
             candidate_runtime_track_segments=(((10, 20), (30, 40)),),
@@ -1093,7 +1105,7 @@ def test_vector_map_view_withholds_position_from_another_map() -> None:
             candidate_runtime_pose_y=900,
             candidate_runtime_heading_deg=0,
             candidate_runtime_region_id=1,
-            received_at="2026-07-24T10:00:00+00:00",
+            received_at=datetime.now(UTC).isoformat(),
         ),
         active=True,
         map_index=1,

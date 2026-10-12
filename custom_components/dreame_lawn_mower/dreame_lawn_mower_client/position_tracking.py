@@ -164,14 +164,14 @@ class MowerPositionTracker:
 
     def record(
         self, blob: Any, *, map_index: int | None, now: datetime | None = None
-    ) -> None:
-        """Bind a new position packet to its already-verified app map slot."""
+    ) -> bool:
+        """Bind a fresh scoped pose, returning whether this event was admitted."""
         if blob is None or not getattr(blob, "frame_valid", False):
-            return
+            return False
         observed = position_timestamp(getattr(blob, "received_at", None))
         current = (now or datetime.now(UTC)).timestamp()
-        if observed is None or observed > current + 5:
-            return
+        if observed is None or not -5 <= current - observed <= POSITION_MAX_AGE_SECONDS:
+            return False
         x, y = (
             getattr(blob, "candidate_runtime_pose_x", None),
             getattr(blob, "candidate_runtime_pose_y", None),
@@ -182,15 +182,15 @@ class MowerPositionTracker:
             or not isinstance(y, int)
             or isinstance(y, bool)
         ):
-            return
+            return False
         with self._lock:
             if self._last_event is not None and observed <= self._last_event:
-                return
+                return False
             self._last_event = observed
             # Do not bind this same cached packet to a newly selected map later.
             if map_index is None:
                 self._input = None
-                return
+                return False
             heading = getattr(blob, "candidate_runtime_heading_deg", None)
             if (
                 not isinstance(heading, (int, float))
@@ -199,6 +199,7 @@ class MowerPositionTracker:
             ):
                 heading = None
             self._input = MowerPosition(x, y, heading, observed, map_index)
+            return True
 
     def resolve(
         self,

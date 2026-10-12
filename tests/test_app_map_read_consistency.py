@@ -113,7 +113,10 @@ def test_view_keeps_position_telemetry_and_trail_from_one_observation(
             candidate_runtime_track_segments=(((200, 200), (300, 200)),),
         )
         if map_switch:
-            client.update_runtime_live_tracking(blob, active=True, map_index=1)
+            client.update_runtime_live_tracking(
+                replace(blob, received_at=datetime.now(UTC).isoformat()),
+                active=True, map_index=1,
+            )
         client._latest_snapshot = SimpleNamespace(
             available=True, activity="charging", docked=True,
         )

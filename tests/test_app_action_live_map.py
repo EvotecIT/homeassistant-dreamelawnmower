@@ -101,7 +101,7 @@ def native_maps():
     }
 
 
-def tracked_client():
+def tracked_client(*, at=None):
     client = _client()
     client._descriptor = replace(
         client.descriptor, model="dreame.mower.g2422", display_model="A1 Pro",
@@ -111,7 +111,7 @@ def tracked_client():
     client._sync_get_current_app_map_index = lambda: 0
     client._sync_get_app_maps = lambda **kwargs: native_maps()
     client._safe_map_diagnostics = lambda **kwargs: None
-    publish(client)
+    publish(client, at=at)
     return client
 
 
