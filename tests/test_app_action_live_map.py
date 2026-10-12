@@ -75,14 +75,15 @@ def a1_pro_packet(*, progress=800, size=33):
 
 
 def native_payload():
+    """Native coarse coordinates describe a 10-by-5-metre shared map frame."""
     return {
         "map": [
             {"id": 1, "name": "Garden", "area": 50,
-             "data": [[0, 0], [1000, 0], [1000, 500], [0, 500]]},
-            {"id": 200, "data": [[800, 100], [900, 200], [800, 300]]},
+             "data": [[0, 0], [100, 0], [100, 50], [0, 50]]},
+            {"id": 200, "data": [[80, 10], [90, 20], [80, 30]]},
         ],
-        "spot": [{"id": 9, "data": [[600, 100], [700, 100], [700, 200]]}],
-        "point": [[500, 100]],
+        "spot": [{"id": 9, "data": [[60, 10], [70, 10], [70, 20]]}],
+        "point": [[50, 10]],
     }
 
 
@@ -219,8 +220,8 @@ def test_app_geometry_requires_current_unique_slot_and_preserves_open_pathways()
 def test_native_maintenance_and_unknown_point_records_do_not_reject_the_lawn():
     maps = native_maps()
     maps["maps"][0]["payload"]["point"] = [
-        {"id": 301, "param": 0, "point": [500, 100, 90], "time": 0, "type": 1},
-        {"id": 302, "param": 0, "point": [700, 100], "time": 0, "type": 2},
+        {"id": 301, "param": 0, "point": [50, 10, 90], "time": 0, "type": 1},
+        {"id": 302, "param": 0, "point": [70, 10], "time": 0, "type": 2},
         {"id": 303, "type": "future"},
     ]
     geometry = parse_app_map_geometry(maps, 0)

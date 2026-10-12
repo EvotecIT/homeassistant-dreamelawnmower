@@ -17,6 +17,9 @@ from .vector_map import (
 )
 
 MAX_APP_MAP_POINTS = 50000
+# MAPD coordinates use the same coarse units as the encoded runtime pose.
+# Stored batch maps and decoded runtime positions use units ten times finer.
+_APP_MAP_COORDINATE_SCALE = 10
 
 
 def _has_polygon_area(points: tuple[tuple[int, int], ...]) -> bool:
@@ -81,7 +84,10 @@ def _points(value: Any, budget: list[int]) -> tuple[tuple[int, int], ...]:
             or not math.isfinite(v) or abs(v) > 10000000 for v in (x, y)
         ):
             raise ValueError("Invalid app-map coordinate.")
-        result.append((round(x), round(y)))
+        result.append((
+            round(x * _APP_MAP_COORDINATE_SCALE),
+            round(y * _APP_MAP_COORDINATE_SCALE),
+        ))
     return tuple(result)
 
 
