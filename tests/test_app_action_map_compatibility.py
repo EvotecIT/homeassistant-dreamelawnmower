@@ -214,7 +214,7 @@ def test_invalid_optional_geometry_still_consumes_the_shared_budget(monkeypatch,
 @pytest.mark.parametrize("stale", [False, True])
 def test_saved_trajectory_without_fresh_runtime_keeps_primary_app_render(stale):
     maps = native_maps()
-    maps["maps"][0]["payload"]["trajectory"] = [{"data": [[0, 0], [100, 100]]}]
+    maps["maps"][0]["payload"]["trajectory"] = [{"data": [[0, 0], [10, 10]]}]
     client = tracked_client()
     client._latest_runtime_status_blob = None
     client._runtime_live_track_segments = ()
