@@ -165,12 +165,12 @@ class MowerPositionTracker:
     def record(
         self, blob: Any, *, map_index: int | None, now: datetime | None = None
     ) -> bool:
-        """Bind a new scoped pose, returning whether this event was admitted."""
+        """Bind a fresh scoped pose, returning whether this event was admitted."""
         if blob is None or not getattr(blob, "frame_valid", False):
             return False
         observed = position_timestamp(getattr(blob, "received_at", None))
         current = (now or datetime.now(UTC)).timestamp()
-        if observed is None or observed > current + 5:
+        if observed is None or not -5 <= current - observed <= POSITION_MAX_AGE_SECONDS:
             return False
         x, y = (
             getattr(blob, "candidate_runtime_pose_x", None),

@@ -165,6 +165,34 @@ def test_rejected_cached_packet_cannot_bypass_trail_recovery_timeout():
     assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 2
 
 
+@pytest.mark.parametrize("packet", [
+    "older_same_task", "older_other_task", "future_other_task",
+])
+def test_rejected_telemetry_cannot_replace_or_enter_recoverable_history(packet):
+    """Delayed or future packets cannot erase or contaminate accepted trails."""
+    client = tracked_client()
+    scene = _scene(client)
+    original = client.mowing_map_runtime_overlay(scene)
+    before = client._sync_refresh_vector_map_view(current_map_index=0)
+    observed = datetime.fromisoformat(original["position_observed_at"])
+    publish(
+        client,
+        at=observed + timedelta(seconds=60 if packet.startswith("future") else -1),
+        hex="rejected-different-content",
+        candidate_runtime_task_id=100 if packet == "older_same_task" else 101,
+        candidate_runtime_track_segments=(((300, 100), (400, 100)),),
+    )
+    after = client.mowing_map_runtime_overlay(scene)
+    assert after["trail"] == original["trail"]
+    assert after["position_observed_at"] == original["position_observed_at"]
+    after_view = client._sync_refresh_vector_map_view(current_map_index=0)
+    assert after_view.image_png == before.image_png
+    _expire(client)
+    _renew(client)
+    _next_packet(client)
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 5
+
+
 @pytest.mark.parametrize("reader", ["renewal", "coordinator"])
 def test_lazy_expiry_does_not_restart_an_already_elapsed_recovery_window(reader):
     client = tracked_client()
@@ -178,6 +206,17 @@ def test_lazy_expiry_does_not_restart_an_already_elapsed_recovery_window(reader)
             datetime.now(UTC) - timedelta(seconds=180)
         )
         host._expire_runtime_map_identity()
+    _renew(client)
+    _next_packet(client)
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 2
+
+
+def test_stale_first_packet_cannot_seed_recoverable_live_history():
+    """A cached startup pose cannot become a trail in a later live session."""
+    client = tracked_client(at=datetime.now(UTC) - timedelta(seconds=120))
+    scene = _scene(client)
+    assert client.mowing_map_runtime_overlay(scene)["trail"] == []
+    _expire(client)
     _renew(client)
     _next_packet(client)
     assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 2

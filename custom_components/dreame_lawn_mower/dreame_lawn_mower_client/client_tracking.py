@@ -266,14 +266,16 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._scope_runtime_geometry(map_index)
         if map_index is None or self._runtime_live_map_index not in (None, map_index):
             self._position_tracker.invalidate_current()
+            self._latest_runtime_status_blob = None
         # The position owner consumes unscoped and repeated events. Timestamp
         # freshness alone cannot promote a rejected replay into recovery proof.
         self._runtime_live_packet_admitted = self._position_tracker.record(
             status_blob, map_index=map_index,
         )
-        self._latest_runtime_status_blob = (
-            status_blob if map_index is not None else None
-        )
+        if self._runtime_live_packet_admitted or status_blob is None:
+            self._latest_runtime_status_blob = (
+                status_blob if map_index is not None else None
+            )
         self._runtime_session_active = active
         if not active or map_index is None:
             if active:
@@ -291,7 +293,12 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._runtime_live_geometry_identity = None
             return
 
-        task_id = getattr(status_blob, "candidate_runtime_task_id", None)
+        # Rejected telemetry cannot retarget the session or enter the buffer
+        # that retirement may later preserve. Host map/idle changes still apply.
+        task_id = (
+            getattr(status_blob, "candidate_runtime_task_id", None)
+            if self._runtime_live_packet_admitted else None
+        )
         context_changed = (
             self._runtime_live_map_index is not None
             and map_index is not None
@@ -310,7 +317,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         if task_id is not None:
             self._runtime_live_task_id = task_id
 
-        if status_blob is None:
+        if status_blob is None or not self._runtime_live_packet_admitted:
             return
 
         observed = self._observed_map_geometry
