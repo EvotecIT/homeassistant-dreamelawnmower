@@ -220,7 +220,9 @@ def test_mower_operating_conditions_are_not_hard_errors(
         (None, 27, "realtime_property_2.2"),
     ],
 )
-@pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
+@pytest.mark.parametrize(
+    "model", ["dreame.mower.q2501a", "mova.mower.g2529b", "mova.mower.g2529c"]
+)
 def test_human_detection_is_a_notice_while_confirmed_model_keeps_mowing(
     status_code: int | None,
     realtime_code: int | None,
@@ -251,7 +253,9 @@ def test_human_detection_is_a_notice_while_confirmed_model_keeps_mowing(
 
 
 @pytest.mark.parametrize("state", ["PAUSED", "ERROR", "MONITORING_PAUSED"])
-@pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
+@pytest.mark.parametrize(
+    "model", ["dreame.mower.q2501a", "mova.mower.g2529b", "mova.mower.g2529c"]
+)
 def test_human_detection_remains_a_fault_when_confirmed_model_is_halted(
     state: str,
     model: str,
@@ -286,7 +290,9 @@ def test_human_detection_remains_a_fault_when_confirmed_model_is_halted(
         "MONITORING",
     ],
 )
-@pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
+@pytest.mark.parametrize(
+    "model", ["dreame.mower.q2501a", "mova.mower.g2529b", "mova.mower.g2529c"]
+)
 def test_human_detection_preserves_special_mowing_activity(state, model):
     snapshot = _snapshot(27, "infrared_shielding", state=state, model=model)
     assert snapshot.activity == "mowing"

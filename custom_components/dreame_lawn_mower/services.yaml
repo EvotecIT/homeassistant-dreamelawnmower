@@ -180,6 +180,27 @@ download_session_photos:
           max: 20
           mode: box
 
+download_person_photo:
+  name: Download person photo
+  description: >-
+    Save the photo the mower took when it detected a person to the Home
+    Assistant media folder, next to the session photos. Without detected_at, the
+    latest retained human-detection notice (code 27) is used. Observed on MOVA
+    LiDAX Ultra 1000 firmware; other models may store person photos differently.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    detected_at:
+      name: Detected at
+      description: >-
+        When the human-detection notice was observed. Defaults to the latest
+        retained detection.
+      required: false
+      selector:
+        datetime:
+
 switch_current_map:
   name: Switch current map
   description: >-

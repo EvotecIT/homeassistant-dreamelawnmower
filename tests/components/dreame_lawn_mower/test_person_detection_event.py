@@ -60,7 +60,12 @@ def _coordinator(hass, model="mova.mower.g2529b"):
 
 @pytest.mark.parametrize(
     ("model", "expected"),
-    [("mova.mower.g2529b", 1), ("dreame.mower.q2501a", 1), ("dreame.mower.p2255", 0)],
+    [
+        ("mova.mower.g2529b", 1),
+        ("mova.mower.g2529c", 1),
+        ("dreame.mower.q2501a", 1),
+        ("dreame.mower.p2255", 0),
+    ],
 )
 async def test_event_platform_only_creates_supported_models(hass, model, expected):
     entry = SimpleNamespace(entry_id="test", runtime_data=_coordinator(hass, model))

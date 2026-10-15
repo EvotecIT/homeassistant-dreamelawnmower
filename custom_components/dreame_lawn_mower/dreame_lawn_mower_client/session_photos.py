@@ -29,6 +29,14 @@ SESSION_SUMMARY_PIID = 9
 MAX_SESSION_PHOTO_BYTES = 8 * 1024 * 1024
 MAX_SESSION_PHOTOS = 100
 MAX_SESSION_HISTORY = 100
+# Person-detection photos are stored next to the session photos as
+# ``<unix seconds>_person.jpg`` and are listed by no session summary. A LiDAX
+# Ultra 1000 named the photo one second before Home Assistant observed the
+# code 27 notice, so search a small window nearest that second first.
+PERSON_PHOTO_SUFFIX = "_person.jpg"
+PERSON_PHOTO_SEARCH_OFFSETS = tuple(
+    sorted(range(-20, 4), key=lambda offset: (abs(offset + 1), offset > -1))
+)
 _PHOTO_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.(?:jpe?g|png)", re.I)
 
 
@@ -244,3 +252,68 @@ async def _read_optional_object(
         if err.status in (404, 410):
             return None
         raise
+
+
+def person_photo_object_names(
+    session_object_name: str, detected_at: float
+) -> list[str]:
+    """Return candidate object names for a detection, most likely first."""
+    parts = _summary_parts(session_object_name)
+    if parts is None:
+        return []
+    folder, prefix, namespace = parts
+    second = int(detected_at)
+    return [
+        f"{folder}/{prefix}/{namespace}/{second + offset}{PERSON_PHOTO_SUFFIX}"
+        for offset in PERSON_PHOTO_SEARCH_OFFSETS
+    ]
+
+
+async def async_find_person_photo(
+    client: DreameLawnMowerClient,
+    detected_at: float,
+    *,
+    deadline: float | None = None,
+    max_bytes: int = MAX_SESSION_PHOTO_BYTES,
+) -> tuple[SessionPhoto, bytes] | None:
+    """Download the photo of one person detection; ``None`` when none exists."""
+    deadline = min(deadline or float("inf"), time.monotonic() + 60)
+    descriptor = client._descriptor
+
+    async def read(cloud: DreameCloudSession) -> tuple[SessionPhoto, bytes] | None:
+        records = await cloud.async_get_property_history(
+            descriptor.did,
+            SESSION_EVENT_KEY,
+            kind="event",
+            require_response=True,
+            limit=5,
+            deadline=deadline,
+        )
+        sessions = task_sessions_from_history(records)
+        if not sessions:
+            return None
+        # Only the storage folder comes from the session; the detection may
+        # belong to a task whose summary is not published yet.
+        storage = TaskSession(sessions[0].object_name, None, None)
+        for object_name in person_photo_object_names(storage.object_name, detected_at):
+            url = await cloud.async_get_interim_file_url(
+                descriptor.did,
+                descriptor.model,
+                object_name,
+                deadline=deadline,
+                require_response=True,
+            )
+            if not url:
+                continue
+            content = await _read_optional_object(
+                cloud,
+                url,
+                deadline=deadline,
+                max_bytes=min(max_bytes, MAX_SESSION_PHOTO_BYTES),
+            )
+            if content is not None:
+                name = object_name.rsplit("/", 1)[1]
+                return SessionPhoto(name, object_name, storage), content
+        return None
+
+    return await client._async_cloud_read(read)

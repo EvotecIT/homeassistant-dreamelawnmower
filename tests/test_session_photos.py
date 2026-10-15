@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +24,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.session_photos
     SessionPhoto,
     TaskSession,
     async_get_session_photos,
+    person_photo_object_names,
     session_photo_names,
     session_photo_object_name,
     task_sessions_from_history,
@@ -441,3 +443,90 @@ def test_batch_timeout_keeps_successfully_saved_photos(
         assert not list(tmp_path.rglob("*.part"))
 
     asyncio.run(scenario())
+
+
+DETECTED = 1792074543
+PERSON = f"IQ000001/-1234/ali_dreame/{DETECTED - 1}_person.jpg"
+
+
+def _person_entity(
+    tmp_path: Path, cloud: _Cloud, events: list[dict]
+) -> DreameLawnMower:
+    entity = _entity(tmp_path, cloud)
+    entity.coordinator.mower_condition_history = SimpleNamespace(
+        recent=lambda: [dict(event) for event in events]
+    )
+    return entity
+
+
+def _detection(seconds: int = DETECTED) -> dict:
+    observed = datetime.fromtimestamp(seconds + 0.79, UTC).isoformat()
+    return {"code": 27, "message": "Human detected", "observed_at": observed}
+
+
+def test_person_photo_candidates_start_one_second_before_detection() -> None:
+    names = person_photo_object_names(SUMMARY, DETECTED + 0.79)
+
+    assert names[:3] == [
+        f"IQ000001/-1234/ali_dreame/{DETECTED + offset}_person.jpg"
+        for offset in (-1, -2, 0)
+    ]
+    assert len(names) == len(set(names)) == 24
+    assert f"IQ000001/-1234/ali_dreame/{DETECTED + 3}_person.jpg" in names
+    assert f"IQ000001/-1234/ali_dreame/{DETECTED - 20}_person.jpg" in names
+    assert person_photo_object_names("summary.json", DETECTED) == []
+
+
+def test_person_photo_service_saves_the_latest_detection_once(tmp_path: Path) -> None:
+    cloud = _cloud()
+    # The cloud signs any name; absent candidates answer 404.
+    cloud.files[f"IQ000001/-1234/ali_dreame/{DETECTED - 2}_person.jpg"] = None
+    cloud.files[PERSON] = b"\xff\xd8person"
+    entity = _person_entity(
+        tmp_path,
+        cloud,
+        [{"code": 74, "observed_at": "2026-10-15T00:45:46+00:00"}, _detection()],
+    )
+
+    first = asyncio.run(entity.async_download_person_photo())
+    second = asyncio.run(entity.async_download_person_photo())
+
+    saved = Path(first["photos"][0]["file"])
+    assert saved.name == f"{DETECTED - 1}_person.jpg"
+    assert saved.read_bytes() == b"\xff\xd8person"
+    assert tmp_path / "dreame_lawn_mower" / "my_mower" in saved.parents
+    assert first["photos"][0]["new"] is True
+    assert second["photos"] == [{"file": str(saved), "new": False}]
+    assert cloud.history_calls[0][2]["kind"] == "event"
+
+
+def test_person_photo_service_accepts_an_explicit_detection_time(
+    tmp_path: Path,
+) -> None:
+    cloud = _cloud()
+    cloud.files[PERSON] = b"\xff\xd8person"
+    entity = _person_entity(tmp_path, cloud, [])
+
+    response = asyncio.run(
+        entity.async_download_person_photo(
+            datetime.fromtimestamp(DETECTED, UTC)
+        )
+    )
+
+    assert Path(response["photos"][0]["file"]).read_bytes() == b"\xff\xd8person"
+
+
+def test_person_photo_service_requires_an_observed_detection(tmp_path: Path) -> None:
+    entity = _person_entity(tmp_path, _cloud(), [{"code": 74}])
+
+    with pytest.raises(HomeAssistantError, match="No person detection"):
+        asyncio.run(entity.async_download_person_photo())
+
+
+def test_person_photo_service_reports_when_no_photo_exists(tmp_path: Path) -> None:
+    entity = _person_entity(tmp_path, _cloud(), [_detection()])
+
+    response = asyncio.run(entity.async_download_person_photo())
+
+    assert response == {"photos": [], "limited": False}
+    assert not (tmp_path / "dreame_lawn_mower").exists()
