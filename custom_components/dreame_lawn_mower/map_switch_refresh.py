@@ -83,7 +83,10 @@ async def async_read_settled_map_index(
         if event != getattr(coordinator, "_map_switch_pending_event", None):
             return index
         index = await coordinator.client.async_get_current_app_map_index()
-    if event == getattr(coordinator, "_map_switch_pending_event", None):
+    if (
+        event == getattr(coordinator, "_map_switch_pending_event", None)
+        and index is not None
+    ):
         # A marker can also describe an unchanged map. Stop after the same
         # bounded backoff used for a commanded switch rather than retry forever.
         coordinator._map_switch_pending_event = None

@@ -3022,6 +3022,13 @@ class DreameLawnMowerCoordinator(
             return self.app_maps
         payload = dict(app_maps)
         current_idx = active_map_index(payload)
+        if (
+            getattr(self, "_map_switch_inventory_pending_event", None) is not None
+            and current_idx != getattr(self, "_runtime_active_map_index", None)
+        ):
+            # MAPL can settle before the complete download reflects the switch.
+            # Retain its identity and keep this inventory eligible for retry.
+            return self.app_maps
         identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
         newer_geometry_at = self.app_maps_refreshed_at
         if isinstance(newer_geometry_at, datetime) and newer_geometry_at > now:
@@ -3046,6 +3053,7 @@ class DreameLawnMowerCoordinator(
         self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
         if self.app_maps_refresh_succeeded:
             self._map_switch_inventory_pending_event = None
+            self._map_switch_pending_event = None
         if (
             identity_at is not None
             and now >= identity_at

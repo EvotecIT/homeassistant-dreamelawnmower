@@ -97,6 +97,35 @@ def test_unchanged_map_announcement_has_bounded_readback():
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("settled", [3, None])
+def test_lagging_inventory_cannot_complete_switch_confirmation(settled):
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        old = {"map_list_valid": True, "current_map_index": 2,
+               "maps": [{"idx": 2, "created": True, "available": True}]}
+        new = {"map_list_valid": True, "current_map_index": 3,
+               "maps": [{"idx": 3, "created": True, "available": True}]}
+        coordinator.app_maps = old
+        coordinator.client.async_get_current_app_map_index.return_value = settled
+        coordinator.client.async_get_app_maps = AsyncMock(side_effect=[old, new])
+        _switch(coordinator)
+        with patch.object(refresh, "MAP_SWITCH_RETRY_DELAYS", (0, 0, 0)):
+            assert await coordinator.async_refresh_app_maps() is old
+        assert coordinator.app_maps_refreshed_at is None
+        assert coordinator.app_maps_refresh_succeeded is False
+        assert coordinator._map_switch_inventory_pending_event == 100
+        assert coordinator._metadata_phase_needs_retry("app_maps", old)
+        coordinator.client.async_get_current_app_map_index.return_value = 3
+        result = await coordinator.async_refresh_app_maps()
+        assert result["current_map_index"] == 3
+        assert coordinator._map_switch_inventory_pending_event is None
+        assert coordinator._map_switch_pending_event is None
+        assert coordinator.app_maps_refresh_succeeded is True
+
+    asyncio.run(scenario())
+
+
 def test_second_docked_switch_uses_fresh_map_list_while_geometry_lags():
     async def scenario():
         coordinator = _coordinator()
