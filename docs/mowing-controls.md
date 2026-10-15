@@ -274,3 +274,56 @@ showed the matching patrol in progress. While patrolling, the mower reports the
 `mowing` activity and the `Patrol task started` notice. Other models may reject
 the requests. Operation `106` sits in the same range, but its purpose is still
 unknown and the integration does not use it.
+
+### Session photos
+
+`dreame_lawn_mower.download_session_photos` saves the photos attached to the
+latest finished task sessions, such as the photos taken at patrol points, to the
+Home Assistant media folder (`<media>/dreame_lawn_mower/<entity>/<object-id>/`).
+The object ID keeps different cloud photos separate when filenames repeat.
+They are then visible in the Media browser and are not served from the public `www`
+folder. Photos already saved are skipped, so the service can run after every
+task. The response lists each photo with its file path, whether it is new, and
+the task operation of its session (for example `107` for point patrol).
+
+The service uses the configured `local` media source, or the first configured
+media source when `local` is absent. Configure a media directory before calling
+it. Each call scans up to 100 recent events to find 1–20 usable sessions and
+downloads at most 100 photos, 8 MiB per photo and 64 MiB in total, within two
+minutes. The archive is limited to 256 MiB per mower entity. The response includes
+`limited: true` when the photo-count, per-photo or storage budget is reached.
+Oversized photos and vendor-deleted objects are skipped so available photos can
+still be saved. Failed
+oversized downloads count against the batch budget. Saved photos
+are kept on failures and retries skip them. Remove older photos from the archive
+to free space; the integration never deletes them automatically. Media storage
+must support hard links for atomic saves that preserve existing files.
+
+```yaml
+action: dreame_lawn_mower.download_session_photos
+target:
+  entity_id: lawn_mower.my_mower
+data:
+  session_count: 3
+```
+
+Each finished task publishes a session event (`siid 4`, `eiid 1`) whose
+property `9` names a stored session summary. The summary's `photo_list` holds
+file names that the vendor app signs as `<folder>/<prefix>/ali_dreame/<file>`,
+where `<folder>` and `<prefix>` come from the summary path. This was verified
+on a MOVA LiDAX Ultra 1000 (`mova.mower.g2529c`) for point patrol photos. The
+service only reads the cloud and never sends a command to the mower.
+
+To save new photos automatically, call the service when the mower is back on
+the dock:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: lawn_mower.my_mower
+    to: docked
+actions:
+  - action: dreame_lawn_mower.download_session_photos
+    target:
+      entity_id: lawn_mower.my_mower
+```

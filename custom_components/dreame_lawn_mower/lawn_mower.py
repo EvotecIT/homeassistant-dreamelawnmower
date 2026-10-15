@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from time import time
 from types import SimpleNamespace
 from typing import Any, cast
@@ -185,6 +186,16 @@ async def async_setup_entry(
         "async_start_edge_patrol",
     )
     platform.async_register_entity_service(
+        "download_session_photos",
+        {
+            vol.Optional("session_count", default=1): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=20),
+            ),
+        },
+        "async_download_session_photos",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
         "switch_current_map",
         {vol.Required("map_index"): vol.Coerce(int)},
         "async_switch_current_map",
@@ -233,6 +244,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._descriptor.unique_id}_mower"
+        self._session_photo_lock = asyncio.Lock()
 
     @property
     def activity(self) -> LawnMowerActivity | None:
@@ -742,6 +754,18 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
         )
         await self.coordinator.async_request_refresh()
+
+    async def async_download_session_photos(
+        self, session_count: int = 1
+    ) -> dict[str, Any]:
+        """Save photos of the latest finished task sessions to the media folder."""
+        from .session_photo_archive import async_archive_session_photos
+
+        async with self._session_photo_lock:
+            return await async_archive_session_photos(
+                self.hass, self.coordinator.client, self.entity_id,
+                session_count=session_count,
+            )
 
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the mower's active app map."""

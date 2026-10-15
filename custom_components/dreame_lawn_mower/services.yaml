@@ -145,6 +145,32 @@ start_edge_patrol:
       selector:
         object: {}
 
+download_session_photos:
+  name: Download session photos
+  description: >-
+    Save the photos attached to the latest finished task sessions (for example
+    point patrol photos) to the Home Assistant media folder under
+    dreame_lawn_mower/<entity>/<object-id>. Already saved photos are skipped.
+    Limited to 100 photos and 64 MiB per call, with a 256 MiB archive per entity.
+    Observed on
+    MOVA LiDAX Ultra 1000 firmware; other models may not publish session photos.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    session_count:
+      name: Session count
+      description: Number of latest finished task sessions to read.
+      required: false
+      default: 1
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+
 switch_current_map:
   name: Switch current map
   description: >-
