@@ -45,7 +45,10 @@ from custom_components.dreame_lawn_mower.schedule_cache import (
 )
 
 
-def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
+@pytest.mark.parametrize("preview_enabled", [False, True])
+def test_coordinator_registers_its_config_entry_with_home_assistant(
+    preview_enabled,
+) -> None:
     entry = SimpleNamespace(
         data={
             CONF_DID: "device-id",
@@ -56,7 +59,8 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
             CONF_USERNAME: "user@example.invalid",
             CONF_PASSWORD: "secret",
         },
-        options={},
+        options={"map_restart_preview": preview_enabled},
+        entry_id="test-entry",
     )
     client = Mock()
     shared_session = Mock()
@@ -78,10 +82,13 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
             "__init__",
             return_value=None,
         ) as coordinator_init,
+        patch("custom_components.dreame_lawn_mower.map_preview.preview_store") as store,
     ):
         coordinator = DreameLawnMowerCoordinator(hass, entry)
 
     assert coordinator.entry is entry
+    assert (coordinator.map_restart_preview is not None) is preview_enabled
+    assert store.call_count == int(preview_enabled)
     assert coordinator_init.call_args.kwargs["config_entry"] is entry
     session_factory.assert_called_once_with(hass)
     assert client_factory.call_args.kwargs["session"] is shared_session

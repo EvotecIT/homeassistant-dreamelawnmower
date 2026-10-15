@@ -120,6 +120,43 @@ def test_docked_mqtt_updates_resume_pending_switch_recovery() -> None:
     asyncio.run(scenario())
 
 
+def test_shutdown_drains_preview_after_stopping_snapshot_producers() -> None:
+    async def scenario():
+        coordinator = _coordinator()
+        started, release = asyncio.Event(), asyncio.Event()
+        snapshot = SimpleNamespace(available=True, map_switch_event_at=100)
+
+        async def cached():
+            started.set()
+            await release.wait()
+            return snapshot
+
+        async def stop_connectivity():
+            release.set()
+            await asyncio.sleep(0)
+
+        coordinator.client.async_get_cached_snapshot = cached
+        coordinator.client.set_update_callback = Mock()
+        coordinator._record_device_snapshot = Mock()
+        coordinator._async_shutdown_connectivity_recovery = stop_connectivity
+        flushed = []
+
+        async def flush():
+            flushed.append(update_task.done())
+
+        coordinator.map_restart_preview = SimpleNamespace(async_flush_invalidated=flush)
+        coordinator._client_update_task = asyncio.create_task(
+            coordinator._async_process_client_update()
+        )
+        update_task = coordinator._client_update_task
+        await started.wait()
+        await coordinator._async_stop_owned_tasks()
+        coordinator._record_device_snapshot.assert_not_called()
+        assert flushed == [True]
+
+    asyncio.run(scenario())
+
+
 def test_background_refresh_recovers_expired_identity() -> None:
     async def scenario() -> None:
         coordinator = _coordinator()

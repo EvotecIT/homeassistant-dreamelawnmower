@@ -168,13 +168,8 @@ class DreameLawnMowerMapCamera(
         if self._supports_restart_preview and self.coordinator.entry.options.get(
             CONF_MAP_RESTART_PREVIEW, False
         ):
-            self._restart_preview = RestartMapPreview(
-                self.hass, self.coordinator.entry.entry_id
-            )
-            self.coordinator.map_restart_preview = self._restart_preview
-            if self._map_switch_event is not None:
-                self._restart_preview.invalidate(self._map_switch_event)
-                await async_flush_restart_preview(self.coordinator)
+            self._restart_preview = self.coordinator.map_restart_preview
+            await async_flush_restart_preview(self.coordinator)
         self._last_refresh_context = self._map_refresh_context
         if self._prewarm_map_image and self.available:
             self._start_map_refresh()

@@ -17,7 +17,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 if TYPE_CHECKING:
-    from .map_preview import RestartMapPreview
     from .observation_checkpoint import ObservationCheckpoint
     from .option_updates import EntryUpdateSnapshot
     from .video_lan_cache import DreameLawnMowerVideoLanCache
@@ -71,6 +70,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
+from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview
 from .map_switch_refresh import (
     async_flush_restart_preview,
     async_prepare_map_switch_metadata,
@@ -428,7 +428,7 @@ class DreameLawnMowerCoordinator(
     video_lan_cache: DreameLawnMowerVideoLanCache
     video_provisioning_cache: DreameLawnMowerVideoProvisioningCache
     loaded_platforms: tuple[Platform, ...]
-    map_restart_preview: RestartMapPreview
+    map_restart_preview: RestartMapPreview | None
 
     def __init__(self, hass: HomeAssistant, entry: DreameLawnMowerConfigEntry) -> None:
         descriptor = DreameLawnMowerDescriptor(
@@ -452,6 +452,10 @@ class DreameLawnMowerCoordinator(
             session=async_get_clientsession(hass),
         )
         self.entry = entry
+        self.map_restart_preview = (
+            RestartMapPreview(hass, entry.entry_id)
+            if entry.options.get(CONF_MAP_RESTART_PREVIEW) else None
+        )
         self.app_map_objects: dict[str, Any] | None = None
         self.app_maps: dict[str, Any] | None = None
         self.app_maps_refreshed_at: datetime | None = None
@@ -823,6 +827,8 @@ class DreameLawnMowerCoordinator(
                 self._device_refresh_lock = asyncio.Lock()
             async with self._device_refresh_lock:
                 snapshot = await self.client.async_get_cached_snapshot()
+                if getattr(self, "_shutting_down", False):
+                    return
                 if not snapshot.available:
                     retained = self._record_connectivity_failure(
                         "Realtime mower connection was interrupted."
@@ -3446,7 +3452,6 @@ class DreameLawnMowerCoordinator(
     async def _async_stop_owned_tasks(self) -> None:
         """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
-        await async_flush_restart_preview(self)
         await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
         self.client.set_update_callback(None)
@@ -3467,6 +3472,7 @@ class DreameLawnMowerCoordinator(
                     "Continuing mower shutdown while a cancelled realtime "
                     "update finishes in the background."
                 )
+        await async_flush_restart_preview(self)
 
     async def _async_stop_owned_tasks_serialized(self) -> None:
         """Serialize shutdown ownership across stop and config-entry unload."""

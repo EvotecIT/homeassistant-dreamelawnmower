@@ -59,6 +59,21 @@ def test_later_full_inventory_rearms_docked_identity_confirmation():
     asyncio.run(scenario())
 
 
+def test_switch_retires_entry_preview_without_an_active_camera():
+    async def scenario():
+        coordinator = _coordinator()
+        preview = SimpleNamespace(
+            invalidate=Mock(), async_flush_invalidated=AsyncMock()
+        )
+        coordinator.map_restart_preview = preview
+        _switch(coordinator)
+        preview.invalidate.assert_called_once_with(100)
+        await refresh.async_flush_restart_preview(coordinator)
+        preview.async_flush_invalidated.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
 def test_switch_expires_previously_fresh_3d_objects():
     async def scenario():
         coordinator = _coordinator()
