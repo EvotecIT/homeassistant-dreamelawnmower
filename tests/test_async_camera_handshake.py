@@ -252,16 +252,25 @@ def test_handshake_cleanup_survives_interruption(monkeypatch, stop, mode):
 @pytest.mark.parametrize("stop", ["cancel", "close"])
 @pytest.mark.parametrize("finish", ["release", "deadline"])
 def test_handshake_drains_bounded_cleanup(monkeypatch, stop, finish):
-    from functools import partial
+    from types import SimpleNamespace
 
     from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
-        client_camera_handshake,
+        client_cleanup,
     )
 
+    timers = []
     if finish == "deadline":
+        def controlled_timeout(delay):
+            timer = asyncio.timeout(None)
+            timers.append(timer)
+            return timer
+
+        # Expire the real cleanup context only after its end request reaches
+        # the server. A 150ms wall-clock budget can expire during CI scheduling,
+        # before the state this regression intends to exercise even exists.
         monkeypatch.setattr(
-            client_camera_handshake, "finish_owned_cleanup",
-            partial(client_camera_handshake.finish_owned_cleanup, timeout=0.15),
+            client_cleanup, "asyncio",
+            SimpleNamespace(**{**vars(asyncio), "timeout": controlled_timeout}),
         )
     strings = cloud_strings("dreame")
 
@@ -312,6 +321,9 @@ def test_handshake_drains_bounded_cleanup(monkeypatch, stop, finish):
                     task.cancel()
                 if finish == "release":
                     release.set()
+                else:
+                    assert len(timers) == 1
+                    timers[0].reschedule(asyncio.get_running_loop().time())
                 with pytest.raises(asyncio.CancelledError):
                     await asyncio.wait_for(task, 3)
                 if closer is not None:
