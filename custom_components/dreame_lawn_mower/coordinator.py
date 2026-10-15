@@ -72,6 +72,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
+from .map_switch_refresh import async_prepare_map_switch_metadata, observe_map_switch
 from .mower_condition_history import MowerConditionHistory
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
@@ -489,7 +490,9 @@ class DreameLawnMowerCoordinator(
         self._pending_schedule_upload_active_indices: set[int] = set()
         self._batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None = None
         self._batch_schedule_read_tasks: set[asyncio.Task[dict[str, Any]]] = set()
-        self._batch_schedule_read_key: tuple[int | None, bool] | None = None
+        self._batch_schedule_read_key: (
+            tuple[int | None, bool, float | None] | None
+        ) = None
         self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
@@ -511,6 +514,11 @@ class DreameLawnMowerCoordinator(
         self.selected_map_index: int | None = None
         # Shared by the map cameras and the interactive map API.
         self.real_scene: RealSceneImage | None = None
+        self._last_map_switch_event_at: float | None = None
+        self._map_switch_inventory_pending_event: float | None = None
+        self._map_switch_pending_event: float | None = None
+        self._map_switch_previous_index: int | None = None
+        self._map_switch_settle_until = 0.0
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
         self.selected_spot_id: int | None = None
@@ -606,6 +614,7 @@ class DreameLawnMowerCoordinator(
         retain: bool = False,
     ) -> None:
         """Assign fetch order so slow hydration cannot publish stale state."""
+        observe_map_switch(self, snapshot)
         self._device_snapshot_generation = (
             getattr(self, "_device_snapshot_generation", 0) + 1
         )
@@ -1006,6 +1015,8 @@ class DreameLawnMowerCoordinator(
         force: bool = False,
     ) -> dict[str, Any] | None:
         """Refresh schedules through the fast batch path with app fallback."""
+        if not await async_prepare_map_switch_metadata(self):
+            return self.schedules
         now = datetime.now(UTC)
         refresh_generation = getattr(self, "_schedule_cache_generation", 0)
         if (
@@ -1056,6 +1067,8 @@ class DreameLawnMowerCoordinator(
                     map_indices=request_schedule_indices,
                 )
             except Exception as err:  # noqa: BLE001 - optional cloud capability
+                if not self._schedule_refresh_is_current(refresh_generation):
+                    return self.schedules
                 action_backoff.record_result(
                     now,
                     succeeded=False,
@@ -2111,6 +2124,9 @@ class DreameLawnMowerCoordinator(
         source: str = "batch_device_data_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached batch device data without failing the main poll."""
+        if not await async_prepare_map_switch_metadata(self):
+            return self.batch_device_data
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
             not force
@@ -2156,6 +2172,8 @@ class DreameLawnMowerCoordinator(
                         )
                     )
                     self.batch_device_data = updated_batch_device_data
+                return self.batch_device_data
+            if switch_event != getattr(self, "_last_map_switch_event_at", None):
                 return self.batch_device_data
             preference_read_is_current = self._preference_read_can_publish(
                 preference_read_generation
@@ -2357,6 +2375,9 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh mower preferences after the mower announces a change."""
         async with self._preference_write_lock:
+            if not await async_prepare_map_switch_metadata(self):
+                return None
+            switch_event = getattr(self, "_last_map_switch_event_at", None)
             preference_read_generation = self._begin_preference_read()
             preference_read_started_at = datetime.now(UTC)
             try:
@@ -2379,6 +2400,8 @@ class DreameLawnMowerCoordinator(
                         ),
                     ),
                 )
+                if switch_event != getattr(self, "_last_map_switch_event_at", None):
+                    return None
                 if not self._preference_read_can_publish(preference_read_generation):
                     if not getattr(self, "_published_preference_read_complete", False):
                         self.batch_device_data_refreshed_at = None
@@ -2773,7 +2796,10 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any]:
         """Coalesce aligned schedule and batch-metadata cloud reads."""
         discover_map_index = map_index_hint is not None
-        key = (map_index_hint, discover_map_index)
+        key = (
+            map_index_hint, discover_map_index,
+            getattr(self, "_last_map_switch_event_at", None),
+        )
         loop = asyncio.get_running_loop()
         task = getattr(self, "_batch_schedule_read_task", None)
         completed_at = getattr(self, "_batch_schedule_read_completed_at", None)
@@ -2872,6 +2898,9 @@ class DreameLawnMowerCoordinator(
         source: str = "app_map_objects_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached read-only 3D map object metadata."""
+        if not await async_prepare_map_switch_metadata(self):
+            return self.app_map_objects
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
             not force
@@ -2888,9 +2917,12 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app map objects: %s", err)
-            self.app_map_objects_refreshed_at = None
+            if switch_event == getattr(self, "_last_map_switch_event_at", None):
+                self.app_map_objects_refreshed_at = None
             return self.app_map_objects
 
+        if switch_event != getattr(self, "_last_map_switch_event_at", None):
+            return self.app_map_objects
         payload = {
             "captured_at": now.isoformat(),
             "source": source,
@@ -2907,6 +2939,9 @@ class DreameLawnMowerCoordinator(
         source: str = "vector_map_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached batch vector-map details without failing the main poll."""
+        if not await async_prepare_map_switch_metadata(self):
+            return self.vector_map_details
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
             not force
@@ -2920,9 +2955,12 @@ class DreameLawnMowerCoordinator(
             vector_map_details = await self.client.async_get_vector_map_details()
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh vector map details: %s", err)
-            self.vector_map_details_refreshed_at = None
+            if switch_event == getattr(self, "_last_map_switch_event_at", None):
+                self.vector_map_details_refreshed_at = None
             return self.vector_map_details
 
+        if switch_event != getattr(self, "_last_map_switch_event_at", None):
+            return self.vector_map_details
         payload = dict(vector_map_details)
         payload.setdefault("captured_at", now.isoformat())
         payload["source"] = source
@@ -2937,7 +2975,10 @@ class DreameLawnMowerCoordinator(
         source: str = "app_maps_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached app-map payloads without failing the main poll."""
+        if not await async_prepare_map_switch_metadata(self, require_inventory=False):
+            return self.app_maps
         now = datetime.now(UTC)
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         if (
             not force
@@ -2966,6 +3007,8 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app maps: %s", err)
+            if switch_event != getattr(self, "_last_map_switch_event_at", None):
+                return self.app_maps
             refreshed_at = self.app_maps_refreshed_at
             if (
                 isinstance(refreshed_at, datetime) and refreshed_at > now
@@ -2976,8 +3019,19 @@ class DreameLawnMowerCoordinator(
             self.app_maps_refresh_succeeded = False
             return self.app_maps
 
+        if switch_event != getattr(self, "_last_map_switch_event_at", None):
+            # A switch can settle on the same index with different geometry.
+            # Keep newer cache state intact regardless of this read's outcome.
+            return self.app_maps
         payload = dict(app_maps)
         current_idx = active_map_index(payload)
+        if (
+            getattr(self, "_map_switch_inventory_pending_event", None) is not None
+            and current_idx != getattr(self, "_runtime_active_map_index", None)
+        ):
+            # MAPL can settle before the complete download reflects the switch.
+            # Retain its identity and keep this inventory eligible for retry.
+            return self.app_maps
         identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
         newer_geometry_at = self.app_maps_refreshed_at
         if isinstance(newer_geometry_at, datetime) and newer_geometry_at > now:
@@ -3000,6 +3054,9 @@ class DreameLawnMowerCoordinator(
         self.app_maps = payload
         self.app_maps_refreshed_at = now
         self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
+        if self.app_maps_refresh_succeeded:
+            self._map_switch_inventory_pending_event = None
+            self._map_switch_pending_event = None
         if (
             identity_at is not None
             and now >= identity_at

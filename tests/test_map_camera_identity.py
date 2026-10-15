@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.dreame_lawn_mower import camera as camera_module
-from custom_components.dreame_lawn_mower.camera import DreameLawnMowerMapCamera
+from custom_components.dreame_lawn_mower.camera import (
+    DreameLawnMowerAllMapsCamera,
+    DreameLawnMowerLivePathMapCamera,
+    DreameLawnMowerMapCamera,
+)
 from custom_components.dreame_lawn_mower.map_cache import DreameLawnMowerMapCameraCache
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
@@ -19,6 +23,8 @@ from dreame_lawn_mower_client.models import (
 class _Camera(DreameLawnMowerMapCamera):
     _selected_map_index = 0
     _map_rotation = 270
+    _map_label_scale = 1
+    _map_style = None
     _map_refresh_context = (0,)
     available = True
 
@@ -116,6 +122,112 @@ def test_presentation_change_during_render_rejects_obsolete_pixels(during_conver
     assert entity._map_refresh_pending is True
 
 
+@pytest.mark.parametrize("during_conversion", [False, True])
+def test_same_index_switch_during_render_rejects_obsolete_pixels(during_conversion):
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(_last_map_switch_event_at=None)
+
+    async def refresh():
+        if not during_conversion:
+            entity.coordinator._last_map_switch_event_at = 100
+        return DreameLawnMowerMapView(
+            source="app_action_map", image_png=b"png",
+            summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        )
+
+    async def convert(_):
+        entity.coordinator._last_map_switch_event_at = 100
+        return b"obsolete-jpeg"
+
+    entity._async_refresh_map_view = refresh
+    entity.hass.async_add_executor_job = convert
+    assert asyncio.run(entity._async_refresh_and_render_map_image()) is None
+    assert entity._map_cache.last_image is None
+    assert entity._map_refresh_pending is True
+
+
+def test_same_index_switch_discards_idle_cached_camera_image(monkeypatch):
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(data=None, _last_map_switch_event_at=100)
+    entity._last_refresh_context = entity._map_refresh_context
+    entity._last_image_request_at = 0
+    entity._map_cache.store_image(b"old", source_image=b"old-png")
+    entity._start_map_refresh = Mock()
+    monkeypatch.setattr(
+        camera_module.CoordinatorEntity, "_handle_coordinator_update", Mock()
+    )
+    entity._handle_coordinator_update()
+    assert entity._map_cache.last_image is None
+
+
+def test_same_index_switch_rejects_inflight_contact_sheet():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(), _last_map_switch_event_at=None,
+    )
+
+    async def convert(_):
+        entity.coordinator._last_map_switch_event_at = 100
+        return b"obsolete-contact-sheet"
+
+    entity.coordinator.client.async_get_app_maps = AsyncMock(return_value={"maps": []})
+    entity.hass.async_add_executor_job = convert
+    # The real contact-sheet owner uses this entity's map identity/style
+    # properties; conversion is the only external worker boundary here.
+    assert asyncio.run(
+        DreameLawnMowerAllMapsCamera._async_refresh_and_render_map_image(entity)
+    ) is None
+    assert entity._map_cache.last_image is None
+    assert entity._map_refresh_pending is True
+
+
+@pytest.mark.parametrize("during_placeholder", [False, True])
+def test_same_index_switch_rejects_failed_contact_sheet(during_placeholder):
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(), _last_map_switch_event_at=None,
+    )
+
+    async def download(**kwargs):
+        if not during_placeholder:
+            entity.coordinator._last_map_switch_event_at = 100
+        raise TimeoutError("Old contact sheet failed")
+
+    async def placeholder(_):
+        entity.coordinator._last_map_switch_event_at = 100
+        return b"obsolete-placeholder"
+
+    entity.coordinator.client.async_get_app_maps = download
+    entity.hass.async_add_executor_job = placeholder
+    assert asyncio.run(
+        DreameLawnMowerAllMapsCamera._async_refresh_and_render_map_image(entity)
+    ) is None
+    assert entity._map_cache.last_view is None
+    assert entity._map_cache.last_image is None
+    assert entity._map_refresh_pending is True
+
+
+@pytest.mark.parametrize("camera_type", [
+    DreameLawnMowerMapCamera, DreameLawnMowerLivePathMapCamera,
+])
+def test_pre_switch_camera_failure_cannot_publish_error_attributes(camera_type):
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(), _last_map_switch_event_at=None,
+    )
+
+    async def download(**kwargs):
+        entity.coordinator._last_map_switch_event_at = 100
+        raise TimeoutError("Old map failed")
+
+    entity.coordinator.client.async_refresh_map_view = download
+    entity.coordinator.client.async_refresh_vector_map_view = download
+    asyncio.run(camera_type._async_refresh_map_view(entity))
+    assert entity._map_cache.last_view is None
+    assert entity._map_cache.last_refresh_at is None
+    entity.async_write_ha_state.assert_not_called()
+
+
 @pytest.mark.parametrize("fresh_wins", [False, True])
 def test_restart_preview_restores_only_before_current_image(fresh_wins):
     entity = _camera()
@@ -144,6 +256,35 @@ def test_restart_preview_cannot_override_mower_unavailability():
     entity._restart_preview.async_load.assert_not_called()
 
 
+def test_observed_switch_cannot_restore_pre_switch_disk_preview():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(_last_map_switch_event_at=100)
+    entity._descriptor = SimpleNamespace(unique_id="one-mower")
+    entity._preview_attempted_scope = None
+    entity._restart_preview = SimpleNamespace(async_load=AsyncMock(
+        return_value=(b"old-garden", 123.0),
+    ))
+    entity._start_map_refresh = Mock()
+    asyncio.run(entity._async_get_map_image())
+    entity._restart_preview.async_load.assert_not_called()
+    assert entity._map_cache.last_image is None
+    entity._start_map_refresh.assert_called_once()
+
+
+def test_switch_during_camera_resize_cannot_return_old_image():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(_last_map_switch_event_at=None)
+    entity._last_refresh_context = entity._map_refresh_context
+    entity._async_camera_image_impl = AsyncMock(return_value=b"old-garden")
+
+    async def resize(*args):
+        entity.coordinator._last_map_switch_event_at = 100
+        return b"old-garden-resized"
+
+    entity._image_variants = SimpleNamespace(async_get=resize)
+    assert asyncio.run(entity.async_camera_image(width=400)) is None
+
+
 def test_identical_map_refresh_renews_preview_without_jpeg_conversion():
     entity = _camera()
     entity.coordinator = SimpleNamespace(entry=SimpleNamespace(
@@ -162,3 +303,22 @@ def test_identical_map_refresh_renews_preview_without_jpeg_conversion():
     entity.hass.async_add_executor_job.assert_not_called()
     entity._restart_preview.async_save.assert_awaited_once()
     assert entity._restart_preview.async_save.call_args.args[0] == b"jpeg"
+
+
+def test_restart_preview_scope_excludes_process_local_switch_receipt():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(
+        entry=SimpleNamespace(options={"map_restart_preview": True}),
+        _last_map_switch_event_at=None,
+    )
+    entity._descriptor = SimpleNamespace(unique_id="one-mower")
+    entity._restart_preview = SimpleNamespace(async_save=AsyncMock())
+
+    async def run():
+        await entity._async_save_restart_preview(b"jpeg", entity._map_render_context)
+        entity.coordinator._last_map_switch_event_at = 100
+        await entity._async_save_restart_preview(b"jpeg", entity._map_render_context)
+
+    asyncio.run(run())
+    first, second = entity._restart_preview.async_save.call_args_list
+    assert first.args[1] == second.args[1]

@@ -229,5 +229,83 @@
     "entry_id_required": {
       "message": "Завантажено кілька записів газонокосарок Dreame; укажіть entry_id."
     }
+  },
+  "services": {
+    "start_scheduled_mowing": {
+      "name": "Почати заплановане косіння після перевірки умов",
+      "description": "Перевіряє умови та запускає завдання або пропускає його із зазначенням причини. Потрібні косарка онлайн на станції, неактивне завдання, відомий стан затримки через дощ, достатній заряд і вимкнені вбудовані розклади на всіх картах. Без черги та відновлення."
+    },
+    "start_zone_mowing": {
+      "name": "Почати косіння зон",
+      "description": "Запускає косіння збережених зон активної карти й підтверджує початок. Точне підтвердження зон залежить від даних завдання косарки."
+    },
+    "start_spot_mowing": {
+      "name": "Почати точкове косіння",
+      "description": "Запускає косіння збережених точкових ділянок активної карти й підтверджує початок. Точне підтвердження ділянок залежить від даних завдання косарки."
+    },
+    "start_edge_mowing": {
+      "name": "Почати косіння країв",
+      "description": "Запускає косіння вказаних країв активної карти й підтверджує початок. Кожен ідентифікатор — пара [edge_id, contour_index]; точне підтвердження режиму залежить від даних завдання."
+    },
+    "start_point_patrol": {
+      "name": "Почати патрулювання точок",
+      "description": "Відвідує точки патрулювання активної карти без косіння; без point_ids відвідує всі. Використовуйте на станції або під час простою. Спостерігалося на MOVA LiDAX Ultra 1000; інші моделі можуть відхилити запит."
+    },
+    "start_edge_patrol": {
+      "name": "Почати патрулювання країв",
+      "description": "Проїжджає вказані краї активної карти без косіння. Кожен ідентифікатор — пара [edge_id, contour_index]. Використовуйте під час простою. Спостерігалося на MOVA LiDAX Ultra 1000; інші моделі можуть відхилити запит."
+    },
+    "download_session_photos": {
+      "name": "Завантажити фотографії завдань",
+      "description": "Зберігає фотографії завершених завдань у медіа Home Assistant і пропускає наявні файли. Ліміти: 100 фотографій і 64 MiB за виклик, архів 256 MiB на сутність. Спостерігалося на MOVA LiDAX Ultra 1000."
+    },
+    "download_person_photo": {
+      "name": "Завантажити фотографію виявленої людини",
+      "description": "Зберігає фотографію виявленої людини поруч із фотографіями завдань. Без detected_at використовує останнє збережене повідомлення з кодом 27. Спостерігалося на MOVA LiDAX Ultra 1000; інші моделі можуть зберігати фотографії інакше."
+    },
+    "switch_current_map": {
+      "name": "Перемкнути поточну карту",
+      "description": "Перемикає фактично активну карту косарки за індексом. Використовуйте на станції або під час простою; під час косіння запит може бути відхилено."
+    },
+    "cancel_current_task": {
+      "name": "Скасувати поточне завдання",
+      "description": "Завершує поточне завдання без повернення на станцію й чекає підтвердження неактивного стану. Якщо косарка вже простоює, нічого не змінює."
+    },
+    "plan_map_preference_mode_update": {
+      "name": "Підготувати зміну режиму налаштувань карти",
+      "description": "Build or send a guarded preference-mode update for the selected map on the mower entity. This only changes the selected map between global and custom preference mode and does not require any zone selection. By default this is a dry run that only stores the candidate PREP request in the last preference write diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "plan_zone_mowing_preference_update": {
+      "name": "Підготувати зміну налаштувань косіння зони",
+      "description": "Build or send a guarded mowing preference update for the selected map on the mower entity. Zone-scoped settings use the current Home Assistant map/zone selection scope unless zone_id is provided explicitly. Map-level preference_mode updates can be planned without any zone selection. By default this is a dry run that only stores the candidate PRE/PREP request in the last preference write diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "remote_control_step": {
+      "name": "Виконати крок дистанційного керування",
+      "description": "Send one validated manual-drive movement step to the mower. This can physically move the mower and is intended for short supervised tests only. The service is blocked while the mower is mowing, returning, mapping, fast mapping, in error, or below 20% battery."
+    },
+    "remote_control_stop": {
+      "name": "Зупинити дистанційне керування",
+      "description": "Send a zero-motion remote-control step to stop manual driving."
+    },
+    "set_schedule_plan_enabled": {
+      "name": "Увімкнути або вимкнути план косіння",
+      "description": "Build or send a guarded app-schedule enable/disable request. By default this is a dry run that only shows the request payload in a notification. Sending the request requires execute and confirm_schedule_write to both be true. Use only during supervised testing."
+    },
+    "set_schedule_task_start_time": {
+      "name": "Задати час початку запланованого завдання",
+      "description": "Preview or change one existing all-area mowing start on an A2 V3 schedule. Qualified for map 0, plan 0. Preserves other tasks, names and enable flags. The mower must have finished its current task. Defaults to a dry run; sending requires execute and confirm_schedule_write. Creation, weekday changes and area edits remain unavailable."
+    },
+    "plan_schedule_upload": {
+      "name": "Підготувати завантаження розкладу",
+      "description": "Build or send a guarded full schedule upload for one map slot. Provide a list of decoded schedule plans in the same readable shape returned by the schedule probe and calendar helpers. By default this is a dry run that only stores the candidate SCHDIV2/SCHDDV2 request sequence in the last schedule write diagnostic sensor. Sending the upload requires execute and confirm_schedule_write to both be true."
+    },
+    "plan_maintenance_reset": {
+      "name": "Підготувати скидання лічильника обслуговування",
+      "description": "Build or send a guarded CMS maintenance counter reset. By default this is a dry run that only shows the candidate CMS request in a notification and the diagnostic sensor. Sending the request requires execute and confirm_maintenance_reset to both be true."
+    },
+    "plan_mowing_preference_update": {
+      "name": "Підготувати зміну налаштувань косіння",
+      "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    }
   }
 }

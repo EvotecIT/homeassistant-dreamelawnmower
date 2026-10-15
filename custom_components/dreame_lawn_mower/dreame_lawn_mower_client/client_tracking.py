@@ -198,6 +198,17 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         with self._runtime_geometry_lock:
             self._retire_runtime_live_tracking_locked()
 
+    def invalidate_runtime_map_geometry(self) -> None:
+        """Require a new geometry observation after an announced app switch.
+
+        A switch can replace a slot's frame. Ordinary lease expiry preserves its
+        observed frame for recovery; a switch retains only labelled history.
+        """
+        with self._runtime_geometry_lock:
+            self._retire_runtime_live_tracking_locked()
+            self._observed_map_geometry = None
+            self._runtime_geometry_revision += 1
+
     def _retire_runtime_live_tracking_locked(self) -> None:
         self._remember_runtime_trail()
         # Keep the observed frame for history, but fence reads from the retired

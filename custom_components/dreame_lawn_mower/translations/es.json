@@ -229,5 +229,83 @@
     "entry_id_required": {
       "message": "Hay varias entradas de cortacésped Dreame cargadas; indique entry_id."
     }
+  },
+  "services": {
+    "start_scheduled_mowing": {
+      "name": "Iniciar corte programado con comprobaciones de seguridad",
+      "description": "Comprueba las condiciones e inicia la tarea o la omite indicando el motivo. Requiere cortacésped conectado y en la base, tarea inactiva, estado de lluvia conocido, batería suficiente y programas nativos desactivados en todos los mapas. No encola ni reanuda tareas."
+    },
+    "start_zone_mowing": {
+      "name": "Iniciar corte por zonas",
+      "description": "Inicia el corte de zonas guardadas del mapa activo y confirma el inicio. La confirmación exacta de las zonas depende de los datos de tarea del cortacésped."
+    },
+    "start_spot_mowing": {
+      "name": "Iniciar corte puntual",
+      "description": "Inicia el corte de áreas puntuales guardadas del mapa activo y confirma el inicio. La confirmación exacta depende de los datos de tarea del cortacésped."
+    },
+    "start_edge_mowing": {
+      "name": "Iniciar corte de bordes",
+      "description": "Inicia el corte de bordes indicados del mapa activo y confirma el inicio. Cada ID es un par [edge_id, contour_index]; la confirmación exacta del modo depende de los datos de tarea."
+    },
+    "start_point_patrol": {
+      "name": "Iniciar patrulla por puntos",
+      "description": "Visita puntos de patrulla del mapa activo sin cortar; sin point_ids visita todos. Úselo en la base o en reposo. Observado en MOVA LiDAX Ultra 1000; otros modelos pueden rechazarlo."
+    },
+    "start_edge_patrol": {
+      "name": "Iniciar patrulla de bordes",
+      "description": "Recorre los bordes indicados del mapa activo sin cortar. Cada ID es un par [edge_id, contour_index]. Úselo en reposo. Observado en MOVA LiDAX Ultra 1000; otros modelos pueden rechazarlo."
+    },
+    "download_session_photos": {
+      "name": "Descargar fotos de las tareas",
+      "description": "Guarda fotos de tareas terminadas en los medios de Home Assistant y omite archivos existentes. Límites: 100 fotos y 64 MiB por llamada, archivo de 256 MiB por entidad. Observado en MOVA LiDAX Ultra 1000."
+    },
+    "download_person_photo": {
+      "name": "Descargar foto de una persona detectada",
+      "description": "Guarda la foto de una persona detectada junto a las fotos de tareas. Sin detected_at usa el último aviso conservado con código 27. Observado en MOVA LiDAX Ultra 1000; otros modelos pueden almacenarlas de otra forma."
+    },
+    "switch_current_map": {
+      "name": "Cambiar el mapa actual",
+      "description": "Cambia el mapa realmente activo del cortacésped según su índice. Úselo en la base o en reposo; durante el corte la solicitud puede rechazarse."
+    },
+    "cancel_current_task": {
+      "name": "Cancelar la tarea actual",
+      "description": "Finaliza la tarea actual sin volver a la base y espera la confirmación del estado inactivo. Si ya está en reposo, no realiza cambios."
+    },
+    "plan_map_preference_mode_update": {
+      "name": "Preparar el cambio del modo de preferencias del mapa",
+      "description": "Build or send a guarded preference-mode update for the selected map on the mower entity. This only changes the selected map between global and custom preference mode and does not require any zone selection. By default this is a dry run that only stores the candidate PREP request in the last preference write diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "plan_zone_mowing_preference_update": {
+      "name": "Preparar el cambio de preferencias de corte de una zona",
+      "description": "Build or send a guarded mowing preference update for the selected map on the mower entity. Zone-scoped settings use the current Home Assistant map/zone selection scope unless zone_id is provided explicitly. Map-level preference_mode updates can be planned without any zone selection. By default this is a dry run that only stores the candidate PRE/PREP request in the last preference write diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "remote_control_step": {
+      "name": "Ejecutar un paso de control remoto",
+      "description": "Send one validated manual-drive movement step to the mower. This can physically move the mower and is intended for short supervised tests only. The service is blocked while the mower is mowing, returning, mapping, fast mapping, in error, or below 20% battery."
+    },
+    "remote_control_stop": {
+      "name": "Detener el control remoto",
+      "description": "Send a zero-motion remote-control step to stop manual driving."
+    },
+    "set_schedule_plan_enabled": {
+      "name": "Activar o desactivar un plan de corte",
+      "description": "Build or send a guarded app-schedule enable/disable request. By default this is a dry run that only shows the request payload in a notification. Sending the request requires execute and confirm_schedule_write to both be true. Use only during supervised testing."
+    },
+    "set_schedule_task_start_time": {
+      "name": "Establecer la hora de inicio de una tarea programada",
+      "description": "Preview or change one existing all-area mowing start on an A2 V3 schedule. Qualified for map 0, plan 0. Preserves other tasks, names and enable flags. The mower must have finished its current task. Defaults to a dry run; sending requires execute and confirm_schedule_write. Creation, weekday changes and area edits remain unavailable."
+    },
+    "plan_schedule_upload": {
+      "name": "Preparar la carga de la programación",
+      "description": "Build or send a guarded full schedule upload for one map slot. Provide a list of decoded schedule plans in the same readable shape returned by the schedule probe and calendar helpers. By default this is a dry run that only stores the candidate SCHDIV2/SCHDDV2 request sequence in the last schedule write diagnostic sensor. Sending the upload requires execute and confirm_schedule_write to both be true."
+    },
+    "plan_maintenance_reset": {
+      "name": "Preparar el reinicio del mantenimiento",
+      "description": "Build or send a guarded CMS maintenance counter reset. By default this is a dry run that only shows the candidate CMS request in a notification and the diagnostic sensor. Sending the request requires execute and confirm_maintenance_reset to both be true."
+    },
+    "plan_mowing_preference_update": {
+      "name": "Preparar el cambio de preferencias de corte",
+      "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    }
   }
 }

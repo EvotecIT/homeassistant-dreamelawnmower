@@ -24,6 +24,18 @@ runtime coordinates. The Map camera, Live Path Map camera, interactive overlay,
 and runtime track sensors share that geometry. Stale or unscoped telemetry does
 not establish a live position or trail; retained positions keep their status.
 
+When the mower announces a map switch made in its app, Home Assistant expires
+the previous map identity and refreshes the map inventory after a short settling
+delay. If the map list still reports the preceding map, bounded readback retries
+give the mower more time to finish switching. Paired switch announcements share
+the background refresh. A response started before the announcement cannot
+restore the old map's live tracking or mark its map, 3D object, schedule, or
+preference metadata as freshly read. Camera renders and dashboard scenes also
+discard results from before the announcement, even when the map number stays
+the same. Live overlays wait for a new geometry observation; the dashboard scene
+waits for the refreshed inventory. The destination map comes from the mower's map
+inventory, never from the announcement itself.
+
 A failed batch-map request does not discard a verified app map or its live
 overlay. App-map downloads accept up to 4 MiB and 16,384 chunks per map, with a
 16 MiB total byte budget and one 60-second budget shared across map selection,
