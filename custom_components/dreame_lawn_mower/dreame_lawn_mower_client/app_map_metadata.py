@@ -77,6 +77,92 @@ def verified_app_map_zone_names(
     return result
 
 
+def _inside_polygon(x: float, y: float, polygon: Sequence[Sequence[float]]) -> bool:
+    """Even-odd ray casting; points on an edge may fall on either side."""
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        x1, y1, x2, y2 = previous[0], previous[1], current[0], current[1]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+        previous = current
+    return inside
+
+
+def app_map_patrol_point_zones(
+    zone_records: Sequence[Any], point_entries: Sequence[Any]
+) -> dict[str, int]:
+    """Map each patrol point id to the lawn zone whose outline contains it."""
+    from .maintenance_point_records import app_map_patrol_point_ids
+
+    zones: list[tuple[int, list[tuple[float, float]]]] = []
+    for record in zone_records:
+        if not isinstance(record, Mapping) or type(record.get("id")) is not int:
+            continue
+        data = record.get("data")
+        if not isinstance(data, Sequence) or isinstance(data, str | bytes | bytearray):
+            continue
+        polygon = [
+            (float(point[0]), float(point[1])) for point in data
+            if isinstance(point, Sequence) and len(point) >= 2
+            and all(isinstance(value, int | float) and not isinstance(value, bool)
+                    for value in point[:2])
+        ]
+        if len(polygon) >= 3:
+            zones.append((record["id"], polygon))
+    patrol_ids = set(app_map_patrol_point_ids(point_entries))
+    result: dict[str, int] = {}
+    for entry in point_entries:
+        if not isinstance(entry, Mapping) or entry.get("id") not in patrol_ids:
+            continue
+        x, y = entry["point"][0], entry["point"][1]
+        zone_id = next(
+            (zone_id for zone_id, polygon in zones if _inside_polygon(x, y, polygon)),
+            None,
+        )
+        if zone_id is not None:
+            result[str(entry["id"])] = zone_id
+    return result
+
+
+def current_app_map_patrol_point_ids_in_zones(
+    app_maps: Any, zone_ids: Sequence[int]
+) -> list[int]:
+    """Return active-map patrol points located inside the requested zones."""
+    summary = _current_verified_app_map_summary(app_maps)
+    zones = summary.get("patrol_point_zones") if summary is not None else None
+    if not isinstance(zones, Mapping):
+        return []
+    wanted = set(zone_ids)
+    return [
+        point_id for point_id in current_app_map_patrol_point_ids(app_maps)
+        if zones.get(str(point_id)) in wanted
+    ]
+
+
+def _current_verified_app_map_summary(app_maps: Any) -> Mapping[str, Any] | None:
+    if not isinstance(app_maps, Mapping) or app_maps.get("map_list_valid") is not True:
+        return None
+    maps = app_maps.get("maps")
+    current_idx = app_maps.get("current_map_index")
+    if type(current_idx) is not int or not isinstance(maps, Sequence) or isinstance(
+        maps, str | bytes | bytearray
+    ):
+        return None
+    candidates = [
+        item for item in maps
+        if isinstance(item, Mapping) and item.get("idx") == current_idx
+        and type(item.get("idx")) is int
+    ]
+    if len(candidates) != 1 or any(
+        candidates[0].get(flag) is not True
+        for flag in ("created", "available", "hash_match")
+    ):
+        return None
+    summary = candidates[0].get("summary")
+    return summary if isinstance(summary, Mapping) else None
+
+
 def current_app_map_patrol_point_ids(app_maps: Any) -> list[int]:
     """Return patrol point ids decoded from the active, verified app map."""
     if not isinstance(app_maps, Mapping) or app_maps.get("map_list_valid") is not True:

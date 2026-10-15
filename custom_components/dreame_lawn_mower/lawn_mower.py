@@ -46,6 +46,7 @@ from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client import DreameLawnMowerConnectionError
 from .dreame_lawn_mower_client.app_map_metadata import (
     current_app_map_patrol_point_ids,
+    current_app_map_patrol_point_ids_in_zones,
 )
 from .dreame_lawn_mower_client.feature_capabilities import (
     resolved_feature_capabilities,
@@ -174,7 +175,10 @@ async def async_setup_entry(
     platform.async_register_entity_service(
         "start_point_patrol",
         {
-            vol.Optional("point_ids"): [
+            vol.Exclusive("point_ids", "patrol_points"): [
+                vol.All(vol.Coerce(int), vol.Range(min=1)),
+            ],
+            vol.Exclusive("zone_ids", "patrol_points"): [
                 vol.All(vol.Coerce(int), vol.Range(min=1)),
             ],
         },
@@ -720,11 +724,19 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_start_point_patrol(
-        self, point_ids: list[int] | None = None
+        self, point_ids: list[int] | None = None, zone_ids: list[int] | None = None
     ) -> None:
         """Visit configured patrol points on the active map without mowing."""
         map_index = self._task_map_index()
         normalized: list[int] | None = None
+        if zone_ids is not None:
+            if not zone_ids:
+                raise HomeAssistantError("At least one zone id is required.")
+            point_ids = current_app_map_patrol_point_ids_in_zones(
+                self.coordinator.app_maps, [int(zone_id) for zone_id in zone_ids]
+            )
+            if not point_ids:
+                raise HomeAssistantError("No patrol point lies in the selected zones.")
         if point_ids is not None:
             if not point_ids:
                 raise HomeAssistantError("At least one patrol point id is required.")

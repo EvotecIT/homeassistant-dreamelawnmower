@@ -571,3 +571,37 @@ def test_patrol_services_are_declared_for_home_assistant() -> None:
 
     assert services["start_point_patrol"]["fields"]["point_ids"]["required"] is False
     assert services["start_edge_patrol"]["fields"]["contour_ids"]["required"] is False
+
+
+def test_patrol_points_are_assigned_to_the_zone_that_contains_them() -> None:
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_map_metadata import (  # noqa: E501
+        app_map_patrol_point_zones,
+    )
+
+    zones = [
+        {"id": 1, "type": 0, "data": [[0, 0], [100, 0], [100, 100], [0, 100]]},
+        {"id": 2, "type": 0, "data": [[200, 0], [300, 0], [250, 80]]},
+        {"id": 3, "type": 2, "description": {}},
+    ]
+    points = [
+        {"id": 1, "param": {}, "point": [50, 50, 1], "time": 60, "type": 2},
+        {"id": 2, "param": {}, "point": [250, 20], "time": 60, "type": 2},
+        {"id": 3, "param": {}, "point": [500, 500], "time": 60, "type": 2},
+        {"id": 4, "param": {}, "point": [60, 60], "time": 60, "type": 1},
+    ]
+
+    assert app_map_patrol_point_zones(zones, points) == {"1": 1, "2": 2}
+
+
+def test_point_patrol_service_visits_only_points_in_selected_zones() -> None:
+    maps = _patrol_app_maps(patrol_point_ids=[1, 2, 3])
+    maps["maps"][0]["summary"]["patrol_point_zones"] = {"1": 1, "2": 3, "3": 1}
+    entity = _entity(app_maps=maps)
+
+    asyncio.run(entity.async_start_point_patrol(zone_ids=[1]))
+
+    entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(
+        [1, 3], expected_map_index=0,
+    )
+    with pytest.raises(HomeAssistantError, match="No patrol point"):
+        asyncio.run(entity.async_start_point_patrol(zone_ids=[9]))
