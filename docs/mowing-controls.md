@@ -327,3 +327,37 @@ actions:
     target:
       entity_id: lawn_mower.my_mower
 ```
+
+### Person photos
+
+When the mower detects a person it reports notice code `27` (human detected)
+and stores a photo next to the session photos as `<unix seconds>_person.jpg`.
+No session summary lists these photos. `dreame_lawn_mower.download_person_photo`
+looks for the photo of one detection by trying the names from 20 seconds before
+to 3 seconds after the notice, nearest the expected second first, and saves the
+first one found to the same media folder as the session photos. On a MOVA LiDAX
+Ultra 1000 (`mova.mower.g2529c`) the photo was named one second before Home
+Assistant observed the notice, so one request is normally enough. A missing
+photo returns an empty `photos` list. Without `detected_at`, the latest retained
+human-detection notice is used.
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: sensor.my_mower_last_mower_notification
+    attribute: observed_at
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.attributes.get('code') == 27 }}
+actions:
+  - delay: "00:00:30"
+  - action: dreame_lawn_mower.download_person_photo
+    target:
+      entity_id: lawn_mower.my_mower
+    data:
+      detected_at: >-
+        {{ trigger.to_state.attributes['observed_at'] }}
+```
+
+The short delay gives the mower time to upload the photo.

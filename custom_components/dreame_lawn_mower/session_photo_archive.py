@@ -21,6 +21,7 @@ from .dreame_lawn_mower_client.session_photos import (
     MAX_SESSION_PHOTOS,
     SessionPhoto,
     async_download_session_photo,
+    async_find_person_photo,
     async_get_session_photos,
     is_session_photo_name,
 )
@@ -34,6 +35,15 @@ MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
 MAX_BATCH_BYTES = 64 * 1024 * 1024
 BATCH_TIMEOUT = 120
 _ARCHIVE_WRITE_LOCK = threading.Lock()
+
+
+def _media_folder(hass: HomeAssistant, entity_id: str) -> Path:
+    """Return the entity's folder inside a registered media source."""
+    media_dirs = hass.config.media_dirs
+    root = media_dirs.get("local") or next(iter(media_dirs.values()), None)
+    if not root:
+        raise HomeAssistantError("Configure a Home Assistant media directory first")
+    return Path(root, DOMAIN, entity_id.split(".", 1)[1])
 
 
 def photo_archive_target(folder: Path, photo: SessionPhoto) -> Path:
@@ -91,11 +101,7 @@ async def async_archive_session_photos(
     session_count: int = 1,
 ) -> dict[str, Any]:
     """Save a bounded batch to a registered media source; never prune user media."""
-    media_dirs = hass.config.media_dirs
-    root = media_dirs.get("local") or next(iter(media_dirs.values()), None)
-    if not root:
-        raise HomeAssistantError("Configure a Home Assistant media directory first")
-    folder = Path(root, DOMAIN, entity_id.split(".", 1)[1])
+    folder = _media_folder(hass, entity_id)
     deadline = time.monotonic() + BATCH_TIMEOUT
     try:
         async with asyncio.timeout(BATCH_TIMEOUT):
@@ -169,6 +175,58 @@ async def async_archive_session_photos(
     except (OSError, ValueError) as err:
         raise HomeAssistantError(
             "Unable to save session photos to the media directory"
+        ) from err
+
+
+async def async_archive_person_photo(
+    hass: HomeAssistant,
+    client: DreameLawnMowerClient,
+    entity_id: str,
+    *,
+    detected_at: float,
+) -> dict[str, Any]:
+    """Save the photo of one person detection next to the session photos."""
+    folder = _media_folder(hass, entity_id)
+    deadline = time.monotonic() + BATCH_TIMEOUT
+    try:
+        async with asyncio.timeout(BATCH_TIMEOUT):
+            used = await hass.async_add_executor_job(_archive_size, folder)
+            remaining = MAX_ARCHIVE_BYTES - used
+            if remaining <= 0:
+                return {"photos": [], "limited": True}
+            found = await async_find_person_photo(
+                client,
+                detected_at,
+                deadline=deadline,
+                max_bytes=min(MAX_SESSION_PHOTO_BYTES, remaining),
+            )
+            if found is None:
+                return {"photos": [], "limited": False}
+            photo, content = found
+            target = photo_archive_target(folder, photo)
+            written = await hass.async_add_executor_job(
+                _write_photo_with_quota,
+                folder,
+                target,
+                content,
+            )
+            if written is None:
+                return {"photos": [], "limited": True}
+            return {
+                "photos": [{"file": str(target), "new": written}],
+                "limited": False,
+            }
+    except HttpResponseError as err:
+        if err.reason != "byte_limit":
+            raise HomeAssistantError("Person photo unavailable") from err
+        return {"photos": [], "limited": True}
+    except (DreameLawnMowerError, DeviceException) as err:
+        raise HomeAssistantError("Person photo unavailable") from err
+    except TimeoutError as err:
+        raise HomeAssistantError("Person photo download timed out") from err
+    except (OSError, ValueError) as err:
+        raise HomeAssistantError(
+            "Unable to save the person photo to the media directory"
         ) from err
 
 
