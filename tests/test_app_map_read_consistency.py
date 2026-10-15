@@ -9,8 +9,11 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from threading import Event
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+
+from custom_components.dreame_lawn_mower import map_switch_refresh
 
 from .test_app_action_live_map import (
     map_render_style,
@@ -18,6 +21,7 @@ from .test_app_action_live_map import (
     publish,
     tracked_client,
 )
+from .test_runtime_map_identity import _coordinator
 from .test_vector_map import _batch_payload
 
 
@@ -91,6 +95,57 @@ def test_identical_overlapping_reads_keep_the_winning_frame_live(
         finally:
             release.set()
             await asyncio.gather(older, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_same_index_switch_fences_old_frame_until_new_geometry_is_observed(
+    monkeypatch, native,
+):
+    client = tracked_client()
+    client._sync_refresh_vector_map_view(current_map_index=0)
+    coordinator = _coordinator()
+    coordinator.client = client
+    coordinator._schedule_metadata_refresh = Mock()
+    coordinator.app_maps = native_maps()
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
+    entered, release = Event(), Event()
+
+    def batch():
+        entered.set()
+        assert release.wait(5)
+        return {}
+
+    client._sync_get_vector_map_batch_data = batch
+    _native_reads(monkeypatch, client, batch, native_maps)
+
+    async def scenario():
+        old = asyncio.create_task(
+            client.async_refresh_vector_map_view(current_map_index=0)
+            if native else asyncio.to_thread(
+                client._sync_refresh_vector_map_view, current_map_index=0,
+            )
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            map_switch_refresh.observe_map_switch(
+                coordinator, SimpleNamespace(map_switch_event_at=100)
+            )
+            coordinator._map_switch_settle_until = 0
+            with patch.object(map_switch_refresh.asyncio, "sleep", new=AsyncMock()):
+                await coordinator._async_refresh_runtime_map_index(force=True)
+            publish(client, hex="post-switch-packet")
+            release.set()
+            result = await asyncio.wait_for(old, 5)
+            assert result.details["runtime_position_valid"] is False
+            assert client._runtime_live_geometry_identity is None
+            # A new read may verify the same frame and recover its live pose.
+            current = client._sync_refresh_vector_map_view(current_map_index=0)
+            assert current.details["runtime_position_valid"] is True
+        finally:
+            release.set()
+            await asyncio.gather(old, return_exceptions=True)
 
     asyncio.run(scenario())
 

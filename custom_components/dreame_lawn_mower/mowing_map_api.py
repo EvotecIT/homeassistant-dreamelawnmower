@@ -66,6 +66,11 @@ class MowingMapAPI:
     def context(self, coordinator: Any) -> tuple[Any, ...]:
         """Include map generation and presentation, but no moving telemetry."""
         app_maps = coordinator.app_maps
+        switch_event = getattr(coordinator, "_last_map_switch_event_at", None)
+        if getattr(
+            coordinator, "_map_switch_inventory_pending_event", None
+        ) is not None:
+            raise web.HTTPConflict(text="The switched map inventory is not available.")
         index = active_map_index(app_maps)
         if index is None or not app_maps or app_maps.get("map_list_valid") is not True:
             raise web.HTTPConflict(text="The current map identity is not available.")
@@ -78,6 +83,7 @@ class MowingMapAPI:
             identity,
             map_style(options, index),
             float(options.get(CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE)),
+            switch_event,
         )
 
     def authorize(self, request: web.Request, entry_id: str) -> Any:

@@ -28,6 +28,7 @@ def _coordinator():
         async_get_runtime_status_blob=AsyncMock(return_value=None),
         update_runtime_live_tracking=Mock(),
         update_runtime_map_identity=Mock(),
+        invalidate_runtime_map_geometry=Mock(),
     )
     return coordinator
 

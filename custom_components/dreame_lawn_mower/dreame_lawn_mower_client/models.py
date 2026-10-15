@@ -16,6 +16,7 @@ from .device_code_semantics import (
     mower_operational_human_detection_notice,
     mower_status_notice_code,
 )
+from .map_switch_events import map_switch_event_at
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 from .notice_events import MowerNoticeEvent
 from .video_provisioning_status import classify_xp2p_provisioning_issue
@@ -463,6 +464,7 @@ class DreameLawnMowerSnapshot:
         repr=False,
         compare=False,
     )
+    map_switch_event_at: float | None = field(default=None, repr=False, compare=False)
     mowing_session_active: bool | None = None
     task_resumable: bool | None = None
     error_code: int | None = None
@@ -1444,6 +1446,9 @@ def snapshot_from_device(
 
     return DreameLawnMowerSnapshot(
         descriptor=descriptor,
+        map_switch_event_at=map_switch_event_at(
+            getattr(device, "realtime_properties", {}) or {}
+        ),
         available=bool(getattr(device, "available", False)),
         state=state,
         state_name=state_name,
