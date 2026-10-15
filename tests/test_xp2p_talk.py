@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import struct
 from pathlib import Path
@@ -37,8 +38,12 @@ def _tag(tag_type: int, timestamp: int, body: bytes) -> bytes:
 
 
 def _flv(*tags: bytes, flags: int = 0x05) -> bytes:
-    return b"FLV\x01" + bytes([flags]) + struct.pack("!I", 9) + b"\0\0\0\0" + b"".join(
-        tags
+    return (
+        b"FLV\x01"
+        + bytes([flags])
+        + struct.pack("!I", 9)
+        + b"\0\0\0\0"
+        + b"".join(tags)
     )
 
 
@@ -81,6 +86,8 @@ def test_voice_status_command_matches_live_status_form() -> None:
         (b'[{"status":0}]', 0),
         (b'[{"status":"1"}]\0', 1),
         (b'{"status":-1}', -1),
+        (b'{"status":false}', None),
+        (b'{"status":0.5}', None),
         (b"[]", None),
         (b"not json", None),
     ],
@@ -131,7 +138,12 @@ def test_play_flv_audio_checks_voice_then_paces_and_closes() -> None:
     )
 
     assert [call[0] for call in runtime.calls] == [
-        "command", "start", "send", "send", "send", "stop",
+        "command",
+        "start",
+        "send",
+        "send",
+        "send",
+        "stop",
     ]
     assert runtime.calls[0][1] == VOICE_STATUS_COMMAND
     assert sleeps == [0.064, 0.064, 0.5]
@@ -214,10 +226,7 @@ def test_runtime_talk_controls_use_length_prefixed_worker_frames(
     runtime.stop_talk(session)
 
     assert process.stdin.getvalue() == (
-        b"C\0\0\0\x05cmd=x"
-        + b"T\0\0\0\x09channel=0"
-        + b"D\0\0\0\x02\x01\x02"
-        + b"S"
+        b"C\0\0\0\x05cmd=x" + b"T\0\0\0\x09channel=0" + b"D\0\0\0\x02\x01\x02" + b"S"
     )
 
 
@@ -253,6 +262,9 @@ def _hass(allowed: bool = True, ffmpeg: object | None = None):
     return SimpleNamespace(
         data=data,
         config=SimpleNamespace(is_allowed_path=lambda _path: allowed),
+        async_add_executor_job=lambda call, *args: (
+            asyncio.get_running_loop().run_in_executor(None, call, *args)
+        ),
     )
 
 
@@ -271,7 +283,7 @@ def test_play_audio_refuses_the_lan_video_transport() -> None:
         asyncio.run(async_play_audio_on_session(_hass(), _Runtime(), session, b"FLV"))
 
 
-def test_play_audio_refuses_paths_outside_the_allowlist() -> None:
+def test_play_audio_refuses_paths_outside_the_allowlist(tmp_path: Path) -> None:
     import asyncio
 
     from homeassistant.exceptions import HomeAssistantError
@@ -282,7 +294,7 @@ def test_play_audio_refuses_paths_outside_the_allowlist() -> None:
 
     with pytest.raises(HomeAssistantError, match="not allowed"):
         asyncio.run(
-            async_convert_to_talk_flv(_hass(allowed=False), "/private/sound.mp3")
+            async_convert_to_talk_flv(_hass(allowed=False), str(tmp_path / "sound.mp3"))
         )
 
 

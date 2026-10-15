@@ -505,11 +505,14 @@ class DreameLawnMowerXp2pHostRuntime:
         try:
             if process is not None and process.poll() is None:
                 try:
-                    if process.stdin is not None:
-                        process.stdin.write(b"\0")
-                        process.stdin.flush()
-                    process.wait(timeout=10.0)
-                except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+                    # The worker closes stdout after its graceful stop. Bound
+                    # the write as well as the read; a buffered writer may be
+                    # stuck behind an abandoned request's pipe lock.
+                    self._exchange_runner_control(session, b"\0", timeout=10.0)
+                except (OSError, DreameLawnMowerVideoRuntimeError):
+                    pass
+                finally:
+                    session.runner_process = None
                     _terminate_process(process)
         finally:
             _join_thread(session.runner_stderr_thread)
@@ -541,12 +544,9 @@ class DreameLawnMowerXp2pHostRuntime:
             if remaining <= 0:
                 return session.stream_link_mode
             try:
-                with session.runner_control_lock:
-                    process.stdin.write(b"Q")
-                    process.stdin.flush()
-                    status, response = _read_response(
-                        process.stdout, timeout=remaining
-                    )
+                status, response = self._exchange_runner_control(
+                    session, b"Q", timeout=remaining
+                )
             except (BrokenPipeError, OSError, DreameLawnMowerVideoRuntimeError):
                 return session.stream_link_mode
             if status == 0:
@@ -615,39 +615,64 @@ class DreameLawnMowerXp2pHostRuntime:
         *,
         timeout: float,
     ) -> bytes:
-        process = session.runner_process
-        if (
-            process is None
-            or process.poll() is not None
-            or process.stdin is None
-            or process.stdout is None
-        ):
-            raise DreameLawnMowerVideoRuntimeError(
-                "The live video worker is not running."
-            )
         message = control
         if argument is not None:
             message += struct.pack("!I", len(argument)) + argument
-
-        def write_request() -> None:
-            process.stdin.write(message)
-            process.stdin.flush()
-
-        with session.runner_control_lock:
-            try:
-                status, response = _read_response(
-                    process.stdout, timeout=timeout, write_request=write_request
-                )
-            except (BrokenPipeError, OSError) as err:
-                raise DreameLawnMowerVideoRuntimeError(
-                    "The live video worker stopped."
-                ) from err
+        status, response = self._exchange_runner_control(
+            session, message, timeout=timeout
+        )
         if status != 0:
             detail = response.decode("utf-8", "replace").strip()
             raise DreameLawnMowerVideoRuntimeError(
                 detail or f"XP2P worker control failed with status {status}."
             )
         return response
+
+    def _exchange_runner_control(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        message: bytes,
+        *,
+        timeout: float,
+    ) -> tuple[int, bytes]:
+        """Serialize framed I/O and retire uncertain pipes before releasing them."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Control timeout must be finite and positive")
+        deadline = time.monotonic() + timeout
+        if not session.runner_control_lock.acquire(timeout=timeout):
+            raise DreameLawnMowerVideoRuntimeError("XP2P control lock timed out.")
+        try:
+            process = session.runner_process
+            if (
+                process is None or process.poll() is not None
+                or process.stdin is None or process.stdout is None
+            ):
+                raise DreameLawnMowerVideoRuntimeError(
+                    "The live video worker is not running."
+                )
+
+            def write_request() -> None:
+                process.stdin.write(message)
+                process.stdin.flush()
+
+            try:
+                return _read_response(
+                    process.stdout, timeout=max(deadline - time.monotonic(), 0.001),
+                    write_request=write_request,
+                )
+            except (OSError, DreameLawnMowerVideoRuntimeError) as err:
+                # DXR1 has no correlation ID. An orphan reader, partial frame
+                # or blocked writer makes every later reply ambiguous. Killing
+                # the process releases its pipes without touching buffer locks.
+                session.runner_process = None
+                _terminate_process(process)
+                if isinstance(err, DreameLawnMowerVideoRuntimeError):
+                    raise
+                raise DreameLawnMowerVideoRuntimeError(
+                    "The live video worker stopped."
+                ) from err
+        finally:
+            session.runner_control_lock.release()
 
 
 def _decode_success_payload(value: str) -> tuple[int | None, str]:

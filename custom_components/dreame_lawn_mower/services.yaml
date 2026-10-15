@@ -199,7 +199,9 @@ play_audio:
     button. The audio uses the live video connection, which this action opens
     when needed and releases afterwards. The file is converted with ffmpeg to
     16 kHz mono AAC and limited to 60 seconds. The path must be in an allowed
-    directory such as /media.
+    directory such as /media. Use the cloud video transport. Supported files
+    include MP3, WAV, AAC, FLAC, Ogg, M4A/MP4 and Matroska; playlists and remote
+    URLs are rejected.
   target:
     entity:
       integration: dreame_lawn_mower

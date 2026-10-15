@@ -612,7 +612,8 @@ def test_host_runtime_refreshes_authoritative_relay_mode(
         now = [0.0]
         reads = []
 
-        def read(_stream, *, timeout):
+        def read(_stream, *, timeout, write_request):
+            write_request()
             reads.append(timeout)
             now[0] += min(1.7, timeout)
             return 0, b"0"

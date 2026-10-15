@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import struct
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -71,6 +72,8 @@ def voice_channel_status(reply: bytes) -> int | None:
     if not isinstance(value, dict):
         return None
     status = value.get("status")
+    if isinstance(status, bool) or not isinstance(status, (int, str)):
+        return None
     try:
         return int(status)
     except (TypeError, ValueError):
@@ -107,9 +110,7 @@ def split_flv_audio(data: bytes) -> list[FlvAudioChunk]:
             raise DreameLawnMowerVideoRuntimeError("The FLV stream contains video.")
         if tag_type == _FLV_TAG_AUDIO:
             tag = data[cursor:end]
-            chunks.append(
-                FlvAudioChunk(timestamp, header + tag if not chunks else tag)
-            )
+            chunks.append(FlvAudioChunk(timestamp, header + tag if not chunks else tag))
         elif tag_type != _FLV_TAG_SCRIPT:
             raise DreameLawnMowerVideoRuntimeError(
                 f"The FLV stream has an unknown tag type {tag_type}."
@@ -127,6 +128,12 @@ def talk_ffmpeg_arguments(input_path: str) -> list[str]:
         "-loglevel",
         "error",
         "-nostdin",
+        # Only self-contained media may be read. HLS/concat/DASH inputs can
+        # otherwise open files outside the path authorized by Home Assistant.
+        "-protocol_whitelist",
+        "file",
+        "-format_whitelist",
+        "aac,flac,mp3,ogg,wav,mov,matroska",
         "-i",
         input_path,
         "-t",
@@ -155,9 +162,22 @@ def play_flv_audio(
     *,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    cancelled: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Check voice readiness, then stream the audio in real time and close."""
     chunks = split_flv_audio(flv)
+
+    def check_cancelled() -> None:
+        if cancelled is not None and cancelled.is_set():
+            raise DreameLawnMowerVideoRuntimeError("Audio playback was cancelled.")
+
+    def wait(seconds: float) -> None:
+        if cancelled is None:
+            sleep(seconds)
+        elif cancelled.wait(seconds):
+            check_cancelled()
+
+    check_cancelled()
     status = voice_channel_status(
         runtime.post_device_command(session, VOICE_STATUS_COMMAND)
     )
@@ -165,15 +185,19 @@ def play_flv_audio(
         raise DreameLawnMowerVideoRuntimeError(
             f"The mower's voice channel is not ready (status {status})."
         )
+    check_cancelled()
     runtime.start_talk(session)
     try:
+        check_cancelled()
         started = clock()
         for chunk in chunks:
+            check_cancelled()
             delay = started + chunk.timestamp_ms / 1000 - clock()
             if delay > 0:
-                sleep(delay)
+                wait(delay)
+            check_cancelled()
             runtime.send_talk_audio(session, chunk.data)
-        sleep(_TALK_TAIL_SECONDS)
+        wait(_TALK_TAIL_SECONDS)
     except BaseException:
         # Keep the send failure; closing a dead channel would only hide it.
         try:

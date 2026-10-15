@@ -201,6 +201,7 @@ class DreameLawnMowerVideoCamera(
         self._prepared_runtime: _DreameVideoRuntime | None = None
         self._runtime_prepare_task: asyncio.Task[None] | None = None
         self._state_gate_cleanup_task: asyncio.Task[None] | None = None
+        self._talk_task: asyncio.Task[Any] | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
         self._unverified_playback_session: (
             DreameLawnMowerXp2pLiveStreamSession | None
@@ -307,13 +308,26 @@ class DreameLawnMowerVideoCamera(
             return self._runtime, self._session
 
         async with self._talk_lock:
-            return await async_play_audio_with_live_video(
-                self.hass,
-                file_path,
-                relay_url=self.stream_source,
-                ready_session=ready_session,
-                stream_error=lambda: getattr(self, "_last_error", None),
-            )
+            self._talk_task = asyncio.current_task()
+            try:
+                return await async_play_audio_with_live_video(
+                    self.hass,
+                    file_path,
+                    relay_url=self.stream_source,
+                    ready_session=ready_session,
+                    stream_error=lambda: getattr(self, "_last_error", None),
+                )
+            finally:
+                self._talk_task = None
+
+    async def _async_cancel_audio(self) -> None:
+        """Drain speaker playback before the video session is stopped."""
+        from .video_talk import _async_drain
+
+        task = getattr(self, "_talk_task", None)
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await _async_drain(task)
 
     async def async_added_to_hass(self) -> None:
         """Schedule managed runtime preparation without blocking entity setup."""
@@ -889,6 +903,7 @@ class DreameLawnMowerVideoCamera(
     async def async_turn_off(self) -> None:
         """Stop the current live video session."""
         self._attr_is_on = False
+        await self._async_cancel_audio()
         request = getattr(self, "_snapshot_request", None)
         if request is not None:
             await request.async_cancel()
@@ -906,6 +921,7 @@ class DreameLawnMowerVideoCamera(
     async def async_will_remove_from_hass(self) -> None:
         """Stop XP2P video when Home Assistant unloads the camera."""
         self._attr_is_on = False
+        await self._async_cancel_audio()
         provider = getattr(self.coordinator, "video_diagnostics_provider", None)
         if provider == self.video_runtime_diagnostics:
             self.coordinator.video_diagnostics_provider = None
