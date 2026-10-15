@@ -500,6 +500,7 @@ class DreameLawnMowerMapCamera(
                 await self._restart_preview.async_save(
                     image,
                     preview_scope(self._descriptor.unique_id, render_context[:-1]),
+                    generation=render_context[-1],
                 )
             except Exception:
                 _LOGGER.debug("Unable to save optional map restart preview")

@@ -26,19 +26,20 @@ def observe_map_switch(
     previous = getattr(coordinator, "_last_map_switch_event_at", None)
     if observed is None or (previous is not None and observed <= previous):
         return
-    if getattr(coordinator, "_map_switch_pending_event", None) is None:
-        if coordinator._runtime_map_identity_is_fresh() and getattr(
+    coordinator._map_switch_overlapping = (
+        getattr(coordinator, "_map_switch_pending_event", None) is not None
+        or getattr(coordinator, "_map_switch_inventory_pending_event", None) is not None
+    )
+    if coordinator._runtime_map_identity_is_fresh() and getattr(
+        coordinator, "_runtime_active_map_index", None
+    ) is not None:
+        coordinator._map_switch_previous_index = getattr(
             coordinator, "_runtime_active_map_index", None
-        ) is not None:
-            # MAPL identity is authoritative even while docked or while its
-            # geometry/overlay has not yet been verified or downloaded.
-            coordinator._map_switch_previous_index = getattr(
-                coordinator, "_runtime_active_map_index", None
-            )
-        else:
-            coordinator._map_switch_previous_index = active_map_index(
-                getattr(coordinator, "app_maps", None)
-            )
+        )
+    else:
+        coordinator._map_switch_previous_index = active_map_index(
+            getattr(coordinator, "app_maps", None)
+        )
     coordinator._last_map_switch_event_at = observed
     coordinator._map_switch_pending_event = observed
     coordinator._map_switch_inventory_pending_event = observed
@@ -77,7 +78,10 @@ async def async_read_settled_map_index(
     for delay in MAP_SWITCH_RETRY_DELAYS:
         if event != getattr(coordinator, "_map_switch_pending_event", None):
             return index
-        if index is not None and (previous is None or index != previous):
+        if (
+            not getattr(coordinator, "_map_switch_overlapping", False)
+            and index is not None and (previous is None or index != previous)
+        ):
             break
         await asyncio.sleep(delay)
         if event != getattr(coordinator, "_map_switch_pending_event", None):

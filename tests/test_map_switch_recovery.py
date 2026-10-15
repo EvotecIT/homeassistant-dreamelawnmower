@@ -18,6 +18,24 @@ def _switch(coordinator):
         coordinator._record_device_snapshot(SimpleNamespace(map_switch_event_at=100))
 
 
+def test_overlapping_switches_confirm_latest_identity_after_intermediate_map():
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._schedule_metadata_refresh = Mock()
+        coordinator.client.async_get_current_app_map_index.side_effect = [3, 4, 4, 4]
+        with patch.object(refresh, "MAP_SWITCH_SETTLE_SECONDS", 0):
+            for event in (100, 101):
+                coordinator._record_device_snapshot(
+                    SimpleNamespace(map_switch_event_at=event)
+                )
+        with patch.object(refresh.asyncio, "sleep", new=AsyncMock()):
+            result = await coordinator._async_refresh_runtime_map_index(force=True)
+        assert result[:2] == (True, 4)
+        assert coordinator._runtime_active_map_index == 4
+
+    asyncio.run(scenario())
+
+
 def test_switch_expires_previously_fresh_3d_objects():
     async def scenario():
         coordinator = _coordinator()
@@ -211,7 +229,7 @@ def test_second_docked_switch_uses_fresh_map_list_while_geometry_lags():
         )
         assert coordinator._runtime_map_identity_verified is False
         assert coordinator.app_maps["current_map_index"] == 2
-        coordinator.client.async_get_current_app_map_index.side_effect = [3, 2]
+        coordinator.client.async_get_current_app_map_index.side_effect = [3, 2, 2, 2]
         with patch.object(refresh, "MAP_SWITCH_SETTLE_SECONDS", 0):
             coordinator._record_device_snapshot(
                 SimpleNamespace(map_switch_event_at=101)
@@ -219,7 +237,7 @@ def test_second_docked_switch_uses_fresh_map_list_while_geometry_lags():
         with patch.object(refresh, "MAP_SWITCH_RETRY_DELAYS", (0, 0, 0)):
             result = await coordinator._async_refresh_runtime_map_index(force=True)
         assert result[:2] == (True, 2)
-        assert coordinator.client.async_get_current_app_map_index.await_count == 3
+        assert coordinator.client.async_get_current_app_map_index.await_count == 5
 
     asyncio.run(scenario())
 

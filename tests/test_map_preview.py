@@ -105,6 +105,26 @@ def test_restart_preview_verifies_jpeg_not_just_header():
     assert verified_preview(encode_preview(JPEG, "scope"), "scope") is None
 
 
+def test_same_slot_switch_renews_restart_image_inside_write_cooldown(monkeypatch):
+    async def exercise():
+        records = []
+
+        async def save(record):
+            records.append(record)
+
+        monkeypatch.setattr(preview_module, "preview_store", lambda *_:
+            SimpleNamespace(async_save=save))
+        monkeypatch.setattr(preview_module.time, "monotonic", lambda: 100.0)
+        preview = RestartMapPreview(SimpleNamespace(), "entry")
+        await preview.async_save(JPEG + b"old", "same-map-style", generation=None)
+        await preview.async_save(JPEG + b"new", "same-map-style", generation=101)
+        await preview.async_save(JPEG + b"new", "same-map-style", generation=101)
+        assert len(records) == 2
+        assert decode_preview(records[-1], "same-map-style")[0] == JPEG + b"new"
+
+    asyncio.run(exercise())
+
+
 def test_opt_out_drains_pending_write_before_removal(monkeypatch):
     async def exercise():
         writing = asyncio.Event()

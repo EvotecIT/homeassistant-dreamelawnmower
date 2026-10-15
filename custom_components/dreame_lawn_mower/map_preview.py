@@ -108,6 +108,7 @@ class RestartMapPreview:
         self._record: Any = None
         self._last_saved = 0.0
         self._last_scope: str | None = None
+        self._last_generation: float | None = None
         self._enabled = True
         self._write_lock = asyncio.Lock()
 
@@ -123,15 +124,22 @@ class RestartMapPreview:
         )
         return restored if self._enabled else None
 
-    async def async_save(self, image: bytes, scope: str) -> None:
+    async def async_save(
+        self, image: bytes, scope: str, *, generation: float | None = None
+    ) -> None:
         """Save no more than once per minute, except for a different map/style."""
         async with self._write_lock:
             if self._enabled:
-                await self._async_save_locked(image, scope)
+                await self._async_save_locked(image, scope, generation)
 
-    async def _async_save_locked(self, image: bytes, scope: str) -> None:
+    async def _async_save_locked(
+        self, image: bytes, scope: str, generation: float | None
+    ) -> None:
         now = time.monotonic()
-        if scope == self._last_scope and now - self._last_saved < 60:
+        if (
+            scope == self._last_scope and generation == self._last_generation
+            and now - self._last_saved < 60
+        ):
             return
         record = encode_preview(image, scope)
         if record is None:
@@ -143,7 +151,10 @@ class RestartMapPreview:
             await task
             raise
         self._last_scope = scope
+        self._last_generation = generation
         self._last_saved = now
+        self._record = record
+        self._loaded = True
 
     async def async_remove(self) -> None:
         """Opt out before draining writes so late work cannot recreate the file."""

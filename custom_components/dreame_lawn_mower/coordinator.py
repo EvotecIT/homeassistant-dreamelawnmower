@@ -515,6 +515,7 @@ class DreameLawnMowerCoordinator(
         self._map_switch_inventory_pending_event: float | None = None
         self._map_switch_pending_event: float | None = None
         self._map_switch_previous_index: int | None = None
+        self._map_switch_overlapping = False
         self._map_switch_settle_until = 0.0
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
