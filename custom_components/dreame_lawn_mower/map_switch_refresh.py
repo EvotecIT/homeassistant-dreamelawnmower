@@ -25,6 +25,7 @@ def observe_map_switch(
     coordinator._last_map_switch_event_at = observed
     coordinator._map_switch_settle_until = monotonic() + MAP_SWITCH_SETTLE_SECONDS
     coordinator._invalidate_runtime_map_identity()
+    coordinator._invalidate_inflight_schedule_refreshes()
     coordinator.app_maps_refreshed_at = None
     coordinator.app_maps_refresh_succeeded = False
     coordinator.vector_map_details_refreshed_at = None

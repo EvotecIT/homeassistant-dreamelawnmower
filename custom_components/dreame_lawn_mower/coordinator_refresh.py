@@ -392,11 +392,11 @@ class DreameLawnMowerRefreshMixin:
         self, *, force: bool,
     ) -> tuple[bool, int | None, int]:
         """Read only MAPL for live tracking; never wait for a MAPD download."""
-        await async_wait_for_map_switch(self)
         requested_at = datetime.now(UTC)
         if not hasattr(self, "_runtime_map_identity_lock"):
             self._runtime_map_identity_lock = asyncio.Lock()
         async with self._runtime_map_identity_lock:
+            await async_wait_for_map_switch(self)
             identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
             refreshed_at = getattr(self, "_runtime_map_index_refreshed_at", None)
             if (

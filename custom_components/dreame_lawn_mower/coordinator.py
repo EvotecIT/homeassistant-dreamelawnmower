@@ -1007,6 +1007,7 @@ class DreameLawnMowerCoordinator(
         force: bool = False,
     ) -> dict[str, Any] | None:
         """Refresh schedules through the fast batch path with app fallback."""
+        await async_wait_for_map_switch(self)
         now = datetime.now(UTC)
         refresh_generation = getattr(self, "_schedule_cache_generation", 0)
         if (
@@ -2112,6 +2113,8 @@ class DreameLawnMowerCoordinator(
         source: str = "batch_device_data_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached batch device data without failing the main poll."""
+        await async_wait_for_map_switch(self)
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
             not force
@@ -2157,6 +2160,8 @@ class DreameLawnMowerCoordinator(
                         )
                     )
                     self.batch_device_data = updated_batch_device_data
+                return self.batch_device_data
+            if switch_event != getattr(self, "_last_map_switch_event_at", None):
                 return self.batch_device_data
             preference_read_is_current = self._preference_read_can_publish(
                 preference_read_generation
@@ -2358,6 +2363,8 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh mower preferences after the mower announces a change."""
         async with self._preference_write_lock:
+            await async_wait_for_map_switch(self)
+            switch_event = getattr(self, "_last_map_switch_event_at", None)
             preference_read_generation = self._begin_preference_read()
             preference_read_started_at = datetime.now(UTC)
             try:
@@ -2380,6 +2387,8 @@ class DreameLawnMowerCoordinator(
                         ),
                     ),
                 )
+                if switch_event != getattr(self, "_last_map_switch_event_at", None):
+                    return None
                 if not self._preference_read_can_publish(preference_read_generation):
                     if not getattr(self, "_published_preference_read_complete", False):
                         self.batch_device_data_refreshed_at = None
@@ -2908,6 +2917,8 @@ class DreameLawnMowerCoordinator(
         source: str = "vector_map_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached batch vector-map details without failing the main poll."""
+        await async_wait_for_map_switch(self)
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
             not force
@@ -2924,6 +2935,8 @@ class DreameLawnMowerCoordinator(
             self.vector_map_details_refreshed_at = None
             return self.vector_map_details
 
+        if switch_event != getattr(self, "_last_map_switch_event_at", None):
+            return self.vector_map_details
         payload = dict(vector_map_details)
         payload.setdefault("captured_at", now.isoformat())
         payload["source"] = source
