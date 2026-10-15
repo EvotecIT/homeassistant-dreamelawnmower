@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from time import time
 from types import SimpleNamespace
 from typing import Any, cast
@@ -20,6 +21,7 @@ from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     async_get_current_platform,
 )
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ACTIVITY_DOCKED,
@@ -47,6 +49,7 @@ from .dreame_lawn_mower_client import DreameLawnMowerConnectionError
 from .dreame_lawn_mower_client.app_map_metadata import (
     current_app_map_patrol_point_ids,
 )
+from .dreame_lawn_mower_client.device_code_semantics import mower_device_code
 from .dreame_lawn_mower_client.feature_capabilities import (
     resolved_feature_capabilities,
 )
@@ -74,6 +77,9 @@ from .services import (
     preference_change_request,
 )
 from .session_timing import observed_mowing_time_attributes
+
+# Vendor fault table: 27 FAULT_HUMAN_DETECTED.
+HUMAN_DETECTED_CODE = 27
 
 # Command owners serialize writes; scheduled rejection and stop requests must
 # reach those owners without waiting behind another entity service.
@@ -120,6 +126,17 @@ def _validate_contour_ids(contour_ids: Any) -> list[list[int]]:
         return _normalize_contour_ids(contour_ids)
     except HomeAssistantError as err:
         raise vol.Invalid(str(err)) from err
+
+
+def latest_person_detection(events: list[dict[str, Any]]) -> datetime | None:
+    """Return when the newest retained human-detection notice was observed."""
+    for event in events:
+        if mower_device_code(event.get("code")) == HUMAN_DETECTED_CODE:
+            observed = event.get("observed_at")
+            if not isinstance(observed, str):
+                return None
+            return dt_util.parse_datetime(observed)
+    return None
 
 
 def _validate_preference_mode(preference_mode: Any) -> int:
@@ -193,6 +210,12 @@ async def async_setup_entry(
             ),
         },
         "async_download_session_photos",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        "download_person_photo",
+        {vol.Optional("detected_at"): cv.datetime},
+        "async_download_person_photo",
         supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
@@ -765,6 +788,24 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             return await async_archive_session_photos(
                 self.hass, self.coordinator.client, self.entity_id,
                 session_count=session_count,
+            )
+
+    async def async_download_person_photo(
+        self, detected_at: datetime | None = None
+    ) -> dict[str, Any]:
+        """Save the photo of a person detection to the media folder."""
+        from .session_photo_archive import async_archive_person_photo
+
+        if detected_at is None:
+            detected_at = latest_person_detection(
+                self.coordinator.mower_condition_history.recent()
+            )
+            if detected_at is None:
+                raise HomeAssistantError("No person detection has been observed.")
+        async with self._session_photo_lock:
+            return await async_archive_person_photo(
+                self.hass, self.coordinator.client, self.entity_id,
+                detected_at=dt_util.as_timestamp(detected_at),
             )
 
     async def async_switch_current_map(self, map_index: int) -> None:
