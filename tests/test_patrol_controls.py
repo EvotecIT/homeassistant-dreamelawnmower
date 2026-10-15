@@ -190,8 +190,9 @@ def test_client_edge_patrol_sends_contour_pairs(client) -> None:
         return_value={"m": "r", "r": 0}
     )
 
-    asyncio.run(client.async_start_edge_patrol([[1, 0]]))
+    asyncio.run(client.async_start_edge_patrol([[1, 0]], expected_map_index=0))
 
+    client.async_get_current_app_map_index.assert_awaited_once_with()
     client._async_call_mowing_task.assert_awaited_once_with(
         {"m": "a", "p": 0, "o": 108, "d": {"edge": [[1, 0]]}},
         task_name="edge patrol",
@@ -222,7 +223,10 @@ def test_point_patrol_service_validates_explicit_ids_against_active_map() -> Non
 
     asyncio.run(entity.async_start_point_patrol([3, "1"]))  # type: ignore[list-item]
 
-    entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with([3, 1])
+    entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(
+        [3, 1],
+        expected_map_index=0,
+    )
     assert entity.coordinator.selected_mowing_action == "all_area"
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
@@ -242,7 +246,10 @@ def test_point_patrol_service_without_ids_lets_client_use_all_points() -> None:
 
     asyncio.run(entity.async_start_point_patrol())
 
-    entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(None)
+    entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(
+        None,
+        expected_map_index=0,
+    )
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -306,8 +313,12 @@ def test_client_point_patrol_checks_movement_state_after_map_read(client) -> Non
 
 
 @pytest.mark.parametrize("current_map_index", [1, None])
-def test_client_point_patrol_requires_unchanged_current_map(
-    client, current_map_index
+@pytest.mark.parametrize(
+    ("method", "targets"),
+    [("async_start_point_patrol", [1]), ("async_start_edge_patrol", [[1, 0]])],
+)
+def test_client_patrols_require_unchanged_current_map(
+    client, current_map_index, method, targets
 ) -> None:
     client.async_get_app_maps = AsyncMock(return_value=_patrol_app_maps())
     client.async_refresh_authoritative_snapshot = AsyncMock(
@@ -317,10 +328,26 @@ def test_client_point_patrol_requires_unchanged_current_map(
     client._async_call_mowing_task = AsyncMock()
 
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="map changed"):
-        asyncio.run(client.async_start_point_patrol([1]))
+        asyncio.run(getattr(client, method)(targets, expected_map_index=0))
 
     client._async_call_mowing_task.assert_not_awaited()
     client.async_get_current_app_map_index.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    ("method", "targets"),
+    [("async_start_point_patrol", [1]), ("async_start_edge_patrol", [[1, 0]])],
+)
+def test_patrol_services_require_known_map_before_queueing(method, targets):
+    app_maps = _patrol_app_maps()
+    app_maps["current_map_index"] = None
+    entity = _entity(app_maps=app_maps)
+
+    with pytest.raises(HomeAssistantError, match="active mower map"):
+        asyncio.run(getattr(entity, method)(targets))
+
+    getattr(entity.coordinator.client, method).assert_not_awaited()
+    entity.coordinator.async_request_refresh.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -396,7 +423,8 @@ def test_edge_patrol_service_uses_explicit_contours() -> None:
     asyncio.run(entity.async_start_edge_patrol([[1, 0], ("3", "0")]))  # type: ignore[list-item]
 
     entity.coordinator.client.async_start_edge_patrol.assert_awaited_once_with(
-        [[1, 0], [3, 0]]
+        [[1, 0], [3, 0]],
+        expected_map_index=0,
     )
     assert entity.coordinator.selected_mowing_action == "all_area"
     entity.coordinator.async_request_refresh.assert_awaited_once()
@@ -418,6 +446,62 @@ def test_edge_patrol_service_requires_valid_pairs() -> None:
         asyncio.run(entity.async_start_edge_patrol([[7]]))
 
     entity.coordinator.client.async_start_edge_patrol.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("method", "targets"),
+    [("async_start_point_patrol", [1]), ("async_start_edge_patrol", [[1, 0]])],
+)
+def test_patrol_service_rejects_map_switch_while_queued(client, method, targets):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        DreameLawnMowerClient,
+    )
+
+    async def scenario():
+        native = DreameLawnMowerClient(
+            username="user@example.invalid",
+            password="secret",
+            country="eu",
+            account_type="dreame",
+            descriptor=client.descriptor,
+        )
+        entity = _entity(client=native)
+        entered = asyncio.Event()
+        fresh_maps = _patrol_app_maps()
+        fresh_maps["current_map_index"] = 1
+        fresh_maps["maps"] = fresh_maps["maps"][:1]
+        fresh_maps["maps"][0]["idx"] = 1
+        native.async_get_app_maps = AsyncMock(return_value=fresh_maps)
+        native.async_get_current_app_map_index = AsyncMock(return_value=1)
+        native.async_refresh_authoritative_snapshot = AsyncMock(
+            return_value=_idle_snapshot()
+        )
+        native._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+
+        async def read(operation):
+            entered.set()
+            return await operation(None)
+
+        native._async_cloud_read = read
+        await native._task_control_gate.acquire()
+        pending = asyncio.create_task(getattr(entity, method)(targets))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            assert not pending.done()
+            native.async_get_app_maps.assert_not_awaited()
+            native._task_control_gate.release()
+            with pytest.raises(HomeAssistantError, match="map changed"):
+                await pending
+            native._async_call_mowing_task.assert_not_awaited()
+            entity.coordinator.async_request_refresh.assert_not_awaited()
+        finally:
+            if native._task_control_gate.locked():
+                native._task_control_gate.release()
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            await native.async_close()
+
+    asyncio.run(scenario())
 
 
 def test_patrol_services_are_declared_for_home_assistant() -> None:

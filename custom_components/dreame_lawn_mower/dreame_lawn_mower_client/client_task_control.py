@@ -7,13 +7,36 @@ from collections.abc import Callable, Coroutine
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Concatenate
 
-from .exceptions import DreameLawnMowerConnectionError
+from .exceptions import (
+    DreameLawnMowerCommandRejectedError,
+    DreameLawnMowerConnectionError,
+)
 
 _WAIT_TIMEOUT_SECONDS = 20
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
     from .cloud_session import DreameCloudSession
+
+
+def require_task_map_index(
+    expected_map_index: int | None,
+    current_map_index: int | None,
+    *,
+    task_name: str,
+) -> None:
+    """Reject a map-scoped command when its validated map is no longer active."""
+    if expected_map_index is None:
+        return
+    if type(expected_map_index) is not int or expected_map_index < 0:
+        raise DreameLawnMowerCommandRejectedError(
+            "The expected mower map index must be a nonnegative integer."
+        )
+    if type(current_map_index) is not int or current_map_index != expected_map_index:
+        raise DreameLawnMowerCommandRejectedError(
+            "The active mower map changed or could not be verified "
+            f"while preparing {task_name}."
+        )
 
 
 def serialized_task_control[**Parameters, Result](

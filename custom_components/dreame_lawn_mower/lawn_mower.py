@@ -32,6 +32,7 @@ from .control_options import (
     MOWING_ACTION_EDGE,
     MOWING_ACTION_SPOT,
     MOWING_ACTION_ZONE,
+    active_map_index,
     contour_label,
     current_contour_entries,
     current_map_index,
@@ -700,7 +701,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         self, point_ids: list[int] | None = None
     ) -> None:
         """Visit configured patrol points on the active map without mowing."""
-        self._ensure_selected_map_matches_active()
+        map_index = self._patrol_map_index()
         normalized: list[int] | None = None
         if point_ids is not None:
             if not point_ids:
@@ -714,17 +715,21 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 target_name="Patrol point",
             )
         await _async_run_targeted_mowing_command(
-            self.coordinator.client.async_start_point_patrol(normalized)
+            self.coordinator.client.async_start_point_patrol(
+                normalized, expected_map_index=map_index,
+            )
         )
         await self.coordinator.async_request_refresh()
 
     async def async_start_edge_patrol(self, contour_ids: list[list[int]]) -> None:
         """Patrol one or more explicit current-map edge contours without mowing."""
         normalized = _normalize_contour_ids(contour_ids)
-        self._ensure_selected_map_matches_active()
+        map_index = self._patrol_map_index()
         self._ensure_contour_ids_available(normalized)
         await _async_run_targeted_mowing_command(
-            self.coordinator.client.async_start_edge_patrol(normalized)
+            self.coordinator.client.async_start_edge_patrol(
+                normalized, expected_map_index=map_index,
+            )
         )
         await self.coordinator.async_request_refresh()
 
@@ -860,6 +865,14 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             if entry["map_index"] == selected_map_index:
                 return str(entry["label"])
         return None
+
+    def _patrol_map_index(self) -> int:
+        """Capture the active map used to validate targets before queueing."""
+        self._ensure_selected_map_matches_active()
+        map_index = active_map_index(self.coordinator.app_maps)
+        if map_index is None:
+            raise HomeAssistantError("The active mower map could not be verified.")
+        return map_index
 
     def _ensure_selected_map_matches_active(self) -> None:
         """Block scoped zone/spot starts when the mower is on another app map."""
