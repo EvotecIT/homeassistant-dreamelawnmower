@@ -39,6 +39,7 @@ class _ServiceEntity(Entity):
     async_start_scheduled_mowing = (
         lawn_mower.DreameLawnMower.async_start_scheduled_mowing
     )
+    _async_cancel_audio = DreameLawnMowerVideoCamera._async_cancel_audio
 
 
 def _register(hass, module, entity, companion=None):

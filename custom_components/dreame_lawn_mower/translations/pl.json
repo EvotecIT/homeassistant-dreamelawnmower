@@ -67,8 +67,7 @@
         "title": "Opcje kosiarki Dreame",
         "data": {
           "scan_interval": "Interwał odpytywania (sekundy)",
-          "map_restart_preview": "Zachowuj podgląd mapy po restarcie",
-          "map_label_scale": "Skala etykiet mapy",
+          "map_restart_preview": "Zachowuj podgląd mapy po restarcie", "map_label_scale": "Skala etykiet mapy",
           "map_rotation": "Obrót mapy",
           "map_theme": "Motyw mapy",
           "map_stroke_scale": "Grubość linii mapy",

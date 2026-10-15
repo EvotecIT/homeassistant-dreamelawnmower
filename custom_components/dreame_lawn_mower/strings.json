@@ -67,8 +67,7 @@
         "title": "Dreame lawn mower options",
         "data": {
           "scan_interval": "Polling interval in seconds",
-          "map_restart_preview": "Keep a map preview across restarts",
-          "map_label_scale": "Map label scale",
+          "map_restart_preview": "Keep a map preview across restarts", "map_label_scale": "Map label scale",
           "map_rotation": "Map display rotation",
           "map_theme": "Map theme",
           "map_stroke_scale": "Map line thickness",

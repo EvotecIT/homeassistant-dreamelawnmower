@@ -67,8 +67,7 @@
         "title": "Opzioni del robot tagliaerba Dreame",
         "data": {
           "scan_interval": "Intervallo di aggiornamento in secondi",
-          "map_restart_preview": "Conserva un'anteprima della mappa dopo il riavvio",
-          "map_label_scale": "Scala delle etichette della mappa",
+          "map_restart_preview": "Conserva un'anteprima della mappa dopo il riavvio", "map_label_scale": "Scala delle etichette della mappa",
           "map_rotation": "Rotazione della mappa",
           "map_theme": "Tema della mappa",
           "map_stroke_scale": "Spessore delle linee della mappa",

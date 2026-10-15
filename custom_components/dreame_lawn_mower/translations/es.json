@@ -67,8 +67,7 @@
         "title": "Opciones del cortacésped Dreame",
         "data": {
           "scan_interval": "Intervalo de sondeo en segundos",
-          "map_restart_preview": "Conservar una vista previa del mapa tras reiniciar",
-          "map_label_scale": "Escala de las etiquetas del mapa",
+          "map_restart_preview": "Conservar una vista previa del mapa tras reiniciar", "map_label_scale": "Escala de las etiquetas del mapa",
           "map_rotation": "Rotación del mapa",
           "map_theme": "Tema del mapa",
           "map_stroke_scale": "Grosor de las líneas del mapa",

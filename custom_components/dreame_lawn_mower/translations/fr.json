@@ -67,8 +67,7 @@
         "title": "Options du robot tondeuse Dreame",
         "data": {
           "scan_interval": "Intervalle d’interrogation en secondes",
-          "map_restart_preview": "Conserver un aperçu de carte après redémarrage",
-          "map_label_scale": "Échelle des libellés de la carte",
+          "map_restart_preview": "Conserver un aperçu de carte après redémarrage", "map_label_scale": "Échelle des libellés de la carte",
           "map_rotation": "Rotation de la carte",
           "map_theme": "Thème de la carte",
           "map_stroke_scale": "Épaisseur des lignes de la carte",
