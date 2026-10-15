@@ -95,12 +95,16 @@ async def async_read_settled_map_index(
 
 async def async_prepare_map_switch_metadata(
     coordinator: DreameLawnMowerCoordinator,
+    *, require_inventory: bool = True,
 ) -> bool:
     """Confirm pending map identity before any map-scoped metadata can be fresh."""
     await async_wait_for_map_switch(coordinator)
-    if getattr(coordinator, "_map_switch_pending_event", None) is None:
-        return True
-    refreshed, _index, _generation = await coordinator._async_refresh_runtime_map_index(
-        force=True
-    )
-    return refreshed
+    if getattr(coordinator, "_map_switch_pending_event", None) is not None:
+        refreshed, _index, _generation = (
+            await coordinator._async_refresh_runtime_map_index(force=True)
+        )
+        if not refreshed:
+            return False
+    return not require_inventory or getattr(
+        coordinator, "_map_switch_inventory_pending_event", None
+    ) is None

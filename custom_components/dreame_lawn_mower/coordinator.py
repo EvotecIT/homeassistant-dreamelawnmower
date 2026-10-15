@@ -2972,7 +2972,7 @@ class DreameLawnMowerCoordinator(
         source: str = "app_maps_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached app-map payloads without failing the main poll."""
-        if not await async_prepare_map_switch_metadata(self):
+        if not await async_prepare_map_switch_metadata(self, require_inventory=False):
             return self.app_maps
         now = datetime.now(UTC)
         switch_event = getattr(self, "_last_map_switch_event_at", None)
