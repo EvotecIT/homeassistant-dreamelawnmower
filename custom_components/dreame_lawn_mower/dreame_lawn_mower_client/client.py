@@ -1312,13 +1312,14 @@ class DreameLawnMowerClient(
         self,
         point_ids: Sequence[int] | None = None,
         *,
-        expected_map_index: int | None = None,
+        expected_map_index: int,
     ) -> Any:
         """Visit configured patrol points without mowing.
 
         When ``point_ids`` is omitted, every patrol point decoded from the active
         verified app map is visited. Explicit IDs must belong to that map too.
-        ``expected_map_index`` binds a caller's selection across queued controls.
+        Callers must supply ``expected_map_index`` to bind their selection
+        across queued controls, including when visiting every point.
         """
         from .app_map_metadata import current_app_map_patrol_point_ids
         from .mowing_tasks import build_point_patrol_request
@@ -1358,18 +1359,17 @@ class DreameLawnMowerClient(
         self,
         contour_ids: Sequence[Sequence[int]],
         *,
-        expected_map_index: int | None = None,
+        expected_map_index: int,
     ) -> Any:
-        """Patrol saved contours, optionally bound to a caller's validated map."""
+        """Patrol saved contours on the caller's required validated map."""
         snapshot = await self.async_refresh_authoritative_snapshot()
         block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
-        if expected_map_index is not None:
-            current_map_index = await self.async_get_current_app_map_index()
-            _require_task_map_index(
-                expected_map_index, current_map_index, task_name="edge patrol",
-            )
+        current_map_index = await self.async_get_current_app_map_index()
+        _require_task_map_index(
+            expected_map_index, current_map_index, task_name="edge patrol",
+        )
         from .mowing_tasks import build_edge_patrol_request
 
         return await self._async_call_mowing_task(

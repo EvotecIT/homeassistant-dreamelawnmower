@@ -109,7 +109,9 @@ def test_client_point_patrol_sends_explicit_point_ids(client) -> None:
         return_value={"m": "r", "r": 0}
     )
 
-    result = asyncio.run(client.async_start_point_patrol([1, 2, 3]))
+    result = asyncio.run(
+        client.async_start_point_patrol([1, 2, 3], expected_map_index=0)
+    )
 
     assert result == {"m": "r", "r": 0}
     client.async_get_app_maps.assert_awaited_once_with(include_objects=False)
@@ -131,7 +133,7 @@ def test_client_point_patrol_defaults_to_active_map_patrol_points(client) -> Non
         return_value={"m": "r", "r": 0}
     )
 
-    asyncio.run(client.async_start_point_patrol())
+    asyncio.run(client.async_start_point_patrol(expected_map_index=0))
 
     client.async_get_app_maps.assert_awaited_once_with(include_objects=False)
     client.async_get_current_app_map_index.assert_awaited_once_with()
@@ -153,7 +155,7 @@ def test_client_point_patrol_requires_patrol_points_when_ids_are_omitted(
     client._async_call_mowing_task = AsyncMock()  # type: ignore[method-assign]
 
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="patrol point"):
-        asyncio.run(client.async_start_point_patrol())
+        asyncio.run(client.async_start_point_patrol(expected_map_index=0))
 
     client._async_call_mowing_task.assert_not_awaited()
 
@@ -176,8 +178,9 @@ def test_client_patrols_are_blocked_while_mowing(
     )
     client._async_call_mowing_task = AsyncMock()  # type: ignore[method-assign]
 
+    map_arguments = {"expected_map_index": 0}
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="mower is active"):
-        asyncio.run(getattr(client, method)(*args))
+        asyncio.run(getattr(client, method)(*args, **map_arguments))
 
     client._async_call_mowing_task.assert_not_awaited()
 
@@ -197,6 +200,27 @@ def test_client_edge_patrol_sends_contour_pairs(client) -> None:
         {"m": "a", "p": 0, "o": 108, "d": {"edge": [[1, 0]]}},
         task_name="edge patrol",
     )
+
+
+@pytest.mark.parametrize(
+    ("method", "targets"),
+    [("async_start_point_patrol", [1]), ("async_start_edge_patrol", [[1, 0]])],
+)
+@pytest.mark.parametrize("map_arguments", [{}, {"expected_map_index": None}])
+def test_client_patrols_require_callers_map_identity(
+    client, method, targets, map_arguments,
+) -> None:
+    client.async_get_app_maps = AsyncMock(return_value=_patrol_app_maps())
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=_idle_snapshot()
+    )
+    client._async_call_mowing_task = AsyncMock()
+
+    error = DreameLawnMowerCommandRejectedError if map_arguments else TypeError
+    with pytest.raises(error, match="expected.*map"):
+        asyncio.run(getattr(client, method)(targets, **map_arguments))
+
+    client._async_call_mowing_task.assert_not_awaited()
 
 
 def _entity(**coordinator_overrides: object) -> DreameLawnMower:
@@ -280,7 +304,7 @@ def test_point_patrol_rejects_unverified_maps_before_dispatch(
     client._async_call_mowing_task = AsyncMock()
 
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="patrol point"):
-        asyncio.run(client.async_start_point_patrol(point_ids))
+        asyncio.run(client.async_start_point_patrol(point_ids, expected_map_index=0))
 
     client._async_call_mowing_task.assert_not_awaited()
 
@@ -290,7 +314,7 @@ def test_client_point_patrol_rejects_points_outside_fresh_active_map(client) -> 
     client._async_call_mowing_task = AsyncMock()
 
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="Every patrol point"):
-        asyncio.run(client.async_start_point_patrol([99]))
+        asyncio.run(client.async_start_point_patrol([99], expected_map_index=0))
 
     client._async_call_mowing_task.assert_not_awaited()
 
@@ -307,7 +331,7 @@ def test_client_point_patrol_checks_movement_state_after_map_read(client) -> Non
         side_effect=refresh_snapshot
     )
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="mower is active"):
-        asyncio.run(client.async_start_point_patrol([1]))
+        asyncio.run(client.async_start_point_patrol([1], expected_map_index=0))
 
     client._async_call_mowing_task.assert_not_awaited()
 
@@ -369,8 +393,11 @@ def test_client_autonomous_movement_rejects_manual_control(
     )
     client._async_call_mowing_task = AsyncMock()
 
+    map_arguments = {} if method == "async_go_to_maintenance_point" else {
+        "expected_map_index": 0
+    }
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="manual remote"):
-        asyncio.run(getattr(client, method)(*args))
+        asyncio.run(getattr(client, method)(*args, **map_arguments))
 
     client._async_call_mowing_task.assert_not_awaited()
 
@@ -411,8 +438,9 @@ def test_client_patrols_require_mower_acknowledgement(
         load_internal_module("client_app_reads"), "async_command_app_action", transport
     )
 
+    map_arguments = {"expected_map_index": 0}
     with pytest.raises(DreameLawnMowerConnectionError, match="acknowledge|rejected"):
-        asyncio.run(getattr(client, method)(*args))
+        asyncio.run(getattr(client, method)(*args, **map_arguments))
 
     transport.assert_awaited_once()
 

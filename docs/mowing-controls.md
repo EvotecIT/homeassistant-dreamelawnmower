@@ -252,7 +252,9 @@ Both services retain the map used to validate the selection and check it again
 inside the command queue before sending the request. A changed or unavailable
 map fails without starting a patrol. Point patrol also refreshes map metadata
 and checks every requested point against the hash-verified active map. Keep
-the same map active in the vendor app while starting a patrol.
+the same map active in the vendor app while starting a patrol. Direct client
+callers must pass the map used to choose their targets as the keyword-only
+`expected_map_index` argument for both patrol methods; omitting it is rejected.
 
 These operations were verified on a MOVA LiDAX Ultra 1000
 (`mova.mower.g2529c`). The mower acknowledged each request and the MOVAhome app

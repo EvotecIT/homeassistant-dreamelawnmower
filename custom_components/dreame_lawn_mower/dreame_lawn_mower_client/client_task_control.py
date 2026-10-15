@@ -26,8 +26,6 @@ def require_task_map_index(
     task_name: str,
 ) -> None:
     """Reject a map-scoped command when its validated map is no longer active."""
-    if expected_map_index is None:
-        return
     if type(expected_map_index) is not int or expected_map_index < 0:
         raise DreameLawnMowerCommandRejectedError(
             "The expected mower map index must be a nonnegative integer."
