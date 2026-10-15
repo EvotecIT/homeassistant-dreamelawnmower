@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .dreame_lawn_mower_client.exceptions import DreameLawnMowerConnectionError
+from .dreame_lawn_mower_client.exceptions import DeviceException, DreameLawnMowerError
 from .dreame_lawn_mower_client.http_response import HttpResponseError
 from .dreame_lawn_mower_client.session_photos import (
     MAX_SESSION_PHOTO_BYTES,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
 MAX_BATCH_BYTES = 64 * 1024 * 1024
 BATCH_TIMEOUT = 120
+_ARCHIVE_WRITE_LOCK = threading.Lock()
 
 
 def photo_archive_target(folder: Path, photo: SessionPhoto) -> Path:
@@ -44,11 +46,16 @@ def photo_archive_target(folder: Path, photo: SessionPhoto) -> Path:
 
 def _archive_size(folder: Path) -> int:
     """Measure retained files without following directory or file symlinks."""
-    return sum(
-        item.stat().st_size
-        for item in folder.rglob("*")
-        if not item.is_symlink() and item.is_file()
-    )
+    size = 0
+    for item in folder.rglob("*"):
+        try:
+            if not item.is_symlink() and item.is_file():
+                size += item.stat().st_size
+        except FileNotFoundError:
+            # A cancelled writer may finish removing its sibling staging file
+            # while a replacement service takes its initial usage snapshot.
+            continue
+    return size
 
 
 def _write_photo(target: Path, content: bytes) -> bool:
@@ -132,9 +139,16 @@ async def async_archive_session_photos(
                     if content is None:
                         continue
                     downloaded += len(content)
-                    new = await hass.async_add_executor_job(
-                        _write_photo, target, content
+                    written = await hass.async_add_executor_job(
+                        _write_photo_with_quota,
+                        folder,
+                        target,
+                        content,
                     )
+                    if written is None:
+                        limited = True
+                        break
+                    new = written
                     if new:
                         used += len(content)
                 saved.append(
@@ -146,7 +160,7 @@ async def async_archive_session_photos(
                     }
                 )
             return {"photos": saved, "limited": limited}
-    except DreameLawnMowerConnectionError as err:
+    except (DreameLawnMowerError, DeviceException) as err:
         raise HomeAssistantError("Session photos unavailable") from err
     except TimeoutError as err:
         raise HomeAssistantError(
@@ -156,3 +170,16 @@ async def async_archive_session_photos(
         raise HomeAssistantError(
             "Unable to save session photos to the media directory"
         ) from err
+
+
+def _write_photo_with_quota(folder: Path, target: Path, content: bytes) -> bool | None:
+    """Recheck quota and publish under ownership that outlives service cancellation."""
+    # Entry reloads and cancelled executor futures can leave an older writer
+    # running. Serialize the real filesystem operation rather than trusting an
+    # entity-instance lock or a usage snapshot taken before the download.
+    with _ARCHIVE_WRITE_LOCK:
+        if target.exists():
+            return False
+        if _archive_size(folder) + len(content) > MAX_ARCHIVE_BYTES:
+            return None
+        return _write_photo(target, content)

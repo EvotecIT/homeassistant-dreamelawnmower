@@ -257,6 +257,15 @@ def test_unusable_newest_summary_does_not_hide_older_photos() -> None:
     assert [photo.file_name for photo in photos] == ["1.jpg", "2.jpg"]
 
 
+def test_oversized_summary_does_not_hide_older_photos() -> None:
+    cloud = _cloud()
+    newest = "ali_dreame/IQ1/large_1.json"
+    cloud.records.insert(0, _record(107, newest, 3000))
+    cloud.files[newest] = b"x" * (1024 * 1024 + 1)
+    photos = asyncio.run(async_get_session_photos(_client(cloud)))
+    assert [photo.file_name for photo in photos] == ["1.jpg", "2.jpg"]
+
+
 def test_reused_filename_keeps_distinct_cloud_objects_separate(tmp_path: Path) -> None:
     first = SessionPhoto(
         "1.jpg", "IQ1/first/ali_dreame/1.jpg", TaskSession(SUMMARY, 107, 1)

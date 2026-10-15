@@ -117,6 +117,7 @@ class DreameCloudSession:
     async def async_get_property_history(
         self, did: str, key: str, *, limit: int = 3, time_start: int = 0,
         deadline: float | None = None, kind: str = "prop",
+        require_response: bool = False,
     ) -> Any:
         """Read history with account fields built after login or token renewal."""
         path = "/".join(self._strings[i] for i in (23, 25, 43))
@@ -128,7 +129,9 @@ class DreameCloudSession:
             ), separators=(",", ":")),
             timeout=20, deadline=deadline,
         )
-        return history_result(response, self._strings)
+        return history_result(
+            response, self._strings, require_response=require_response,
+        )
 
     async def async_get_interim_file_url(
         self, did: str, model: str | None, object_name: str, *,

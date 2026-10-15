@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .http_response import HttpResponseError
 from .public_download import MAX_PUBLIC_JSON_BYTES, PublicDownloadError
 
 if TYPE_CHECKING:
@@ -139,6 +140,7 @@ async def async_get_session_photos(
             descriptor.did,
             SESSION_EVENT_KEY,
             kind="event",
+            require_response=True,
             limit=min(MAX_SESSION_HISTORY, max(20, session_count * 5)),
             deadline=deadline,
         )
@@ -155,15 +157,21 @@ async def async_get_session_photos(
                 descriptor.model,
                 session.object_name,
                 deadline=deadline,
+                require_response=True,
             )
             if not url:
                 continue
-            content = await _read_optional_object(
-                cloud,
-                url,
-                deadline=deadline,
-                max_bytes=MAX_PUBLIC_JSON_BYTES,
-            )
+            try:
+                content = await _read_optional_object(
+                    cloud,
+                    url,
+                    deadline=deadline,
+                    max_bytes=MAX_PUBLIC_JSON_BYTES,
+                )
+            except HttpResponseError as err:
+                if err.reason == "byte_limit":
+                    continue
+                raise
             if content is None:
                 continue
             try:
@@ -204,6 +212,7 @@ async def async_download_session_photo(
             descriptor.model,
             photo.object_name,
             deadline=deadline,
+            require_response=True,
         )
         if not url:
             return None

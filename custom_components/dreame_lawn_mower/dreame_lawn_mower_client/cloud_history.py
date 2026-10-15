@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
+
 
 def history_params(
     strings: Sequence[str],
@@ -30,6 +32,20 @@ def history_params(
     }
 
 
-def history_result(response: Any, strings: Sequence[str]) -> Any:
+def history_result(
+    response: Any,
+    strings: Sequence[str],
+    *,
+    require_response: bool = False,
+) -> Any:
+    """Decode absent history, optionally requiring a successful vendor envelope."""
+    if require_response:
+        if not isinstance(response, Mapping):
+            raise DeviceException("The history request did not return a response.")
+        code = response.get("code")
+        if not isinstance(code, int) or isinstance(code, bool):
+            raise DeviceException("The history response had an invalid code.")
+        if code != 0:
+            raise DreameLawnMowerCloudAPIError(code)
     data = response.get("data") if isinstance(response, Mapping) else None
     return data.get(strings[33]) if isinstance(data, Mapping) else None
