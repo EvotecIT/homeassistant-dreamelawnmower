@@ -42,6 +42,7 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client import DreameLawnMowerConnectionError
 from .dreame_lawn_mower_client.app_map_metadata import (
     current_app_map_patrol_point_ids,
 )
@@ -531,7 +532,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         observed_generation = runtime_mission_session_generation(runtime_cache)
         new_session: bool | None = False
         if action == MOWING_ACTION_EDGE:
-            self._ensure_selected_map_matches_active()
+            map_index = self._task_map_index()
             contour_entries = current_contour_entries(
                 self.coordinator.vector_map_details,
                 self.coordinator.app_maps,
@@ -544,11 +545,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                     "No current-map edge contour is available to start."
                 )
             await _async_run_targeted_mowing_command(
-                self.coordinator.client.async_start_edge_mowing([list(contour_id)])
+                self.coordinator.client.async_start_edge_mowing(
+                    [list(contour_id)], expected_map_index=map_index,
+                )
             )
             new_session = True
         elif action == MOWING_ACTION_ZONE:
-            self._ensure_selected_map_matches_active()
+            map_index = self._task_map_index()
             zone_entries = current_zone_entries(
                 self.coordinator.batch_device_data,
                 self.coordinator.app_maps,
@@ -559,11 +562,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             if zone_id is None:
                 raise HomeAssistantError("No current-map zone is available to start.")
             await _async_run_targeted_mowing_command(
-                self.coordinator.client.async_start_zone_mowing([zone_id])
+                self.coordinator.client.async_start_zone_mowing(
+                    [zone_id], expected_map_index=map_index,
+                )
             )
             new_session = True
         elif action == MOWING_ACTION_SPOT:
-            self._ensure_selected_map_matches_active()
+            map_index = self._task_map_index()
             spot_entries = current_spot_entries(
                 self.coordinator.app_maps,
                 self.coordinator.batch_device_data,
@@ -573,7 +578,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             if spot_id is None:
                 raise HomeAssistantError("No current-map spot is available to start.")
             await _async_run_targeted_mowing_command(
-                self.coordinator.client.async_start_spot_mowing([spot_id])
+                self.coordinator.client.async_start_spot_mowing(
+                    [spot_id], expected_map_index=map_index,
+                )
             )
             new_session = True
         else:
@@ -591,12 +598,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         return await async_start_scheduled_mowing(self, **kwargs)
 
     async def async_start_zone_mowing(
-        self, zone_ids: list[int], *, require_inactive_task: bool = False
+        self, zone_ids: list[int], *, require_inactive_task: bool = False,
+        expected_map_index: int | None = None,
     ) -> None:
         """Start mowing for one or more explicit current-map zones."""
         if not zone_ids:
             raise HomeAssistantError("At least one zone id is required.")
-        self._ensure_selected_map_matches_active()
+        map_index = self._task_map_index(expected_map_index)
         zone_entries = current_zone_entries(
             self.coordinator.batch_device_data,
             self.coordinator.app_maps,
@@ -613,7 +621,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_zone_mowing(
-                normalized,
+                normalized, expected_map_index=map_index,
                 **({"require_inactive_task": True} if require_inactive_task else {}),
             )
         )
@@ -631,12 +639,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_start_spot_mowing(
-        self, spot_ids: list[int], *, require_inactive_task: bool = False
+        self, spot_ids: list[int], *, require_inactive_task: bool = False,
+        expected_map_index: int | None = None,
     ) -> None:
         """Start mowing for one or more explicit current-map spot ids."""
         if not spot_ids:
             raise HomeAssistantError("At least one spot id is required.")
-        self._ensure_selected_map_matches_active()
+        map_index = self._task_map_index(expected_map_index)
         spot_entries = current_spot_entries(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
@@ -652,7 +661,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_spot_mowing(
-                normalized,
+                normalized, expected_map_index=map_index,
                 **({"require_inactive_task": True} if require_inactive_task else {}),
             )
         )
@@ -670,17 +679,18 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_start_edge_mowing(
-        self, contour_ids: list[list[int]], *, require_inactive_task: bool = False
+        self, contour_ids: list[list[int]], *, require_inactive_task: bool = False,
+        expected_map_index: int | None = None,
     ) -> None:
         """Start mowing for one or more explicit current-map edge contour ids."""
         normalized = _normalize_contour_ids(contour_ids)
-        self._ensure_selected_map_matches_active()
+        map_index = self._task_map_index(expected_map_index)
         self._ensure_contour_ids_available(normalized)
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_edge_mowing(
-                normalized,
+                normalized, expected_map_index=map_index,
                 **({"require_inactive_task": True} if require_inactive_task else {}),
             )
         )
@@ -701,7 +711,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         self, point_ids: list[int] | None = None
     ) -> None:
         """Visit configured patrol points on the active map without mowing."""
-        map_index = self._patrol_map_index()
+        map_index = self._task_map_index()
         normalized: list[int] | None = None
         if point_ids is not None:
             if not point_ids:
@@ -724,7 +734,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     async def async_start_edge_patrol(self, contour_ids: list[list[int]]) -> None:
         """Patrol one or more explicit current-map edge contours without mowing."""
         normalized = _normalize_contour_ids(contour_ids)
-        map_index = self._patrol_map_index()
+        map_index = self._task_map_index()
         self._ensure_contour_ids_available(normalized)
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_edge_patrol(
@@ -866,12 +876,23 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 return str(entry["label"])
         return None
 
-    def _patrol_map_index(self) -> int:
+    def _task_map_index(self, expected_map_index: int | None = None) -> int:
         """Capture the active map used to validate targets before queueing."""
         self._ensure_selected_map_matches_active()
         map_index = active_map_index(self.coordinator.app_maps)
         if map_index is None:
             raise HomeAssistantError("The active mower map could not be verified.")
+        if expected_map_index is not None:
+            from .dreame_lawn_mower_client.client_task_control import (
+                require_task_map_index,
+            )
+
+            try:
+                require_task_map_index(
+                    expected_map_index, map_index, task_name="targeted mowing",
+                )
+            except DreameLawnMowerConnectionError as err:
+                raise HomeAssistantError(str(err)) from err
         return map_index
 
     def _ensure_selected_map_matches_active(self) -> None:

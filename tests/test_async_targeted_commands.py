@@ -60,6 +60,7 @@ def test_native_targeted_command(monkeypatch, account, kind, reply):
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session, account)
+            client.async_get_current_app_map_index = AsyncMock(return_value=0)
             client._async_refresh_authoritative_snapshot = AsyncMock(
                 side_effect=[snapshot(), snapshot(kind)])
             try:
@@ -102,6 +103,7 @@ def test_targeted_command_lifetime(monkeypatch, kind, stage, stop):
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
+            client.async_get_current_app_map_index = AsyncMock(return_value=0)
             client._async_refresh_authoritative_snapshot = AsyncMock(
                 return_value=snapshot())
             operation = asyncio.create_task(

@@ -224,6 +224,18 @@ is rejected before dispatch while an active task's mode is unknown, or when the
 mower is running the same task type and the integration cannot prove that a
 different target was requested.
 
+Targeted zone, spot, and edge mowing, including selected-action and scheduled
+starts, retain the map used to validate their targets while waiting in the
+command queue. Maintenance-point travel does the same. If the active map changes
+or cannot be read before dispatch, the command fails without starting movement.
+Keep the same map active in the vendor app while starting a task.
+
+Direct client callers may pass `expected_map_index` to bind targets to the map
+used to select them. When it is omitted for the existing mowing and maintenance
+methods, the client captures the active map before dispatch when no other control
+is pending. Queueing a direct movement requires `expected_map_index`; an unbound
+call fails with guidance to provide it. Both paths check the map before dispatch.
+
 ### Patrol Services
 
 Two services start mower-native patrol tasks that drive the mower without

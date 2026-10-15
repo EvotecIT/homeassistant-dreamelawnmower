@@ -22,13 +22,15 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
 
 
 def _client() -> DreameLawnMowerClient:
-    return DreameLawnMowerClient(
+    client = DreameLawnMowerClient(
         username="test", password="test", country="eu", account_type="dreame",
         descriptor=DreameLawnMowerDescriptor(
             did="42", name="Garden", model="dreame.mower.g2408",
             display_model="A2", account_type="dreame", country="eu",
         ),
     )
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
+    return client
 
 
 def _run(client, operation):

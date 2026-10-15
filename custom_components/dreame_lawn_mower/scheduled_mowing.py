@@ -78,15 +78,16 @@ async def async_start_scheduled_mowing(
                 await client.async_start_fresh_mowing()
             elif task_type == "zone":
                 await entity.async_start_zone_mowing(
-                    zone_ids, require_inactive_task=True
+                    zone_ids, require_inactive_task=True, expected_map_index=map_index,
                 )
             elif task_type == "spot":
                 await entity.async_start_spot_mowing(
-                    spot_ids, require_inactive_task=True
+                    spot_ids, require_inactive_task=True, expected_map_index=map_index,
                 )
             elif task_type == "edge":
                 await entity.async_start_edge_mowing(
-                    contour_ids, require_inactive_task=True
+                    contour_ids, require_inactive_task=True,
+                    expected_map_index=map_index,
                 )
             else:
                 raise ValueError("Unknown scheduled mowing task type.")

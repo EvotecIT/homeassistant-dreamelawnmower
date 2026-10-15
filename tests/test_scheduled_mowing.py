@@ -194,7 +194,7 @@ def test_targeted_run_uses_explicit_command_and_bound_map(task_type, argument, t
     assert result["map_index"] == 2
     assert result["target_ids"] == targets
     getattr(entity, f"async_start_{task_type}_mowing").assert_awaited_once_with(
-        targets, require_inactive_task=True
+        targets, require_inactive_task=True, expected_map_index=2,
     )
     entity.coordinator.client.async_start_fresh_mowing.assert_not_awaited()
 

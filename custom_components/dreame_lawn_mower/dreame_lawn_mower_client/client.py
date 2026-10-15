@@ -92,6 +92,7 @@ from .client_schedules import (
 )
 from .client_schedules import _DreameLawnMowerClientSchedulesMixin
 from .client_settings import _DreameLawnMowerClientSettingsMixin
+from .client_task_control import map_scoped_task_control as _map_scoped_task_control
 from .client_task_control import require_task_map_index as _require_task_map_index
 from .client_task_control import serialized_task_control as _serialized_task_control
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
@@ -560,6 +561,7 @@ class DreameLawnMowerClient(
         self._schedule_async_gate = asyncio.Lock()
         self._device_settings_write_lock = asyncio.Lock()
         self._task_control_gate = asyncio.Lock()
+        self._task_control_admission_gate = asyncio.Lock()
         self._app_schedule_retry_offset = 0
         self._schedule_protocols: dict[int, str] = {}
         self._schedule_document_versions: dict[int, int] = {}
@@ -1014,9 +1016,10 @@ class DreameLawnMowerClient(
         """Return to base while preserving a resumable mowing session."""
         await self._async_device_control(dock=True)
 
-    @_serialized_task_control
+    @_map_scoped_task_control
     async def async_start_zone_mowing(
-        self, zone_ids: Sequence[int], *, require_inactive_task: bool = False
+        self, zone_ids: Sequence[int], *, require_inactive_task: bool = False,
+        expected_map_index: int | None = None,
     ) -> Any:
         """Start mower-native zone mowing for explicit map area ids."""
         normalized_zone_ids = [int(zone_id) for zone_id in zone_ids]
@@ -1029,6 +1032,7 @@ class DreameLawnMowerClient(
             requested_target_ids=requested_zone_ids,
             require_inactive_task=require_inactive_task,
         )
+        await self._async_require_active_task_map(expected_map_index, "zone mowing")
         async def start_task(_cloud: _DreameCloudSession) -> Any:
             try:
                 response = await self._async_call_mowing_task(
@@ -1058,12 +1062,13 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(start_task)
 
-    @_serialized_task_control
+    @_map_scoped_task_control
     async def async_start_edge_mowing(
         self,
         contour_ids: Sequence[Sequence[int]],
         *,
         require_inactive_task: bool = False,
+        expected_map_index: int | None = None,
     ) -> Any:
         """Start edge mowing for one or more contour id pairs."""
         normalized_contour_ids = [
@@ -1077,6 +1082,7 @@ class DreameLawnMowerClient(
             _MOWING_TASK_EDGE,
             require_inactive_task=require_inactive_task,
         )
+        await self._async_require_active_task_map(expected_map_index, "edge mowing")
         async def start_task(_cloud: _DreameCloudSession) -> Any:
             try:
                 response = await self._async_call_mowing_task(
@@ -1104,9 +1110,10 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(start_task)
 
-    @_serialized_task_control
+    @_map_scoped_task_control
     async def async_start_spot_mowing(
-        self, spot_ids: Sequence[int], *, require_inactive_task: bool = False
+        self, spot_ids: Sequence[int], *, require_inactive_task: bool = False,
+        expected_map_index: int | None = None,
     ) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
         normalized_spot_ids = [int(spot_id) for spot_id in spot_ids]
@@ -1119,6 +1126,7 @@ class DreameLawnMowerClient(
             requested_target_ids=requested_spot_ids,
             require_inactive_task=require_inactive_task,
         )
+        await self._async_require_active_task_map(expected_map_index, "spot mowing")
         async def start_task(_cloud: _DreameCloudSession) -> Any:
             try:
                 response = await self._async_call_mowing_task(
@@ -1293,13 +1301,27 @@ class DreameLawnMowerClient(
             raise DreameLawnMowerConnectionError(str(err)) from err
         return client_task_result(response, task_name=task_name)
 
-    @_serialized_task_control
-    async def async_go_to_maintenance_point(self, point_id: int) -> Any:
+    async def _async_require_active_task_map(
+        self, expected_map_index: int | None, task_name: str,
+    ) -> None:
+        """Check a queued target's map after state preparation and before dispatch."""
+        current_map_index = await self.async_get_current_app_map_index()
+        _require_task_map_index(
+            expected_map_index, current_map_index, task_name=task_name,
+        )
+
+    @_map_scoped_task_control
+    async def async_go_to_maintenance_point(
+        self, point_id: int, *, expected_map_index: int | None = None,
+    ) -> Any:
         """Drive to one configured map maintenance point."""
         snapshot = await self.async_refresh_authoritative_snapshot()
         block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
+        await self._async_require_active_task_map(
+            expected_map_index, "maintenance point",
+        )
         from .mowing_tasks import build_maintenance_point_request
 
         return await self._async_call_mowing_task(

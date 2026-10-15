@@ -681,6 +681,7 @@ def test_async_map_switch_rejects_non_idle_activity_with_inactive_session() -> N
 
 def test_maintenance_point_rejects_repositioning_at_client_boundary() -> None:
     client = _client()
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="idle",
@@ -699,6 +700,7 @@ def test_maintenance_point_rejects_repositioning_at_client_boundary() -> None:
 
 def test_maintenance_point_allows_authoritatively_inactive_paused_report() -> None:
     client = _client()
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="paused",
