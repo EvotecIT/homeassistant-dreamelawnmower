@@ -28,10 +28,66 @@ def test_switch_expires_previously_fresh_3d_objects():
         )
         coordinator.client.async_get_current_app_map_index.return_value = 3
         _switch(coordinator)
+        assert await coordinator.async_refresh_app_map_objects() == {
+            "app_map_objects": {"object_count": 7}
+        }
+        coordinator.client.async_get_app_map_objects.assert_not_awaited()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        coordinator.client.async_get_app_maps = AsyncMock(return_value={
+            "current_map_index": 3, "map_list_valid": True,
+            "maps": [{"idx": 3, "created": True, "available": True}],
+        })
+        await coordinator.async_refresh_app_maps()
         assert coordinator.app_map_objects_refreshed_at is None
         result = await coordinator.async_refresh_app_map_objects()
         assert result["app_map_objects"]["object_count"] == 2
         coordinator.client.async_get_app_map_objects.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "kind", ["schedules", "batch", "preferences", "objects", "vector"]
+)
+def test_map_scoped_metadata_waits_for_matching_full_inventory(kind):
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator.schedules = {"active_schedule_index": 2}
+        coordinator.batch_device_data = {"retained": True}
+        coordinator.app_map_objects = {"retained": True}
+        coordinator.vector_map_details = {"retained": True}
+        coordinator._preference_write_lock = asyncio.Lock()
+        coordinator.client.async_get_current_app_map_index.return_value = 3
+        _switch(coordinator)
+        await coordinator._async_refresh_runtime_map_index(force=True)
+        read = AsyncMock(side_effect=AssertionError(
+            "Old inventory must not label reads"
+        ))
+        if kind == "schedules":
+            coordinator.client.async_get_app_schedules = read
+            result = await coordinator.async_refresh_schedules(force=True)
+            assert result is coordinator.schedules
+            assert coordinator.schedules_refreshed_at is None
+        elif kind == "batch":
+            coordinator._async_fetch_batch_device_data = read
+            result = await coordinator.async_refresh_batch_device_data(force=True)
+            assert result is coordinator.batch_device_data
+            assert coordinator.batch_device_data_refreshed_at is None
+        elif kind == "preferences":
+            coordinator._async_get_current_mowing_preferences = read
+            result = await coordinator.async_refresh_mowing_preferences(source="test")
+            assert result is None
+        elif kind == "objects":
+            coordinator.client.async_get_app_map_objects = read
+            result = await coordinator.async_refresh_app_map_objects(force=True)
+            assert result is coordinator.app_map_objects
+            assert coordinator.app_map_objects_refreshed_at is None
+        else:
+            coordinator.client.async_get_vector_map_details = read
+            result = await coordinator.async_refresh_vector_map_details(force=True)
+            assert result is coordinator.vector_map_details
+            assert coordinator.vector_map_details_refreshed_at is None
+        read.assert_not_awaited()
 
     asyncio.run(scenario())
 
@@ -122,6 +178,24 @@ def test_lagging_inventory_cannot_complete_switch_confirmation(settled):
         assert coordinator._map_switch_inventory_pending_event is None
         assert coordinator._map_switch_pending_event is None
         assert coordinator.app_maps_refresh_succeeded is True
+
+    asyncio.run(scenario())
+
+
+def test_empty_inventory_completes_empty_switch_readback():
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        coordinator.client.async_get_current_app_map_index.return_value = None
+        coordinator.client.async_get_app_maps = AsyncMock(return_value={
+            "map_list_valid": True, "current_map_index": None, "maps": [],
+        })
+        _switch(coordinator)
+        with patch.object(refresh, "MAP_SWITCH_RETRY_DELAYS", (0, 0, 0)):
+            result = await coordinator.async_refresh_app_maps()
+        assert result["map_list_valid"] is True
+        assert coordinator._map_switch_pending_event is None
+        assert coordinator._map_switch_inventory_pending_event is None
 
     asyncio.run(scenario())
 
