@@ -29,7 +29,14 @@ class MowerDeviceCodeTier(StrEnum):
 
 
 _OPERATIONAL_HUMAN_DETECTION_MODELS = frozenset(
-    {"dreame.mower.q2501a", "q2501a", "mova.mower.g2529b", "g2529b"}
+    {
+        "dreame.mower.q2501a",
+        "q2501a",
+        "mova.mower.g2529b",
+        "g2529b",
+        "mova.mower.g2529c",
+        "g2529c",
+    }
 )
 
 # The normalized activity and notice paths share these firmware work states.

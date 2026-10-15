@@ -67,7 +67,9 @@ def _message(message_id=None, *, state=None, code=0, value=27):
     return message
 
 
-@pytest.mark.parametrize("model", ["mova.mower.g2529b", "dreame.mower.q2501a"])
+@pytest.mark.parametrize(
+    "model", ["mova.mower.g2529b", "mova.mower.g2529c", "dreame.mower.q2501a"]
+)
 def test_repeated_mqtt_notices_update_consumers_without_property_change(model):
     device = _device(model)
     with patch("time.time", side_effect=[100.0, 200.0, 300.0]):
