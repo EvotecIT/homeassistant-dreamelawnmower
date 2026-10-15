@@ -288,6 +288,10 @@ class DreameLawnMowerXp2pLiveStreamSession:
     runner_process: Any | None = field(default=None, repr=False)
     runner_stdout_thread: threading.Thread | None = field(default=None, repr=False)
     runner_stderr_thread: threading.Thread | None = field(default=None, repr=False)
+    # One request and its response at a time on the worker's control pipes.
+    runner_control_lock: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False
+    )
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return safe stream session metadata."""

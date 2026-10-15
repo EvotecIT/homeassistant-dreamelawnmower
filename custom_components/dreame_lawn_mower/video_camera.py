@@ -210,6 +210,7 @@ class DreameLawnMowerVideoCamera(
         ) = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
+        self._talk_lock = asyncio.Lock()
         self._snapshot_requests = 0
         self._snapshot_owned_stream = None
         self._snapshot_request = VideoSnapshotRequest()
@@ -294,6 +295,15 @@ class DreameLawnMowerVideoCamera(
             coordinator.data
         )
         self._video_capability_observed = False
+
+    async def async_play_audio(self, file_path: str) -> dict[str, Any]:
+        """Play an audio file through the mower speaker while video is live."""
+        from .video_talk import async_play_audio_on_session
+
+        async with self._talk_lock:
+            return await async_play_audio_on_session(
+                self.hass, self._runtime, self._session, file_path
+            )
 
     async def async_added_to_hass(self) -> None:
         """Schedule managed runtime preparation without blocking entity setup."""

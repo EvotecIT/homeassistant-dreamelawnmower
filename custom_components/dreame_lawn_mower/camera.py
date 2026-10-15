@@ -11,11 +11,16 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from homeassistant.components.camera import Camera
+import voluptuous as vol
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.const import MATCH_ALL, EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+    async_get_current_platform,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -113,6 +118,13 @@ async def async_setup_entry(
     )
     if video_capability.state != CAPABILITY_UNSUPPORTED:
         entities.append(DreameLawnMowerVideoCamera(coordinator, entry))
+        async_get_current_platform().async_register_entity_service(
+            "play_audio",
+            {vol.Required("file_path"): cv.string},
+            "async_play_audio",
+            required_features=[CameraEntityFeature.STREAM],
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     async_add_entities(entities)
 
 

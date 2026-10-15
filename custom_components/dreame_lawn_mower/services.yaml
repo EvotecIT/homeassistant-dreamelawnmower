@@ -192,6 +192,28 @@ download_person_photo:
       selector:
         datetime:
 
+play_audio:
+  name: Play audio through the mower
+  description: >-
+    Play a local audio file through the mower speaker, like the app's talk
+    button. Start the live video first: the audio uses the same connection.
+    The file is converted with ffmpeg to 16 kHz mono AAC and limited to 60
+    seconds. The path must be in an allowed directory such as /media.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: camera
+      supported_features:
+        - camera.CameraEntityFeature.STREAM
+  fields:
+    file_path:
+      name: File path
+      description: Local path of the audio file, for example /media/hello.mp3.
+      required: true
+      example: /media/hello.mp3
+      selector:
+        text:
+
 switch_current_map:
   name: Switch current map
   description: >-

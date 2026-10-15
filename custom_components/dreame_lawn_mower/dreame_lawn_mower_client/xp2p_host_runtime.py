@@ -42,6 +42,9 @@ _REQUEST_MAGIC = b"DXP1"
 _RESPONSE_MAGIC = b"DXR1"
 _REQUEST_FIELDS = 20
 _MAX_RESPONSE_LENGTH = 64 * 1024
+_MAX_CONTROL_COMMAND_LENGTH = 64 * 1024
+_MAX_CONTROL_AUDIO_LENGTH = 256 * 1024
+_CONTROL_TIMEOUT = 5.0
 _DEFAULT_STATUS_ATTEMPTS = 60
 _DEFAULT_RETRY_INTERVAL = 0.5
 _CACHED_COMMAND_TIMEOUT_US = 2_000_000
@@ -538,9 +541,12 @@ class DreameLawnMowerXp2pHostRuntime:
             if remaining <= 0:
                 return session.stream_link_mode
             try:
-                process.stdin.write(b"Q")
-                process.stdin.flush()
-                status, response = _read_response(process.stdout, timeout=remaining)
+                with session.runner_control_lock:
+                    process.stdin.write(b"Q")
+                    process.stdin.flush()
+                    status, response = _read_response(
+                        process.stdout, timeout=remaining
+                    )
             except (BrokenPipeError, OSError, DreameLawnMowerVideoRuntimeError):
                 return session.stream_link_mode
             if status == 0:
@@ -554,6 +560,94 @@ class DreameLawnMowerXp2pHostRuntime:
                     return session.stream_link_mode
                 time.sleep(min(max(float(retry_interval), 0.0), remaining))
         return session.stream_link_mode
+
+    def post_device_command(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        command: str,
+        *,
+        timeout: float = DEFAULT_COMMAND_TIMEOUT_US / 1_000_000 + _CONTROL_TIMEOUT,
+    ) -> bytes:
+        """Send one P2P command on the live session and return the device reply."""
+        encoded = command.encode("utf-8")
+        if not encoded or len(encoded) > _MAX_CONTROL_COMMAND_LENGTH:
+            raise ValueError("XP2P command length is out of range")
+        return self._runner_control(session, b"C", encoded, timeout=timeout)
+
+    def start_talk(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        *,
+        channel: int = 0,
+        timeout: float = _CONTROL_TIMEOUT,
+    ) -> None:
+        """Open the encrypted two-way audio channel on the live session."""
+        self._runner_control(
+            session, b"T", f"channel={int(channel)}".encode("ascii"), timeout=timeout
+        )
+
+    def send_talk_audio(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        chunk: bytes,
+        *,
+        timeout: float = _CONTROL_TIMEOUT,
+    ) -> None:
+        """Send one FLV audio chunk on the open two-way audio channel."""
+        if not chunk or len(chunk) > _MAX_CONTROL_AUDIO_LENGTH:
+            raise ValueError("XP2P audio chunk length is out of range")
+        self._runner_control(session, b"D", bytes(chunk), timeout=timeout)
+
+    def stop_talk(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        *,
+        timeout: float = _CONTROL_TIMEOUT,
+    ) -> None:
+        """Close the two-way audio channel; the video keeps running."""
+        self._runner_control(session, b"S", None, timeout=timeout)
+
+    def _runner_control(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        control: bytes,
+        argument: bytes | None,
+        *,
+        timeout: float,
+    ) -> bytes:
+        process = session.runner_process
+        if (
+            process is None
+            or process.poll() is not None
+            or process.stdin is None
+            or process.stdout is None
+        ):
+            raise DreameLawnMowerVideoRuntimeError(
+                "The live video worker is not running."
+            )
+        message = control
+        if argument is not None:
+            message += struct.pack("!I", len(argument)) + argument
+
+        def write_request() -> None:
+            process.stdin.write(message)
+            process.stdin.flush()
+
+        with session.runner_control_lock:
+            try:
+                status, response = _read_response(
+                    process.stdout, timeout=timeout, write_request=write_request
+                )
+            except (BrokenPipeError, OSError) as err:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "The live video worker stopped."
+                ) from err
+        if status != 0:
+            detail = response.decode("utf-8", "replace").strip()
+            raise DreameLawnMowerVideoRuntimeError(
+                detail or f"XP2P worker control failed with status {status}."
+            )
+        return response
 
 
 def _decode_success_payload(value: str) -> tuple[int | None, str]:
