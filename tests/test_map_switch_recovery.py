@@ -92,6 +92,30 @@ def test_unchanged_map_announcement_has_bounded_readback():
     asyncio.run(scenario())
 
 
+def test_second_docked_switch_uses_fresh_map_list_while_geometry_lags():
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator.client.async_get_current_app_map_index.return_value = 3
+        _switch(coordinator)
+        assert (await coordinator._async_refresh_runtime_map_index(force=True))[:2] == (
+            True,
+            3,
+        )
+        assert coordinator._runtime_map_identity_verified is False
+        assert coordinator.app_maps["current_map_index"] == 2
+        coordinator.client.async_get_current_app_map_index.side_effect = [3, 2]
+        with patch.object(refresh, "MAP_SWITCH_SETTLE_SECONDS", 0):
+            coordinator._record_device_snapshot(
+                SimpleNamespace(map_switch_event_at=101)
+            )
+        with patch.object(refresh, "MAP_SWITCH_RETRY_DELAYS", (0, 0, 0)):
+            result = await coordinator._async_refresh_runtime_map_index(force=True)
+        assert result[:2] == (True, 2)
+        assert coordinator.client.async_get_current_app_map_index.await_count == 3
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("cancelled", [False, True], ids=["timeout", "cancellation"])
 def test_failed_switch_readback_does_not_renew_old_identity(cancelled):
     async def scenario():

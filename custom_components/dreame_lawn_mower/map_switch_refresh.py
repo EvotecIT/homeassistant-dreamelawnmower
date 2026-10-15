@@ -27,8 +27,13 @@ def observe_map_switch(
     if observed is None or (previous is not None and observed <= previous):
         return
     if getattr(coordinator, "_map_switch_pending_event", None) is None:
-        coordinator._map_switch_previous_index = coordinator._runtime_map_index()
-        if coordinator._map_switch_previous_index is None:
+        if coordinator._runtime_map_identity_is_fresh():
+            # MAPL identity is authoritative even while docked or while its
+            # geometry/overlay has not yet been verified or downloaded.
+            coordinator._map_switch_previous_index = getattr(
+                coordinator, "_runtime_active_map_index", None
+            )
+        else:
             coordinator._map_switch_previous_index = active_map_index(
                 getattr(coordinator, "app_maps", None)
             )
