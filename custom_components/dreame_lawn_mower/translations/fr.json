@@ -70,6 +70,7 @@
           "map_restart_preview": "Conserver un aperçu de carte après redémarrage", "map_label_scale": "Échelle des libellés de la carte",
           "map_rotation": "Rotation de la carte",
           "map_theme": "Thème de la carte",
+          "map_background": "Fond de carte",
           "map_stroke_scale": "Épaisseur des lignes de la carte",
           "map_marker_scale": "Taille des marqueurs de la carte",
           "map_marker_image": "Marqueur personnalisé du robot tondeuse",
@@ -86,6 +87,7 @@
           "map_restart_preview": "Désactivé par défaut. Enregistre une image JPEG privée de la carte (jusqu’à 2 Mo) dans Home Assistant. Seuls les aperçus de moins de 24 heures sont utilisés pendant le chargement de la carte correspondante ; ils ne représentent pas l’état en direct. Désactiver cette option ou supprimer l’intégration efface l’aperçu enregistré.",
           "map_rotation": "Rotation utilisée pour les cartes sans réglage individuel. Pour chaque carte, utilisez l’entité Rotation d’affichage de la carte sélectionnée.",
           "map_theme": "Choisissez une palette claire, sombre, nocturne ou à contraste élevé cohérente pour toutes les cartes rendues localement.",
+          "map_background": "Standard dessine les pelouses sur un fond uni. Photo réelle place sous la carte la photo du jardin vue du dessus prise par la tondeuse, si elle en fournit une.",
           "map_stroke_scale": "Ajustez l’épaisseur des limites et des trajectoires de la carte entre 0,5 et 3.",
           "map_marker_scale": "Ajustez la taille des points de la carte et du marqueur de position du robot tondeuse entre 0,5 et 3.",
           "map_marker_image": "Fichier PNG, JPEG ou WebP facultatif placé dans le dossier config/www de Home Assistant, par exemple mower/marker.png ou /local/mower/marker.png. Les fichiers situés hors de ce dossier ou dépassant 1 Mo sont ignorés.",
@@ -126,6 +128,12 @@
         "dark": "Sombre",
         "midnight": "Minuit",
         "high_contrast": "Contraste élevé"
+      }
+    },
+    "map_background": {
+      "options": {
+        "standard": "Standard",
+        "real_scene": "Photo réelle"
       }
     },
     "map_spot_area_style": {

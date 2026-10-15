@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .map_geometry import rotate_canvas_point
+from .map_geometry import rotate_canvas_point_exact
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,12 @@ class MapProjection:
 
     def point(self, x: float, y: float) -> tuple[int, int]:
         """Project a native point using the renderer's exact rounding rule."""
-        return rotate_canvas_point(
+        px, py = self.point_exact(x, y)
+        return round(px), round(py)
+
+    def point_exact(self, x: float, y: float) -> tuple[float, float]:
+        """Project a native point without pixel rounding, for raster layers."""
+        return rotate_canvas_point_exact(
             (
                 (self.max_x - x) * self.scale + self.padding,
                 (y - self.min_y) * self.scale + self.padding,

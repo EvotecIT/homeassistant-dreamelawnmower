@@ -21,6 +21,7 @@ CONF_MAP_LABEL_SCALE = "map_label_scale"
 CONF_MAP_ROTATION = "map_rotation"
 CONF_MAP_ROTATIONS = "map_rotations"
 CONF_MAP_THEME = "map_theme"
+CONF_MAP_BACKGROUND = "map_background"
 CONF_MAP_STROKE_SCALE = "map_stroke_scale"
 CONF_MAP_MARKER_SCALE = "map_marker_scale"
 CONF_MAP_MARKER_IMAGE = "map_marker_image"
@@ -39,6 +40,7 @@ DEFAULT_COUNTRY = "eu"
 DEFAULT_MAP_LABEL_SCALE = 1.0
 DEFAULT_MAP_ROTATION = 0
 DEFAULT_MAP_THEME = "emerald"
+DEFAULT_MAP_BACKGROUND = "standard"
 DEFAULT_MAP_STROKE_SCALE = 1.0
 DEFAULT_MAP_MARKER_SCALE = 1.0
 DEFAULT_MAP_SPOT_AREA_STYLE = "hidden"
@@ -69,6 +71,10 @@ MAP_THEME_OPTIONS = {
     "dark": "Dark",
     "midnight": "Midnight",
     "high_contrast": "High contrast",
+}
+MAP_BACKGROUND_OPTIONS = {
+    "standard": "Standard",
+    "real_scene": "Real-scene photo",
 }
 MAP_SPOT_AREA_STYLE_OPTIONS = {
     "hidden": "Hidden (recommended)",

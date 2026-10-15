@@ -114,6 +114,27 @@ under `/config/www` and enter its relative path, such as
 `mower/my-marker.png`. The integration ignores absolute paths, traversal,
 unsupported types, files over 1 MB, and images larger than 512 by 512 pixels.
 
+### Real-scene background
+
+Set **Map background** to **Real-scene photo** to draw the mower's top-down
+garden photo under the lawns, the live position and the trail of the Map and
+Live Path Map cameras, as the vendor app's Real-scene Map does. Lawns become
+translucent and Mint stripes are not drawn while the photo is shown. The photo
+follows the selected map's display rotation.
+
+The camera asks the mower for the photo name with a read-only app request
+(`{"m": "g", "t": "OBJ", "d": {"type": "ARmap"}}`), outside the map refresh,
+at most every 30 minutes or when the selected map changes. The mower updates
+the photo after a task, and the PNG is downloaded only when its name changes.
+The name carries the placement, for example `..._275_202_3cm_processed.png`:
+the image origin in pixels and the ground size of one pixel. When the mower
+publishes no photo for the selected map, the standard background is used. The
+All Maps and Map Diagnostics cameras always use the standard background, and the
+interactive card view is unchanged.
+
+This was verified on a MOVA LiDAX Ultra 1000 (`mova.mower.g2529c`), where the
+lawn contour matched the photo. Other models may not publish a real-scene photo.
+
 ## Mission values after docking
 
 The runtime mission progress, current-area, and total-area sensors also retain

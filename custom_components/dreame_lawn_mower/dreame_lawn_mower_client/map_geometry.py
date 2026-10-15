@@ -13,6 +13,14 @@ def rotate_canvas_point(
     point: Point, width: int, height: int, rotation: int
 ) -> tuple[int, int]:
     """Rotate geometry clockwise before drawing upright text and markers."""
+    x, y = rotate_canvas_point_exact(point, width, height, rotation)
+    return round(x), round(y)
+
+
+def rotate_canvas_point_exact(
+    point: Point, width: int, height: int, rotation: int
+) -> Point:
+    """Apply the clockwise canvas rotation without pixel rounding."""
     x, y = point
     if rotation == 90:
         x, y = height - 1 - y, x
@@ -20,7 +28,7 @@ def rotate_canvas_point(
         x, y = width - 1 - x, height - 1 - y
     elif rotation == 270:
         x, y = y, width - 1 - x
-    return round(x), round(y)
+    return x, y
 
 
 def polygon_label_point(points: Sequence[Point]) -> Point:

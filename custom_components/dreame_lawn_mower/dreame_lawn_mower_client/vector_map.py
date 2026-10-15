@@ -292,6 +292,10 @@ def render_vector_map_png(
     if not position_within_vector_map(vector_map, runtime_position):
         runtime_position = None
     image = Image.new("RGBA", (image_width, image_height), style.background)
+    if style.real_scene is not None:
+        from .real_scene import paint_real_scene
+
+        paint_real_scene(image, style.real_scene, projection.point_exact)
     draw = ImageDraw.Draw(image)
     font = map_font(
         round(_LABEL_FONT_SIZE * _normalize_label_scale(label_scale) * pixel_scale)

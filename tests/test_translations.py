@@ -27,6 +27,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.dreame_lawn_mower.const import (
     COUNTRY_OPTIONS,
     DOMAIN,
+    MAP_BACKGROUND_OPTIONS,
     MAP_MOWING_PATH_STYLE_OPTIONS,
     MAP_ROTATION_OPTIONS,
     MAP_SPOT_AREA_STYLE_OPTIONS,
@@ -165,6 +166,7 @@ def test_localized_selector_options_match_runtime_values() -> None:
         "country": COUNTRY_OPTIONS,
         "map_rotation": [str(value) for value in MAP_ROTATION_OPTIONS],
         "map_theme": MAP_THEME_OPTIONS,
+        "map_background": MAP_BACKGROUND_OPTIONS,
         "map_spot_area_style": MAP_SPOT_AREA_STYLE_OPTIONS,
         "map_mowing_path_style": MAP_MOWING_PATH_STYLE_OPTIONS,
         "notification_mode": NOTIFICATION_MODE_OPTIONS,

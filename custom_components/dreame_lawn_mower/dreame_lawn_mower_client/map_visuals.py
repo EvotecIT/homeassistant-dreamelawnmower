@@ -9,13 +9,17 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PIL import Image, ImageDraw, ImageFont
+
+if TYPE_CHECKING:
+    from .real_scene import RealSceneImage
 
 from .resources import MAP_FONT, MAP_FONT_LIGHT
 
 Color = tuple[int, int, int, int]
+_REAL_SCENE_ZONE_ALPHA = 56
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +49,7 @@ class MapRenderStyle:
     mowing_path_style: str = "detailed"
     zone_pattern: str = "solid"
     rotation: int = 0
+    real_scene: RealSceneImage | None = None
 
 
 _EMERALD = MapRenderStyle(
@@ -142,11 +147,23 @@ def map_render_style(
     spot_area_style: str = "filled",
     mowing_path_style: str = "detailed",
     rotation: int = 0,
+    real_scene: RealSceneImage | None = None,
 ) -> MapRenderStyle:
     """Return a normalized preset with optional safe presentation overrides."""
     preset = MAP_RENDER_STYLES.get(str(name or "").lower(), _EMERALD)
+    if real_scene is not None:
+        # Let the photo show through, as the vendor app does.
+        preset = replace(
+            preset,
+            zone_fills=tuple(
+                (*color[:3], min(color[3], _REAL_SCENE_ZONE_ALPHA))
+                for color in preset.zone_fills
+            ),
+            zone_pattern="solid",
+        )
     return replace(
         preset,
+        real_scene=real_scene,
         rotation=rotation if rotation in (0, 90, 180, 270) else 0,
         stroke_scale=_finite_scale(
             preset.stroke_scale * _finite_scale(stroke_scale, 0.5, 3.0),
