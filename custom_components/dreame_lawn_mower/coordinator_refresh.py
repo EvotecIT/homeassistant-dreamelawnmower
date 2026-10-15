@@ -25,7 +25,11 @@ from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
 from .ha_tasks import create_background_task
-from .map_switch_refresh import async_read_settled_map_index, async_wait_for_map_switch
+from .map_switch_refresh import (
+    async_flush_restart_preview,
+    async_read_settled_map_index,
+    async_wait_for_map_switch,
+)
 from .performance import (
     DreameLawnMowerPerformanceCycle,
     DreameLawnMowerPerformanceSample,
@@ -634,6 +638,7 @@ class DreameLawnMowerRefreshMixin:
         current_task = asyncio.current_task()
         tasks: list[asyncio.Task[Any]] = []
         try:
+            await async_flush_restart_preview(self)
             core_operations: list[
                 tuple[str, Callable[[], Awaitable[Any]]]
             ] = []

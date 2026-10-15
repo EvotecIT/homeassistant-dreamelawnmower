@@ -74,7 +74,10 @@ from .map_cache import (
 from .map_image_variants import MapImageVariants
 from .map_presentation import map_rotation, map_style
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_scope
-from .map_switch_refresh import async_prepare_map_switch_metadata
+from .map_switch_refresh import (
+    async_flush_restart_preview,
+    async_prepare_map_switch_metadata,
+)
 from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
 from .real_scene_cache import real_scene_owner
@@ -171,10 +174,8 @@ class DreameLawnMowerMapCamera(
         if self._supports_restart_preview and self.coordinator.entry.options.get(
             CONF_MAP_RESTART_PREVIEW, False
         ):
-            self._restart_preview = RestartMapPreview(
-                self.hass, self.coordinator.entry.entry_id
-            )
-            self.coordinator.map_restart_preview = self._restart_preview
+            self._restart_preview = self.coordinator.map_restart_preview
+            await async_flush_restart_preview(self.coordinator)
         self._last_refresh_context = self._map_refresh_context
         if self._prewarm_map_image and self.available:
             self._start_map_refresh()
@@ -516,6 +517,7 @@ class DreameLawnMowerMapCamera(
                 await self._restart_preview.async_save(
                     image,
                     preview_scope(self._descriptor.unique_id, render_context[:-1]),
+                    generation=render_context[-1],
                 )
             except Exception:
                 _LOGGER.debug("Unable to save optional map restart preview")

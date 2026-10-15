@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from time import monotonic
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 MAP_SWITCH_SETTLE_SECONDS = 2.0
 MAP_SWITCH_RETRY_DELAYS = (0.75, 1.5, 3.0)
+_LOGGER = logging.getLogger(__name__)
 
 
 def observe_map_switch(
@@ -26,23 +28,27 @@ def observe_map_switch(
     previous = getattr(coordinator, "_last_map_switch_event_at", None)
     if observed is None or (previous is not None and observed <= previous):
         return
-    if getattr(coordinator, "_map_switch_pending_event", None) is None:
-        if coordinator._runtime_map_identity_is_fresh() and getattr(
+    coordinator._map_switch_overlapping = (
+        getattr(coordinator, "_map_switch_pending_event", None) is not None
+        or getattr(coordinator, "_map_switch_inventory_pending_event", None) is not None
+    )
+    if coordinator._runtime_map_identity_is_fresh() and getattr(
+        coordinator, "_runtime_active_map_index", None
+    ) is not None:
+        coordinator._map_switch_previous_index = getattr(
             coordinator, "_runtime_active_map_index", None
-        ) is not None:
-            # MAPL identity is authoritative even while docked or while its
-            # geometry/overlay has not yet been verified or downloaded.
-            coordinator._map_switch_previous_index = getattr(
-                coordinator, "_runtime_active_map_index", None
-            )
-        else:
-            coordinator._map_switch_previous_index = active_map_index(
-                getattr(coordinator, "app_maps", None)
-            )
+        )
+    else:
+        coordinator._map_switch_previous_index = active_map_index(
+            getattr(coordinator, "app_maps", None)
+        )
     coordinator._last_map_switch_event_at = observed
     coordinator._map_switch_pending_event = observed
     coordinator._map_switch_inventory_pending_event = observed
     coordinator._map_switch_settle_until = monotonic() + MAP_SWITCH_SETTLE_SECONDS
+    preview = getattr(coordinator, "map_restart_preview", None)
+    if preview is not None:
+        preview.invalidate(observed)
     coordinator._invalidate_runtime_map_identity()
     coordinator.client.invalidate_runtime_map_geometry()
     coordinator._invalidate_inflight_schedule_refreshes()
@@ -54,6 +60,16 @@ def observe_map_switch(
     coordinator.schedules_refreshed_at = None
     coordinator.batch_device_data_refreshed_at = None
     coordinator._schedule_metadata_refresh(refresh_map_and_runtime=True)
+
+
+async def async_flush_restart_preview(coordinator: object) -> None:
+    """Drain optional preview retirement through existing refresh/stop owners."""
+    preview = getattr(coordinator, "map_restart_preview", None)
+    if preview is not None:
+        try:
+            await preview.async_flush_invalidated()
+        except Exception:  # Optional storage must not stop mower metadata recovery.
+            _LOGGER.debug("Unable to retire optional map restart preview")
 
 
 async def async_wait_for_map_switch(coordinator: DreameLawnMowerRefreshMixin) -> None:
@@ -77,7 +93,10 @@ async def async_read_settled_map_index(
     for delay in MAP_SWITCH_RETRY_DELAYS:
         if event != getattr(coordinator, "_map_switch_pending_event", None):
             return index
-        if index is not None and (previous is None or index != previous):
+        if (
+            not getattr(coordinator, "_map_switch_overlapping", False)
+            and index is not None and (previous is None or index != previous)
+        ):
             break
         await asyncio.sleep(delay)
         if event != getattr(coordinator, "_map_switch_pending_event", None):

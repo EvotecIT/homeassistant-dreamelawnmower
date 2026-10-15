@@ -124,9 +124,11 @@ def test_switch_pair_shares_a_settled_authoritative_map_read():
         started, release = asyncio.Event(), asyncio.Event()
 
         async def sleep(delay):
-            assert delay == 2
-            started.set()
-            await release.wait()
+            if delay == 2:
+                started.set()
+                await release.wait()
+            else:
+                assert delay in refresh.MAP_SWITCH_RETRY_DELAYS
 
         with (
             patch.object(refresh, "monotonic", side_effect=[10, 12]),
@@ -139,7 +141,7 @@ def test_switch_pair_shares_a_settled_authoritative_map_read():
             coordinator.client.async_get_current_app_map_index.assert_not_awaited()
             release.set()
             assert (await read)[:2] == (True, 3)
-        coordinator.client.async_get_current_app_map_index.assert_awaited_once()
+        assert coordinator.client.async_get_current_app_map_index.await_count == 4
 
     asyncio.run(scenario())
 

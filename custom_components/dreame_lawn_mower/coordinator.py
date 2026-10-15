@@ -18,7 +18,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 if TYPE_CHECKING:
     from .dreame_lawn_mower_client.real_scene import RealSceneImage
-    from .map_preview import RestartMapPreview
     from .observation_checkpoint import ObservationCheckpoint
     from .option_updates import EntryUpdateSnapshot
     from .video_lan_cache import DreameLawnMowerVideoLanCache
@@ -72,7 +71,12 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
-from .map_switch_refresh import async_prepare_map_switch_metadata, observe_map_switch
+from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview
+from .map_switch_refresh import (
+    async_flush_restart_preview,
+    async_prepare_map_switch_metadata,
+    observe_map_switch,
+)
 from .mower_condition_history import MowerConditionHistory
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
@@ -425,7 +429,7 @@ class DreameLawnMowerCoordinator(
     video_lan_cache: DreameLawnMowerVideoLanCache
     video_provisioning_cache: DreameLawnMowerVideoProvisioningCache
     loaded_platforms: tuple[Platform, ...]
-    map_restart_preview: RestartMapPreview
+    map_restart_preview: RestartMapPreview | None
 
     def __init__(self, hass: HomeAssistant, entry: DreameLawnMowerConfigEntry) -> None:
         descriptor = DreameLawnMowerDescriptor(
@@ -449,6 +453,10 @@ class DreameLawnMowerCoordinator(
             session=async_get_clientsession(hass),
         )
         self.entry = entry
+        self.map_restart_preview = (
+            RestartMapPreview(hass, entry.entry_id)
+            if entry.options.get(CONF_MAP_RESTART_PREVIEW) else None
+        )
         self.app_map_objects: dict[str, Any] | None = None
         self.app_maps: dict[str, Any] | None = None
         self.app_maps_refreshed_at: datetime | None = None
@@ -518,6 +526,7 @@ class DreameLawnMowerCoordinator(
         self._map_switch_inventory_pending_event: float | None = None
         self._map_switch_pending_event: float | None = None
         self._map_switch_previous_index: int | None = None
+        self._map_switch_overlapping = False
         self._map_switch_settle_until = 0.0
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
@@ -821,6 +830,8 @@ class DreameLawnMowerCoordinator(
                 self._device_refresh_lock = asyncio.Lock()
             async with self._device_refresh_lock:
                 snapshot = await self.client.async_get_cached_snapshot()
+                if getattr(self, "_shutting_down", False):
+                    return
                 if not snapshot.available:
                     retained = self._record_connectivity_failure(
                         "Realtime mower connection was interrupted."
@@ -957,9 +968,10 @@ class DreameLawnMowerCoordinator(
                     bluetooth_error,
                 )
             self.async_set_updated_data(snapshot)
-            if runtime_active and not getattr(
-                self, "_runtime_map_identity_verified", False
-            ):
+            if (
+                runtime_active
+                and not getattr(self, "_runtime_map_identity_verified", False)
+            ) or getattr(self, "_map_switch_inventory_pending_event", None) is not None:
                 # Push updates reset HA's polling interval. Acquire missing map
                 # identity through the existing coalesced background owner.
                 self._schedule_metadata_refresh(refresh_map_and_runtime=True)
@@ -3031,6 +3043,8 @@ class DreameLawnMowerCoordinator(
         ):
             # MAPL can settle before the complete download reflects the switch.
             # Retain its identity and keep this inventory eligible for retry.
+            self._map_switch_pending_event = self._map_switch_inventory_pending_event
+            self._invalidate_runtime_map_identity()
             return self.app_maps
         identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
         newer_geometry_at = self.app_maps_refreshed_at
@@ -3464,6 +3478,7 @@ class DreameLawnMowerCoordinator(
                     "Continuing mower shutdown while a cancelled realtime "
                     "update finishes in the background."
                 )
+        await async_flush_restart_preview(self)
 
     async def _async_stop_owned_tasks_serialized(self) -> None:
         """Serialize shutdown ownership across stop and config-entry unload."""

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.dreame_lawn_mower import camera as camera_module
+from custom_components.dreame_lawn_mower import map_preview as preview_module
 from custom_components.dreame_lawn_mower.camera import (
     DreameLawnMowerAllMapsCamera,
     DreameLawnMowerLivePathMapCamera,
@@ -322,3 +323,33 @@ def test_restart_preview_scope_excludes_process_local_switch_receipt():
     asyncio.run(run())
     first, second = entity._restart_preview.async_save.call_args_list
     assert first.args[1] == second.args[1]
+    assert [first.kwargs["generation"], second.kwargs["generation"]] == [None, 100]
+
+
+def test_same_slot_camera_switch_updates_durable_preview_inside_cooldown(monkeypatch):
+    async def scenario():
+        records = []
+
+        async def save(record):
+            records.append(record)
+
+        monkeypatch.setattr(preview_module, "preview_store", lambda *_:
+            SimpleNamespace(async_save=save, async_remove=AsyncMock()))
+        monkeypatch.setattr(preview_module.time, "monotonic", lambda: 100.0)
+        entity = _camera()
+        entity.coordinator = SimpleNamespace(
+            entry=SimpleNamespace(options={"map_restart_preview": True}),
+            _last_map_switch_event_at=None,
+        )
+        entity._descriptor = SimpleNamespace(unique_id="one-mower")
+        entity._restart_preview = preview_module.RestartMapPreview(entity.hass, "entry")
+        old, new = b"\xff\xd8\xffold", b"\xff\xd8\xffnew"
+        await entity._async_save_restart_preview(old, entity._map_render_context)
+        entity.coordinator._last_map_switch_event_at = 100
+        entity._restart_preview.invalidate(100)
+        await entity._async_save_restart_preview(new, entity._map_render_context)
+        assert len(records) == 2
+        assert records[0]["scope"] == records[1]["scope"]
+        assert preview_module.decode_preview(records[1], records[1]["scope"])[0] == new
+
+    asyncio.run(scenario())
