@@ -43,7 +43,6 @@ from .coordinator_refresh import runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
-from .dreame_lawn_mower_client.exceptions import DeviceException, DreameLawnMowerError
 from .dreame_lawn_mower_client.feature_capabilities import (
     CAPABILITY_UNSUPPORTED,
     FEATURE_LIVE_VIDEO,
@@ -55,7 +54,7 @@ from .dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
-from .dreame_lawn_mower_client.real_scene import RealSceneImage, async_fetch_real_scene
+from .dreame_lawn_mower_client.real_scene import RealSceneImage
 from .feature_capabilities import coordinator_feature_capabilities
 from .ha_tasks import create_background_task
 from .image import (
@@ -77,6 +76,7 @@ from .map_presentation import map_rotation, map_style
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_scope
 from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
+from .real_scene_cache import real_scene_owner
 from .runtime_data import DreameLawnMowerConfigEntry
 from .video_camera import DreameLawnMowerVideoCamera
 
@@ -86,7 +86,6 @@ PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 # The mower refreshes the photo after a task; re-read its name occasionally.
-_REAL_SCENE_REFRESH_SECONDS = 30 * 60
 _MAP_CACHE_TTL = timedelta(seconds=60)
 _MAP_TIMEOUT_SECONDS = 6.0
 _MAP_POLL_INTERVAL_SECONDS = 0.5
@@ -138,10 +137,6 @@ class DreameLawnMowerMapCamera(
     _supports_restart_preview = True
     _supports_mowing_scene = True
     _supports_real_scene = True
-    _real_scene: RealSceneImage | None = None
-    _real_scene_checked_at: float | None = None
-    _real_scene_checked_index: int | None = None
-    _real_scene_task: asyncio.Task[None] | None = None
     _refresh_cached_view_on_coordinator_update = True
     # Camera attributes describe the current rendered/diagnostic view. Persisting
     # their large map payloads on every refresh creates unbounded recorder churn.
@@ -186,7 +181,7 @@ class DreameLawnMowerMapCamera(
     async def async_will_remove_from_hass(self) -> None:
         """Cancel a private warm-up task when the entity is removed."""
         self._map_refresh_pending = False
-        for task in (self._map_refresh_task, self._real_scene_task):
+        for task in (self._map_refresh_task,):
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -398,57 +393,13 @@ class DreameLawnMowerMapCamera(
                     self._start_map_refresh()
 
     def _maybe_refresh_real_scene(self) -> None:
-        """Fetch the vendor real-scene photo off the render path when enabled."""
-        if not self._supports_real_scene:
-            return
-        options = self.coordinator.entry.options
-        enabled = (
-            options.get(CONF_MAP_BACKGROUND, DEFAULT_MAP_BACKGROUND) == "real_scene"
-        )
-        map_index = self._selected_map_index
-        if not enabled or map_index is None:
-            self._real_scene = None
-            self._real_scene_checked_at = None
-            self.coordinator.real_scene = None
-            return
-        task = self._real_scene_task
-        if task is not None and not task.done():
-            return
-        checked_at = self._real_scene_checked_at
-        if (
-            checked_at is not None
-            and self._real_scene_checked_index == map_index
-            and monotonic() - checked_at < _REAL_SCENE_REFRESH_SECONDS
-        ):
-            return
-        self._real_scene_checked_at = monotonic()
-        self._real_scene_checked_index = map_index
-        self._real_scene_task = create_background_task(
-            self.hass,
-            self._async_refresh_real_scene(map_index),
-            "dreame-lawn-mower-real-scene",
-        )
+        """Request the entry's shared photo without blocking camera rendering."""
+        if self._supports_real_scene:
+            real_scene_owner(self.coordinator).request()
 
-    async def _async_refresh_real_scene(self, map_index: int) -> None:
-        """Replace the photo only when the mower names a different object."""
-        current = self._real_scene
-        try:
-            scene = await async_fetch_real_scene(
-                self.coordinator.client, map_index, current=current
-            )
-        except (DreameLawnMowerError, DeviceException, TimeoutError, ValueError) as err:
-            _LOGGER.debug(
-                "Real-scene map unavailable: %s", sanitize_diagnostic_text(err)
-            )
-            return
-        if scene is current:
-            return
-        self._real_scene = scene
-        self.coordinator.real_scene = scene
-        self._map_cache.invalidate_view()
-        if self.available:
-            self._map_refresh_pending = True
-            self._start_map_refresh()
+    @property
+    def _real_scene(self) -> RealSceneImage | None:
+        return real_scene_owner(self.coordinator).current
 
     async def _async_refresh_and_render_map_image(self) -> bytes | None:
         """Refresh the source view and atomically replace rendered JPEG bytes."""

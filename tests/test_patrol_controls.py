@@ -603,5 +603,27 @@ def test_point_patrol_service_visits_only_points_in_selected_zones() -> None:
     entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(
         [1, 3], expected_map_index=0,
     )
-    with pytest.raises(HomeAssistantError, match="No patrol point"):
+    with pytest.raises(HomeAssistantError, match="Zone #9"):
         asyncio.run(entity.async_start_point_patrol(zone_ids=[9]))
+
+
+@pytest.mark.parametrize("bad", [
+    {"id": []}, {"id": 1, "type": 2},
+    {"id": 1, "param": {}, "point": ["bad", 20], "time": 60, "type": 2},
+])
+def test_malformed_optional_patrol_point_does_not_break_map_summary(bad):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_map_metadata import (  # noqa: E501
+        app_map_patrol_point_zones,
+    )
+    zones = [{"id": 1, "data": [[0, 0], [100, 0], [100, 100], [0, 100]]}]
+    good = {"id": 1, "param": {}, "point": [50, 50], "time": 60, "type": 2}
+    assert app_map_patrol_point_zones(zones, [bad, good]) == {"1": 1}
+
+
+def test_point_patrol_rejects_mixed_valid_and_unknown_zones_before_dispatch():
+    maps = _patrol_app_maps()
+    maps["maps"][0]["summary"]["patrol_point_zones"] = {"1": 1}
+    entity = _entity(app_maps=maps)
+    with pytest.raises(HomeAssistantError, match="Zone #999"):
+        asyncio.run(entity.async_start_point_patrol(zone_ids=[1, 999]))
+    entity.coordinator.client.async_start_point_patrol.assert_not_called()

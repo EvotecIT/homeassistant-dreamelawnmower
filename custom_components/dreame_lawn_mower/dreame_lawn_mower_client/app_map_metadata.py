@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -97,7 +98,11 @@ def app_map_patrol_point_zones(
 
     zones: list[tuple[int, list[tuple[float, float]]]] = []
     for record in zone_records:
-        if not isinstance(record, Mapping) or type(record.get("id")) is not int:
+        if (
+            not isinstance(record, Mapping)
+            or type(record.get("id")) is not int or record["id"] <= 0
+            or record.get("type", 0) != 0
+        ):
             continue
         data = record.get("data")
         if not isinstance(data, Sequence) or isinstance(data, str | bytes | bytearray):
@@ -106,14 +111,15 @@ def app_map_patrol_point_zones(
             (float(point[0]), float(point[1])) for point in data
             if isinstance(point, Sequence) and len(point) >= 2
             and all(isinstance(value, int | float) and not isinstance(value, bool)
+                    and math.isfinite(value)
                     for value in point[:2])
         ]
-        if len(polygon) >= 3:
+        if len(polygon) == len(data) and len(polygon) >= 3:
             zones.append((record["id"], polygon))
-    patrol_ids = set(app_map_patrol_point_ids(point_entries))
     result: dict[str, int] = {}
     for entry in point_entries:
-        if not isinstance(entry, Mapping) or entry.get("id") not in patrol_ids:
+        point_ids = app_map_patrol_point_ids([entry])
+        if not point_ids or str(point_ids[0]) in result:
             continue
         x, y = entry["point"][0], entry["point"][1]
         zone_id = next(

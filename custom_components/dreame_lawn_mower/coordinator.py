@@ -3384,6 +3384,9 @@ class DreameLawnMowerCoordinator(
     async def _async_stop_owned_tasks(self) -> None:
         """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
+        photo_owner = getattr(self, "_real_scene_owner", None)
+        if photo_owner is not None:
+            await photo_owner.async_close()
         await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
         self.client.set_update_callback(None)
