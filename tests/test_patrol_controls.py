@@ -458,6 +458,31 @@ def test_edge_patrol_service_uses_explicit_contours() -> None:
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
+def test_edge_patrol_service_defaults_to_each_zone_outer_edge() -> None:
+    entity = _entity()
+
+    asyncio.run(entity.async_start_edge_patrol())
+
+    entity.coordinator.client.async_start_edge_patrol.assert_awaited_once_with(
+        [[1, 0], [3, 0]],
+        expected_map_index=0,
+    )
+
+
+def test_edge_patrol_default_skips_inner_contours() -> None:
+    details = _vector_map_details()
+    details["maps"][0]["contour_ids"] = [[1, 1], [1, 0]]
+    details["maps"][0]["contour_count"] = 2
+    entity = _entity(vector_map_details=details)
+
+    asyncio.run(entity.async_start_edge_patrol())
+
+    entity.coordinator.client.async_start_edge_patrol.assert_awaited_once_with(
+        [[1, 0]],
+        expected_map_index=0,
+    )
+
+
 def test_edge_patrol_service_rejects_unknown_active_map_contour() -> None:
     entity = _entity()
 
@@ -545,4 +570,4 @@ def test_patrol_services_are_declared_for_home_assistant() -> None:
     )
 
     assert services["start_point_patrol"]["fields"]["point_ids"]["required"] is False
-    assert services["start_edge_patrol"]["fields"]["contour_ids"]["required"] is True
+    assert services["start_edge_patrol"]["fields"]["contour_ids"]["required"] is False

@@ -182,7 +182,7 @@ async def async_setup_entry(
     )
     platform.async_register_entity_service(
         "start_edge_patrol",
-        {vol.Required("contour_ids"): _validate_contour_ids},
+        {vol.Optional("contour_ids"): _validate_contour_ids},
         "async_start_edge_patrol",
     )
     platform.async_register_entity_service(
@@ -743,10 +743,16 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         await self.coordinator.async_request_refresh()
 
-    async def async_start_edge_patrol(self, contour_ids: list[list[int]]) -> None:
-        """Patrol one or more explicit current-map edge contours without mowing."""
-        normalized = _normalize_contour_ids(contour_ids)
+    async def async_start_edge_patrol(
+        self, contour_ids: list[list[int]] | None = None
+    ) -> None:
+        """Patrol current-map edge contours; default to each zone's outer edge."""
         map_index = self._task_map_index()
+        if contour_ids is None:
+            contour_ids = self._outer_edge_contour_ids()
+            if not contour_ids:
+                raise HomeAssistantError("No zone edge is available on this map.")
+        normalized = _normalize_contour_ids(contour_ids)
         self._ensure_contour_ids_available(normalized)
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_edge_patrol(
@@ -941,6 +947,20 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 "Selected map does not match the active mower map. "
                 "Switch the active map in the Dreame app first."
             )
+
+    def _outer_edge_contour_ids(self) -> list[list[int]]:
+        """Return contour index 0 of every zone, as tapping zones in the app."""
+        return sorted(
+            [list(entry["contour_id"]) for entry in current_contour_entries(
+                getattr(self.coordinator, "vector_map_details", None),
+                self.coordinator.app_maps,
+                self.coordinator.batch_device_data,
+                selected_map_index=self.coordinator.selected_map_index,
+            )
+            if isinstance(entry.get("contour_id"), tuple)
+            and len(entry["contour_id"]) == 2
+            and entry["contour_id"][1] == 0]
+        )
 
     def _ensure_contour_ids_available(self, contour_ids: list[list[int]]) -> None:
         """Reject edge contour ids that are absent from current-map metadata."""

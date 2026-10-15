@@ -139,8 +139,10 @@ start_edge_patrol:
   fields:
     contour_ids:
       name: Contour IDs
-      description: List of edge contour ids, for example [[1, 0]].
-      required: true
+      description: >-
+        List of edge contour ids, for example [[1, 0]]. Omit to patrol the
+        outer edge of every zone on the active map.
+      required: false
       example: [[1, 0]]
       selector:
         object: {}
