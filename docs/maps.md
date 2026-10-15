@@ -68,6 +68,11 @@ position or mission telemetry. The companion Lawn Mower Card labels it **Saved
 preview** until a fresh map replaces it. Disabling the option removes the stored
 preview.
 
+A map-switch announcement also retires the saved preview, including when the
+primary camera entity is disabled. Pending writes finish before the retired
+image is removed. The first verified image after a same-slot switch replaces
+the preview immediately; later updates retain the usual write cooldown.
+
 Transient paths are scoped to the selected map and mowing task.
 Changing either clears the prior session trail. A mower position outside the
 selected map boundary is retained in diagnostics but withheld from the image,
