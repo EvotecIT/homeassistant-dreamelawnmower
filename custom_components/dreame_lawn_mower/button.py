@@ -43,6 +43,7 @@ async def async_setup_entry(
         [
             DreameLawnMowerEndCurrentTaskButton(coordinator),
             DreameLawnMowerDockWithoutStoppingButton(coordinator),
+            DreameLawnMowerFindMowerButton(coordinator),
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
@@ -96,6 +97,21 @@ class DreameLawnMowerDockWithoutStoppingButton(
             self.coordinator.client.async_dock_without_stopping()
         )
         await self.coordinator.async_request_refresh()
+
+
+class DreameLawnMowerFindMowerButton(DreameLawnMowerEntity, ButtonEntity):
+    """Make the mower play its locator sound, like the app's Find my mower."""
+
+    _attr_name = "Find My Mower"
+    _attr_icon = "mdi:map-marker-radius"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_find_mower"
+
+    async def async_press(self) -> None:
+        """Send the locator request once; it does not change the mower state."""
+        await async_run_mowing_command(self.coordinator.client.async_find_mower())
 
 
 class DreameLawnMowerGoToMaintenancePointButton(

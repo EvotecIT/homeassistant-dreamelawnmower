@@ -18,6 +18,9 @@ MOWING_TASK_SPOT = 103
 MOWING_TASK_POINT_PATROL = 107
 MOWING_TASK_EDGE_PATROL = 108
 MOWING_TASK_MAINTENANCE_POINT = 109
+# The app's "Find my mower" (findBot) control: the mower plays a sound and
+# does not move. It uses the control group (p=1), not the task group (p=0).
+FIND_MOWER_OPERATION = 9
 
 
 class MowingTaskResponseError(ValueError):
@@ -92,6 +95,11 @@ def build_map_switch_request(map_index: int) -> dict[str, Any]:
     if map_index < 0:
         raise ValueError("map_index must be zero or greater.")
     return {"m": "a", "p": 0, "o": 200, "d": {"idx": int(map_index)}}
+
+
+def build_find_mower_request() -> dict[str, Any]:
+    """Build the app action that makes the mower play its locator sound."""
+    return {"m": "a", "p": 1, "o": FIND_MOWER_OPERATION}
 
 
 def client_task_result(response: Any, *, task_name: str) -> Any:
