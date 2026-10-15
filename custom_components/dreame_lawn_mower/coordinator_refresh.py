@@ -25,6 +25,7 @@ from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
 from .ha_tasks import create_background_task
+from .map_switch_refresh import async_wait_for_map_switch
 from .performance import (
     DreameLawnMowerPerformanceCycle,
     DreameLawnMowerPerformanceSample,
@@ -391,6 +392,7 @@ class DreameLawnMowerRefreshMixin:
         self, *, force: bool,
     ) -> tuple[bool, int | None, int]:
         """Read only MAPL for live tracking; never wait for a MAPD download."""
+        await async_wait_for_map_switch(self)
         requested_at = datetime.now(UTC)
         if not hasattr(self, "_runtime_map_identity_lock"):
             self._runtime_map_identity_lock = asyncio.Lock()

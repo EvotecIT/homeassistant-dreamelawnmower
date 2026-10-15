@@ -71,6 +71,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
+from .map_switch_refresh import async_wait_for_map_switch, observe_map_switch
 from .mower_condition_history import MowerConditionHistory
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
@@ -508,6 +509,8 @@ class DreameLawnMowerCoordinator(
         self._retained_device_snapshot_ids: set[int] = set()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
+        self._last_map_switch_event_at: float | None = None
+        self._map_switch_settle_until = 0.0
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
         self.selected_spot_id: int | None = None
@@ -603,6 +606,7 @@ class DreameLawnMowerCoordinator(
         retain: bool = False,
     ) -> None:
         """Assign fetch order so slow hydration cannot publish stale state."""
+        observe_map_switch(self, snapshot)
         self._device_snapshot_generation = (
             getattr(self, "_device_snapshot_generation", 0) + 1
         )
@@ -2934,6 +2938,7 @@ class DreameLawnMowerCoordinator(
         source: str = "app_maps_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached app-map payloads without failing the main poll."""
+        await async_wait_for_map_switch(self)
         now = datetime.now(UTC)
         identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         if (
