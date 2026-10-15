@@ -156,7 +156,9 @@ from .models import map_summary_from_map_data as map_summary_from_map_data
 from .models import remote_control_block_reason as remote_control_block_reason
 from .models import remote_control_state_safe as remote_control_state_safe
 from .models import snapshot_from_device as snapshot_from_device
-from .movement_safety import stationary_movement_block_reason
+from .movement_safety import (
+    stationary_movement_block_reason as _stationary_movement_block_reason,
+)
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD as MOWING_PREFERENCE_MODE_FIELD,
 )
@@ -1294,7 +1296,7 @@ class DreameLawnMowerClient(
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
         snapshot = await self.async_refresh_authoritative_snapshot()
-        block_reason = stationary_movement_block_reason(snapshot)
+        block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
         from .mowing_tasks import build_maintenance_point_request
@@ -1332,7 +1334,7 @@ class DreameLawnMowerClient(
                 "Every patrol point must belong to the verified active mower map."
             )
         snapshot = await self.async_refresh_authoritative_snapshot()
-        block_reason = stationary_movement_block_reason(snapshot)
+        block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
         return await self._async_call_mowing_task(request, task_name="point patrol")
@@ -1343,7 +1345,7 @@ class DreameLawnMowerClient(
     ) -> Any:
         """Drive along one or more saved edge contours without mowing."""
         snapshot = await self.async_refresh_authoritative_snapshot()
-        block_reason = stationary_movement_block_reason(snapshot)
+        block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
         from .mowing_tasks import build_edge_patrol_request
