@@ -150,7 +150,7 @@ download garden geometry during an ordinary dashboard render. Select the Hero
 layout's **3D** tab or press **Load 3D map** in another layout when you want to
 fetch it. The route itself does not prove mower support: `feature_capabilities.point_cloud`
 reports `supported`, `unknown`, or `unsupported`, with its evidence source.
-A2 has confirmed model support. Other models remain unknown until explicit
+A2 and MOVA LiDAX Ultra 1000 have confirmed model support. Other models remain unknown until explicit
 metadata or a validated download supplies evidence; LiDAR and 2D maps alone do
 not. The current companion card asks for an explicit load on unknown mowers.
 Point-cloud access is currently restricted to Home Assistant admins.
