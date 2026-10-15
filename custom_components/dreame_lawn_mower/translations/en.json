@@ -67,7 +67,8 @@
         "title": "Dreame lawn mower options",
         "data": {
           "scan_interval": "Polling interval in seconds",
-          "map_restart_preview": "Keep a map preview across restarts", "map_label_scale": "Map label scale",
+          "map_restart_preview": "Keep a map preview across restarts",
+          "map_label_scale": "Map label scale",
           "map_rotation": "Map display rotation",
           "map_theme": "Map theme",
           "map_stroke_scale": "Map line thickness",
@@ -298,6 +299,16 @@
     "plan_mowing_preference_update": {
       "name": "Plan mowing preference update",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Play audio through the mower",
+      "description": "Play a local audio file through the mower speaker using cloud live video. Playback is limited to 60 seconds.",
+      "fields": {
+        "file_path": {
+          "name": "File path",
+          "description": "Absolute path of an allowed local audio file, for example /media/hello.mp3."
+        }
+      }
     }
   }
 }

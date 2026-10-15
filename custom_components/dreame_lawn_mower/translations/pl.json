@@ -67,7 +67,8 @@
         "title": "Opcje kosiarki Dreame",
         "data": {
           "scan_interval": "Interwał odpytywania (sekundy)",
-          "map_restart_preview": "Zachowuj podgląd mapy po restarcie", "map_label_scale": "Skala etykiet mapy",
+          "map_restart_preview": "Zachowuj podgląd mapy po restarcie",
+          "map_label_scale": "Skala etykiet mapy",
           "map_rotation": "Obrót mapy",
           "map_theme": "Motyw mapy",
           "map_stroke_scale": "Grubość linii mapy",
@@ -298,6 +299,16 @@
     "plan_mowing_preference_update": {
       "name": "Przygotuj zmianę preferencji koszenia",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Odtwórz dźwięk przez kosiarkę",
+      "description": "Odtwarza lokalny plik dźwiękowy przez głośnik kosiarki, korzystając z podglądu na żywo przez chmurę. Odtwarzanie trwa maksymalnie 60 sekund.",
+      "fields": {
+        "file_path": {
+          "name": "Ścieżka pliku",
+          "description": "Bezwzględna ścieżka do dozwolonego lokalnego pliku dźwiękowego, na przykład /media/hello.mp3."
+        }
+      }
     }
   }
 }

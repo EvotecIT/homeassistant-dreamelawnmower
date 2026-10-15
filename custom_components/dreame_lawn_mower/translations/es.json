@@ -67,7 +67,8 @@
         "title": "Opciones del cortacésped Dreame",
         "data": {
           "scan_interval": "Intervalo de sondeo en segundos",
-          "map_restart_preview": "Conservar una vista previa del mapa tras reiniciar", "map_label_scale": "Escala de las etiquetas del mapa",
+          "map_restart_preview": "Conservar una vista previa del mapa tras reiniciar",
+          "map_label_scale": "Escala de las etiquetas del mapa",
           "map_rotation": "Rotación del mapa",
           "map_theme": "Tema del mapa",
           "map_stroke_scale": "Grosor de las líneas del mapa",
@@ -298,6 +299,16 @@
     "plan_mowing_preference_update": {
       "name": "Preparar el cambio de preferencias de corte",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Reproducir audio en el cortacésped",
+      "description": "Reproduce un archivo de audio local por el altavoz del cortacésped mediante vídeo en directo en la nube. La reproducción se limita a 60 segundos.",
+      "fields": {
+        "file_path": {
+          "name": "Ruta del archivo",
+          "description": "Ruta absoluta de un archivo de audio local permitido, por ejemplo /media/hello.mp3."
+        }
+      }
     }
   }
 }

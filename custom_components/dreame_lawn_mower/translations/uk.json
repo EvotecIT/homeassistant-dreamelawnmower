@@ -67,7 +67,8 @@
         "title": "Параметри газонокосарки Dreame",
         "data": {
           "scan_interval": "Інтервал опитування в секундах",
-          "map_restart_preview": "Зберігати попередній перегляд карти після перезапуску", "map_label_scale": "Масштаб підписів на карті",
+          "map_restart_preview": "Зберігати попередній перегляд карти після перезапуску",
+          "map_label_scale": "Масштаб підписів на карті",
           "map_rotation": "Обертання карти",
           "map_theme": "Тема карти",
           "map_stroke_scale": "Товщина ліній карти",
@@ -298,6 +299,16 @@
     "plan_mowing_preference_update": {
       "name": "Підготувати зміну налаштувань косіння",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Відтворити звук через газонокосарку",
+      "description": "Відтворює локальний аудіофайл через динамік газонокосарки за допомогою хмарного відеопотоку. Відтворення обмежено 60 секундами.",
+      "fields": {
+        "file_path": {
+          "name": "Шлях до файлу",
+          "description": "Абсолютний шлях до дозволеного локального аудіофайлу, наприклад /media/hello.mp3."
+        }
+      }
     }
   }
 }

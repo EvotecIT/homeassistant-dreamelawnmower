@@ -67,7 +67,8 @@
         "title": "Параметры газонокосилки Dreame",
         "data": {
           "scan_interval": "Интервал опроса в секундах",
-          "map_restart_preview": "Сохранять предпросмотр карты после перезапуска", "map_label_scale": "Масштаб подписей на карте",
+          "map_restart_preview": "Сохранять предпросмотр карты после перезапуска",
+          "map_label_scale": "Масштаб подписей на карте",
           "map_rotation": "Поворот карты",
           "map_theme": "Тема карты",
           "map_stroke_scale": "Толщина линий карты",
@@ -298,6 +299,16 @@
     "plan_mowing_preference_update": {
       "name": "Подготовить изменение настроек кошения",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Воспроизвести звук через газонокосилку",
+      "description": "Воспроизводит локальный аудиофайл через динамик газонокосилки с использованием облачного видеопотока. Воспроизведение ограничено 60 секундами.",
+      "fields": {
+        "file_path": {
+          "name": "Путь к файлу",
+          "description": "Абсолютный путь к разрешённому локальному аудиофайлу, например /media/hello.mp3."
+        }
+      }
     }
   }
 }
