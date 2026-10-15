@@ -79,6 +79,8 @@ def build_mowing_map_scene(
     # theme show through, while retaining zone hues and all safety overlays.
     interactive_style = replace(
         style,
+        # The real-scene photo is a separate layer the card can switch.
+        real_scene=None,
         background=(0, 0, 0, 0),
         zone_fills=tuple((*color[:3], min(color[3], 64)) for color in style.zone_fills),
         zone_pattern="solid",

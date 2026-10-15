@@ -399,14 +399,17 @@ class DreameLawnMowerMapCamera(
 
     def _maybe_refresh_real_scene(self) -> None:
         """Fetch the vendor real-scene photo off the render path when enabled."""
+        if not self._supports_real_scene:
+            return
         options = self.coordinator.entry.options
-        enabled = self._supports_real_scene and (
+        enabled = (
             options.get(CONF_MAP_BACKGROUND, DEFAULT_MAP_BACKGROUND) == "real_scene"
         )
         map_index = self._selected_map_index
         if not enabled or map_index is None:
             self._real_scene = None
             self._real_scene_checked_at = None
+            self.coordinator.real_scene = None
             return
         task = self._real_scene_task
         if task is not None and not task.done():
@@ -441,6 +444,7 @@ class DreameLawnMowerMapCamera(
         if scene is current:
             return
         self._real_scene = scene
+        self.coordinator.real_scene = scene
         self._map_cache.invalidate_view()
         if self.available:
             self._map_refresh_pending = True

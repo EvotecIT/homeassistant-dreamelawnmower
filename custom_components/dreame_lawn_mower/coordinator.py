@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 if TYPE_CHECKING:
+    from .dreame_lawn_mower_client.real_scene import RealSceneImage
     from .map_preview import RestartMapPreview
     from .observation_checkpoint import ObservationCheckpoint
     from .option_updates import EntryUpdateSnapshot
@@ -508,6 +509,8 @@ class DreameLawnMowerCoordinator(
         self._retained_device_snapshot_ids: set[int] = set()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
+        # Shared by the map cameras and the interactive map API.
+        self.real_scene: RealSceneImage | None = None
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
         self.selected_spot_id: int | None = None

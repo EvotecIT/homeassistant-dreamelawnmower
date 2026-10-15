@@ -129,8 +129,11 @@ the photo after a task, and the PNG is downloaded only when its name changes.
 The name carries the placement, for example `..._275_202_3cm_processed.png`:
 the image origin in pixels and the ground size of one pixel. When the mower
 publishes no photo for the selected map, the standard background is used. The
-All Maps and Map Diagnostics cameras always use the standard background, and the
-interactive card view is unchanged.
+All Maps and Map Diagnostics cameras always use the standard background. The
+interactive map scene advertises the photo as a separate layer: its JSON adds
+`real_scene_path`, a PNG with the same width and height as `background_path`,
+drawn in the same canvas so a card can stack it under the transparent
+background. The field is `null` when no photo is available.
 
 This was verified on a MOVA LiDAX Ultra 1000 (`mova.mower.g2529c`), where the
 lawn contour matched the photo. Other models may not publish a real-scene photo.

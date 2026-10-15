@@ -166,3 +166,53 @@ def test_background_requires_exact_revision_and_current_context(monkeypatch):
             await view.get({}, "entry", "a" * 64)
 
     asyncio.run(run())
+
+
+def test_real_scene_layer_matches_the_background_canvas(monkeypatch):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.real_scene import (  # noqa: E501
+        real_scene_from_png,
+    )
+
+    async def run():
+        async def load(**kwargs):
+            return scene()
+
+        hass, coordinator, api = environment(load)
+
+        async def executor(func, *args):
+            return func(*args)
+
+        hass.async_add_executor_job = executor
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        photo = BytesIO()
+        Image.new("RGBA", (40, 20), (0, 128, 0, 255)).save(photo, format="PNG")
+        coordinator.real_scene = real_scene_from_png(
+            0, "x/IQ1/a_20_10_3cm.png", photo.getvalue()
+        )
+        entry = await api.scene("entry")
+        view = module.MowingMapRealSceneView(api)
+
+        assert module._real_scene_path("entry", entry) is None
+        coordinator.entry.options["map_background"] = "real_scene"
+        path = module._real_scene_path("entry", entry)
+        digest = coordinator.real_scene.digest
+        assert path.endswith(f"/real-scene/{'a' * 64}/{digest}")
+
+        response = await view.get({}, "entry", "a" * 64, digest)
+        assert response.headers["Cache-Control"] == "private, no-store"
+        with Image.open(BytesIO(response.body)) as layer:
+            projection = entry.scene.projection
+            assert layer.size == (projection.width, projection.height)
+            assert layer.getpixel(projection.point(0, 0))[1] == 128
+        with pytest.raises(web.HTTPNotFound):
+            await view.get({}, "entry", "a" * 64, "0" * 64)
+        coordinator.real_scene = real_scene_from_png(
+            1, "x/IQ1/a_20_10_3cm.png", photo.getvalue()
+        )
+        assert module._real_scene_path("entry", entry) is None
+
+    asyncio.run(run())
