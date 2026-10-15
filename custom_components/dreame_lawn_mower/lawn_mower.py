@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
 from time import time
 from types import SimpleNamespace
 from typing import Any, cast
@@ -28,7 +28,6 @@ from .const import (
     ACTIVITY_MOWING,
     ACTIVITY_PAUSED,
     ACTIVITY_RETURNING,
-    DOMAIN,
 )
 from .control_options import (
     MOWING_ACTION_EDGE,
@@ -53,10 +52,6 @@ from .dreame_lawn_mower_client.feature_capabilities import (
 )
 from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
-)
-from .dreame_lawn_mower_client.session_photos import (
-    async_download_session_photo,
-    async_get_session_photos,
 )
 from .entity import DreameLawnMowerEntity
 from .mowing_command import (
@@ -125,14 +120,6 @@ def _validate_contour_ids(contour_ids: Any) -> list[list[int]]:
         return _normalize_contour_ids(contour_ids)
     except HomeAssistantError as err:
         raise vol.Invalid(str(err)) from err
-
-
-def _write_session_photo(target: Path, content: bytes) -> None:
-    """Write a photo atomically so a partial file is never kept."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(f".{target.name}.part")
-    partial.write_bytes(content)
-    partial.replace(target)
 
 
 def _validate_preference_mode(preference_mode: Any) -> int:
@@ -257,6 +244,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._descriptor.unique_id}_mower"
+        self._session_photo_lock = asyncio.Lock()
 
     @property
     def activity(self) -> LawnMowerActivity | None:
@@ -771,39 +759,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         self, session_count: int = 1
     ) -> dict[str, Any]:
         """Save photos of the latest finished task sessions to the media folder."""
-        client = self.coordinator.client
-        try:
-            photos = await async_get_session_photos(client, session_count=session_count)
-        except DreameLawnMowerConnectionError as err:
-            raise HomeAssistantError(f"Session photos unavailable: {err}") from err
-        folder = Path(
-            self.hass.config.media_dirs.get("local") or self.hass.config.path("media"),
-            DOMAIN,
-            self.entity_id.split(".", 1)[1],
-        )
-        saved: list[dict[str, Any]] = []
-        for photo in photos:
-            target = folder / photo.file_name
-            exists = await self.hass.async_add_executor_job(target.exists)
-            if not exists:
-                try:
-                    content = await async_download_session_photo(client, photo)
-                except DreameLawnMowerConnectionError as err:
-                    raise HomeAssistantError(
-                        f"Session photo {photo.file_name} unavailable: {err}"
-                    ) from err
-                if content is None:
-                    continue
-                await self.hass.async_add_executor_job(
-                    _write_session_photo, target, content,
-                )
-            saved.append({
-                "file": str(target),
-                "new": not exists,
-                "task": photo.session.task,
-                "session": photo.session.object_name,
-            })
-        return {"photos": saved}
+        from .session_photo_archive import async_archive_session_photos
+
+        async with self._session_photo_lock:
+            return await async_archive_session_photos(
+                self.hass, self.coordinator.client, self.entity_id,
+                session_count=session_count,
+            )
 
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the mower's active app map."""

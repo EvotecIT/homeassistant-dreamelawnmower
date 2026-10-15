@@ -279,11 +279,22 @@ unknown and the integration does not use it.
 
 `dreame_lawn_mower.download_session_photos` saves the photos attached to the
 latest finished task sessions, such as the photos taken at patrol points, to the
-Home Assistant media folder (`<media>/dreame_lawn_mower/<entity>/`). They are
-then visible in the Media browser and are not served from the public `www`
+Home Assistant media folder (`<media>/dreame_lawn_mower/<entity>/<object-id>/`).
+The object ID keeps different cloud photos separate when filenames repeat.
+They are then visible in the Media browser and are not served from the public `www`
 folder. Photos already saved are skipped, so the service can run after every
 task. The response lists each photo with its file path, whether it is new, and
 the task operation of its session (for example `107` for point patrol).
+
+The service uses the configured `local` media source, or the first configured
+media source when `local` is absent. Configure a media directory before calling
+it. Each call scans up to 100 recent events to find 1–20 usable sessions and
+downloads at most 100 photos, 8 MiB per photo and 64 MiB in total, within two
+minutes. The archive is limited to 256 MiB per mower entity. The response includes
+`limited: true` when the photo-count or storage budget is reached. Saved photos
+are kept on failures and retries skip them. Remove older photos from the archive
+to free space; the integration never deletes them automatically. Media storage
+must support hard links for atomic saves that preserve existing files.
 
 ```yaml
 action: dreame_lawn_mower.download_session_photos
