@@ -61,6 +61,20 @@ def test_repeated_identical_switches_publish_fresh_receipts():
     assert device._property_changed.call_count == 2
 
 
+def test_retransmitted_task_switch_keeps_its_original_receipt():
+    device = _device()
+    task = {"t": "TASK", "d": {"o": 200, "exe": True}}
+    message = {"method": "properties_changed", "params": [
+        {"siid": 2, "piid": 50, "value": task},
+    ]}
+    with patch("time.time", side_effect=[100.0, 200.0]):
+        device._message_callback(message)
+        first = map_switch_event_at(device.realtime_properties)
+        device._message_callback(message)
+        assert map_switch_event_at(device.realtime_properties) == first == 100
+    assert device._property_changed.call_count == 1
+
+
 def test_failed_switch_properties_do_not_expire_map_scope():
     assert (
         map_switch_event_at(

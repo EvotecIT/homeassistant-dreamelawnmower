@@ -256,6 +256,35 @@ def test_restart_preview_cannot_override_mower_unavailability():
     entity._restart_preview.async_load.assert_not_called()
 
 
+def test_observed_switch_cannot_restore_pre_switch_disk_preview():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(_last_map_switch_event_at=100)
+    entity._descriptor = SimpleNamespace(unique_id="one-mower")
+    entity._preview_attempted_scope = None
+    entity._restart_preview = SimpleNamespace(async_load=AsyncMock(
+        return_value=(b"old-garden", 123.0),
+    ))
+    entity._start_map_refresh = Mock()
+    asyncio.run(entity._async_get_map_image())
+    entity._restart_preview.async_load.assert_not_called()
+    assert entity._map_cache.last_image is None
+    entity._start_map_refresh.assert_called_once()
+
+
+def test_switch_during_camera_resize_cannot_return_old_image():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(_last_map_switch_event_at=None)
+    entity._last_refresh_context = entity._map_refresh_context
+    entity._async_camera_image_impl = AsyncMock(return_value=b"old-garden")
+
+    async def resize(*args):
+        entity.coordinator._last_map_switch_event_at = 100
+        return b"old-garden-resized"
+
+    entity._image_variants = SimpleNamespace(async_get=resize)
+    assert asyncio.run(entity.async_camera_image(width=400)) is None
+
+
 def test_identical_map_refresh_renews_preview_without_jpeg_conversion():
     entity = _camera()
     entity.coordinator = SimpleNamespace(entry=SimpleNamespace(

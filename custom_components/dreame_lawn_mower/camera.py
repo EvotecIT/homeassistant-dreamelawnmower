@@ -289,12 +289,14 @@ class DreameLawnMowerMapCamera(
             self, "_last_map_switch_event_at", None
         ):
             self._invalidate_map_context(context)
+        render_context = self._map_render_context
         image = await self._async_camera_image_impl()
         if image is None:
             return None
-        return await self._image_variants.async_get(
+        image = await self._image_variants.async_get(
             image, width, height, self.hass.async_add_executor_job
         )
+        return image if self._map_render_context == render_context else None
 
     def _invalidate_map_context(self, context: tuple[Any, ...]) -> None:
         """Never retain another lawn's image while a new map is loading."""
@@ -326,6 +328,7 @@ class DreameLawnMowerMapCamera(
             self._map_cache.last_image is None
             and self._restart_preview is not None
             and self._selected_map_index is not None
+            and self._map_switch_event is None
         ):
             context = self._map_render_context
             scope = preview_scope(self._descriptor.unique_id, context[:-1])

@@ -99,6 +99,7 @@ def test_inflight_scene_cannot_publish_after_context_change(change):
             coordinator.app_maps["maps"][0]["info"]["hash"] = "garden-b"
         elif change == "switch":
             coordinator._last_map_switch_event_at = 100
+            coordinator._map_switch_inventory_pending_event = 100
             coordinator.app_maps_refresh_succeeded = False
         elif change == "rotation":
             coordinator.entry.options["map_rotation"] = 90
@@ -123,11 +124,28 @@ def test_switch_holds_cached_scene_until_inventory_is_refreshed():
         _, coordinator, api = environment(load)
         first = await api.scene("entry")
         coordinator._last_map_switch_event_at = 100
+        coordinator._map_switch_inventory_pending_event = 100
         coordinator.app_maps_refresh_succeeded = False
         with pytest.raises(web.HTTPConflict):
             await api.scene("entry")
         coordinator.app_maps_refresh_succeeded = True
+        coordinator._map_switch_inventory_pending_event = None
         assert await api.scene("entry") is not first
+
+    asyncio.run(run())
+
+
+def test_confirmed_switch_scene_survives_later_inventory_timeout():
+    async def run():
+        async def load(**kwargs):
+            return scene()
+
+        _, coordinator, api = environment(load)
+        coordinator._last_map_switch_event_at = 100
+        coordinator.app_maps_refresh_succeeded = True
+        first = await api.scene("entry")
+        coordinator.app_maps_refresh_succeeded = False
+        assert await api.scene("entry") is first
 
     asyncio.run(run())
 

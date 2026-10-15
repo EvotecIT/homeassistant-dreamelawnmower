@@ -32,7 +32,10 @@ def map_switch_event_at(properties: Mapping[str, Any]) -> float | None:
         entry = properties.get(key)
         if not isinstance(entry, Mapping) or entry.get("code") not in (None, 0):
             continue
-        received = entry.get("last_seen")
+        received = (
+            entry.get("changed_at", entry.get("last_seen"))
+            if key == "2.50" else entry.get("last_seen")
+        )
         if (
             is_map_switch_announcement(key, entry.get("value"))
             and isinstance(received, int | float)

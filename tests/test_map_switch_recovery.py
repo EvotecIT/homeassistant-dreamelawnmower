@@ -54,13 +54,17 @@ def test_switch_rejects_inflight_3d_object_result():
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("stale_runtime_index", [None, 1])
+@pytest.mark.parametrize(
+    "stale_runtime_index,fresh_empty_lease", [(None, False), (1, False), (None, True)]
+)
 def test_docked_map_refresh_retries_unchanged_inventory_before_publishing(
-    stale_runtime_index,
+    stale_runtime_index, fresh_empty_lease,
 ):
     async def scenario():
         coordinator = _coordinator()
         coordinator._runtime_active_map_index = stale_runtime_index
+        if fresh_empty_lease:
+            coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         coordinator.client.async_get_current_app_map_index.side_effect = [2, 3]
         coordinator.client.async_get_app_maps = AsyncMock(
             return_value={
@@ -74,6 +78,7 @@ def test_docked_map_refresh_retries_unchanged_inventory_before_publishing(
             result = await coordinator.async_refresh_app_maps()
         assert coordinator.client.async_get_current_app_map_index.await_count == 2
         assert result["current_map_index"] == coordinator.selected_map_index == 3
+        assert coordinator._map_switch_inventory_pending_event is None
         coordinator.client.update_runtime_map_identity.assert_called_once()
         assert coordinator.client.update_runtime_map_identity.call_args.args[0] == 3
 

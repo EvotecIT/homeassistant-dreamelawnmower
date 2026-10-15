@@ -512,6 +512,7 @@ class DreameLawnMowerCoordinator(
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self._last_map_switch_event_at: float | None = None
+        self._map_switch_inventory_pending_event: float | None = None
         self._map_switch_pending_event: float | None = None
         self._map_switch_previous_index: int | None = None
         self._map_switch_settle_until = 0.0
@@ -3043,6 +3044,8 @@ class DreameLawnMowerCoordinator(
         self.app_maps = payload
         self.app_maps_refreshed_at = now
         self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
+        if self.app_maps_refresh_succeeded:
+            self._map_switch_inventory_pending_event = None
         if (
             identity_at is not None
             and now >= identity_at

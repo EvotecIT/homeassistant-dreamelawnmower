@@ -67,9 +67,9 @@ class MowingMapAPI:
         """Include map generation and presentation, but no moving telemetry."""
         app_maps = coordinator.app_maps
         switch_event = getattr(coordinator, "_last_map_switch_event_at", None)
-        if switch_event is not None and not getattr(
-            coordinator, "app_maps_refresh_succeeded", False
-        ):
+        if getattr(
+            coordinator, "_map_switch_inventory_pending_event", None
+        ) is not None:
             raise web.HTTPConflict(text="The switched map inventory is not available.")
         index = active_map_index(app_maps)
         if index is None or not app_maps or app_maps.get("map_list_valid") is not True:
