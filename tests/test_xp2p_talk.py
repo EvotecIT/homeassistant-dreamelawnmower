@@ -256,21 +256,6 @@ def _hass(allowed: bool = True, ffmpeg: object | None = None):
     )
 
 
-def test_play_audio_requires_an_active_live_video_session() -> None:
-    import asyncio
-
-    from homeassistant.exceptions import HomeAssistantError
-
-    from custom_components.dreame_lawn_mower.video_talk import (
-        async_play_audio_on_session,
-    )
-
-    with pytest.raises(HomeAssistantError, match="Start the live video first"):
-        asyncio.run(
-            async_play_audio_on_session(_hass(), _Runtime(), None, "/media/a.mp3")
-        )
-
-
 def test_play_audio_refuses_the_lan_video_transport() -> None:
     import asyncio
 
@@ -283,9 +268,7 @@ def test_play_audio_refuses_the_lan_video_transport() -> None:
     session = _session()
     session.transport = "lan"
     with pytest.raises(HomeAssistantError, match="cloud video transport"):
-        asyncio.run(
-            async_play_audio_on_session(_hass(), _Runtime(), session, "/media/a.mp3")
-        )
+        asyncio.run(async_play_audio_on_session(_hass(), _Runtime(), session, b"FLV"))
 
 
 def test_play_audio_refuses_paths_outside_the_allowlist() -> None:
@@ -313,3 +296,115 @@ def test_play_audio_uses_home_assistant_ffmpeg_binary_when_configured() -> None:
         _ffmpeg_binary(_hass(ffmpeg=SimpleNamespace(binary="/usr/bin/ffmpeg")))
         == "/usr/bin/ffmpeg"
     )
+
+
+def _live_video_call(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sessions: list,
+    relay: str | None = "http://127.0.0.1:1/x.flv",
+    consumer_ends: bool = False,
+    timeout: float = 5.0,
+):
+    import asyncio
+
+    from custom_components.dreame_lawn_mower import video_talk
+
+    events: list[str] = []
+
+    async def convert(_hass, _path):
+        events.append("convert")
+        return b"flv"
+
+    async def consume(_hass, url):
+        events.append(f"consume {url}")
+        if consumer_ends:
+            raise OSError("relay closed")
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            events.append("consumer released")
+
+    async def play(_hass, runtime, session, flv):
+        events.append(f"play {flv!r}")
+        return {"voice_status": 0}
+
+    monkeypatch.setattr(video_talk, "async_convert_to_talk_flv", convert)
+    monkeypatch.setattr(video_talk, "_async_consume_relay", consume)
+    monkeypatch.setattr(video_talk, "async_play_audio_on_session", play)
+    monkeypatch.setattr(video_talk, "_SESSION_POLL_INTERVAL", 0.001)
+
+    async def relay_url():
+        return relay
+
+    def ready_session():
+        return "runtime", sessions.pop(0) if len(sessions) > 1 else sessions[0]
+
+    async def run():
+        return await video_talk.async_play_audio_with_live_video(
+            _hass(),
+            "/media/a.mp3",
+            relay_url=relay_url,
+            ready_session=ready_session,
+            stream_error=lambda: None,
+            ready_timeout=timeout,
+        )
+
+    return events, run
+
+
+def test_play_audio_opens_live_video_and_releases_it_after_sending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    events, run = _live_video_call(monkeypatch, sessions=[None, None, _session()])
+
+    assert asyncio.run(run()) == {"voice_status": 0}
+    assert events == [
+        "convert",
+        "consume http://127.0.0.1:1/x.flv",
+        "play b'flv'",
+        "consumer released",
+    ]
+
+
+def test_play_audio_reports_unavailable_live_video_relay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    _events, run = _live_video_call(monkeypatch, sessions=[None], relay=None)
+
+    with pytest.raises(HomeAssistantError, match="live video is unavailable"):
+        asyncio.run(run())
+
+
+def test_play_audio_reports_live_video_that_stops_before_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    events, run = _live_video_call(monkeypatch, sessions=[None], consumer_ends=True)
+
+    with pytest.raises(HomeAssistantError, match="stopped before it was ready"):
+        asyncio.run(run())
+    assert not any(event.startswith("play") for event in events)
+
+
+def test_play_audio_gives_up_when_live_video_does_not_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    events, run = _live_video_call(monkeypatch, sessions=[None], timeout=0.05)
+
+    with pytest.raises(HomeAssistantError, match="did not start in time"):
+        asyncio.run(run())
+    assert events[-1] == "consumer released"

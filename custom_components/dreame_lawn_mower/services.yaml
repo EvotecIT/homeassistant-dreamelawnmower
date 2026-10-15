@@ -196,9 +196,10 @@ play_audio:
   name: Play audio through the mower
   description: >-
     Play a local audio file through the mower speaker, like the app's talk
-    button. Start the live video first: the audio uses the same connection.
-    The file is converted with ffmpeg to 16 kHz mono AAC and limited to 60
-    seconds. The path must be in an allowed directory such as /media.
+    button. The audio uses the live video connection, which this action opens
+    when needed and releases afterwards. The file is converted with ffmpeg to
+    16 kHz mono AAC and limited to 60 seconds. The path must be in an allowed
+    directory such as /media.
   target:
     entity:
       integration: dreame_lawn_mower

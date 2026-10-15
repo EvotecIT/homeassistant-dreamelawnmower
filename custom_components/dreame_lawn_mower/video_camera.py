@@ -297,12 +297,22 @@ class DreameLawnMowerVideoCamera(
         self._video_capability_observed = False
 
     async def async_play_audio(self, file_path: str) -> dict[str, Any]:
-        """Play an audio file through the mower speaker while video is live."""
-        from .video_talk import async_play_audio_on_session
+        """Play an audio file through the mower speaker, opening live video."""
+        from .video_talk import async_play_audio_with_live_video
+
+        def ready_session() -> tuple[Any, DreameLawnMowerXp2pLiveStreamSession | None]:
+            # The relay clears the unverified marker once real media arrived.
+            if self._unverified_playback_session is not None:
+                return self._runtime, None
+            return self._runtime, self._session
 
         async with self._talk_lock:
-            return await async_play_audio_on_session(
-                self.hass, self._runtime, self._session, file_path
+            return await async_play_audio_with_live_video(
+                self.hass,
+                file_path,
+                relay_url=self.stream_source,
+                ready_session=ready_session,
+                stream_error=lambda: getattr(self, "_last_error", None),
             )
 
     async def async_added_to_hass(self) -> None:

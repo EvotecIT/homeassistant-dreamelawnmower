@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerVideoRuntimeError,
@@ -18,10 +23,18 @@ from .dreame_lawn_mower_client.xp2p_talk import (
 )
 
 _CONVERT_TIMEOUT = 30.0
+_MAX_TALK_FLV_BYTES = 2 * 1024 * 1024
+# First playback may also install the XP2P runtime before the mower answers.
+_SESSION_READY_TIMEOUT = 120.0
+_SESSION_POLL_INTERVAL = 0.25
+_CONSUMER_CHUNK_BYTES = 64 * 1024
 # hass.data key of the core ffmpeg integration (DATA_FFMPEG); importing that
 # integration needs ha-ffmpeg, which this integration does not require.
 _FFMPEG_DATA_KEY = "ffmpeg"
-_MAX_TALK_FLV_BYTES = 2 * 1024 * 1024
+
+ReadySession = Callable[
+    [], tuple[Any, DreameLawnMowerXp2pLiveStreamSession | None]
+]
 
 
 async def async_convert_to_talk_flv(hass: HomeAssistant, file_path: str) -> bytes:
@@ -57,20 +70,77 @@ def _ffmpeg_binary(hass: HomeAssistant) -> str:
     return str(getattr(manager, "binary", None) or "ffmpeg")
 
 
+async def async_play_audio_with_live_video(
+    hass: HomeAssistant,
+    file_path: str,
+    *,
+    relay_url: Callable[[], Awaitable[str | None]],
+    ready_session: ReadySession,
+    stream_error: Callable[[], str | None],
+    ready_timeout: float = _SESSION_READY_TIMEOUT,
+) -> dict[str, Any]:
+    """Hold the live video open as a relay consumer while the audio is sent."""
+    flv = await async_convert_to_talk_flv(hass, file_path)
+    url = await relay_url()
+    if url is None:
+        raise HomeAssistantError(stream_error() or "The live video is unavailable.")
+    consumer = asyncio.ensure_future(_async_consume_relay(hass, url))
+    try:
+        runtime, session = await _async_wait_for_session(
+            ready_session, consumer, stream_error, ready_timeout
+        )
+        return await async_play_audio_on_session(hass, runtime, session, flv)
+    finally:
+        consumer.cancel()
+        # Its failures were already reported while waiting for the session.
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await consumer
+
+
+async def _async_consume_relay(hass: HomeAssistant, url: str) -> None:
+    """Read and discard the relay stream; this keeps the video session open."""
+    timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=60)
+    async with async_get_clientsession(hass).get(url, timeout=timeout) as response:
+        response.raise_for_status()
+        async for _chunk in response.content.iter_chunked(_CONSUMER_CHUNK_BYTES):
+            pass
+
+
+async def _async_wait_for_session(
+    ready_session: ReadySession,
+    consumer: asyncio.Future[None],
+    stream_error: Callable[[], str | None],
+    timeout: float,
+) -> tuple[Any, DreameLawnMowerXp2pLiveStreamSession]:
+    deadline = time.monotonic() + timeout
+    while True:
+        runtime, session = ready_session()
+        if session is not None:
+            return runtime, session
+        if consumer.done():
+            error = consumer.exception()
+            raise HomeAssistantError(
+                stream_error()
+                or f"The live video stopped before it was ready: {error}"
+            )
+        if time.monotonic() >= deadline:
+            raise HomeAssistantError(
+                stream_error() or "The live video did not start in time."
+            )
+        await asyncio.sleep(_SESSION_POLL_INTERVAL)
+
+
 async def async_play_audio_on_session(
     hass: HomeAssistant,
     runtime: Any,
-    session: DreameLawnMowerXp2pLiveStreamSession | None,
-    file_path: str,
+    session: DreameLawnMowerXp2pLiveStreamSession,
+    flv: bytes,
 ) -> dict[str, Any]:
-    """Send one audio file on the active live session and report what was sent."""
-    if session is None or not callable(getattr(runtime, "start_talk", None)):
-        raise HomeAssistantError(
-            "Start the live video first: talking uses its connection."
-        )
+    """Send converted audio on a verified live session and report what was sent."""
+    if not callable(getattr(runtime, "start_talk", None)):
+        raise HomeAssistantError("This video runtime cannot send audio.")
     if session.transport != "cloud":
         raise HomeAssistantError("Talking needs the cloud video transport.")
-    flv = await async_convert_to_talk_flv(hass, file_path)
     try:
         return await hass.async_add_executor_job(
             play_flv_audio, runtime, session, flv
