@@ -1337,6 +1337,12 @@ class DreameLawnMowerClient(
         block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
+        current_map_index = await self.async_get_current_app_map_index()
+        if current_map_index != app_maps.get("current_map_index"):
+            raise _DreameLawnMowerCommandRejectedError(
+                "The active mower map changed or could not be verified "
+                "while preparing point patrol."
+            )
         return await self._async_call_mowing_task(request, task_name="point patrol")
 
     @_serialized_task_control

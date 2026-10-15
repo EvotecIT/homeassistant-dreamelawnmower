@@ -27,6 +27,7 @@ from .test_vector_map import _client as _new_client
 def client():
     """Close the real client's owned HTTP resources after each command test."""
     value = _new_client()
+    value.async_get_current_app_map_index = AsyncMock(return_value=0)
     try:
         yield value
     finally:
@@ -112,6 +113,7 @@ def test_client_point_patrol_sends_explicit_point_ids(client) -> None:
 
     assert result == {"m": "r", "r": 0}
     client.async_get_app_maps.assert_awaited_once_with(include_objects=False)
+    client.async_get_current_app_map_index.assert_awaited_once_with()
     client._async_call_mowing_task.assert_awaited_once_with(
         {"m": "a", "p": 0, "o": 107, "d": {"point": [1, 2, 3]}},
         task_name="point patrol",
@@ -132,6 +134,7 @@ def test_client_point_patrol_defaults_to_active_map_patrol_points(client) -> Non
     asyncio.run(client.async_start_point_patrol())
 
     client.async_get_app_maps.assert_awaited_once_with(include_objects=False)
+    client.async_get_current_app_map_index.assert_awaited_once_with()
     client._async_call_mowing_task.assert_awaited_once_with(
         {"m": "a", "p": 0, "o": 107, "d": {"point": [1, 2, 3]}},
         task_name="point patrol",
@@ -300,6 +303,24 @@ def test_client_point_patrol_checks_movement_state_after_map_read(client) -> Non
         asyncio.run(client.async_start_point_patrol([1]))
 
     client._async_call_mowing_task.assert_not_awaited()
+
+
+@pytest.mark.parametrize("current_map_index", [1, None])
+def test_client_point_patrol_requires_unchanged_current_map(
+    client, current_map_index
+) -> None:
+    client.async_get_app_maps = AsyncMock(return_value=_patrol_app_maps())
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=_idle_snapshot()
+    )
+    client.async_get_current_app_map_index.return_value = current_map_index
+    client._async_call_mowing_task = AsyncMock()
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="map changed"):
+        asyncio.run(client.async_start_point_patrol([1]))
+
+    client._async_call_mowing_task.assert_not_awaited()
+    client.async_get_current_app_map_index.assert_awaited_once_with()
 
 
 @pytest.mark.parametrize(

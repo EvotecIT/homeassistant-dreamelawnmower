@@ -249,8 +249,10 @@ Both services require a docked or idle mower and check the mower
 acknowledgement. They use app action operations `107` (point patrol,
 `{"point": [ids]}`) and `108` (edge patrol, `{"edge": [[id, index]]}`).
 Point patrol refreshes map metadata and checks every requested point against
-the verified active map before dispatch. If the map cannot be verified, the
-action fails without starting a patrol.
+the verified active map before dispatch, then rechecks the active map before
+sending the request. If the map changed or cannot be verified, the action fails
+without starting a patrol. Keep the same map active in the vendor app while
+starting a patrol.
 
 These operations were verified on a MOVA LiDAX Ultra 1000
 (`mova.mower.g2529c`). The mower acknowledged each request and the MOVAhome app
