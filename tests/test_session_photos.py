@@ -13,6 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.dreame_lawn_mower import session_photo_archive as archive
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     DreameLawnMowerConnectionError,
+    public_download,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.http_response import (
     HttpResponseError,
@@ -49,10 +50,11 @@ def _record(task: object, summary: object, created: int) -> dict:
 
 
 class _Cloud:
-    def __init__(self, files: dict[str, bytes], records: list[dict]) -> None:
+    def __init__(self, files: dict[str, bytes | None], records: list[dict]) -> None:
         self.files = files
         self.records = records
         self.history_calls: list[tuple] = []
+        self.missing_status = 404
 
     async def async_get_property_history(self, did, key, **kwargs):
         self.history_calls.append((did, key, kwargs))
@@ -63,6 +65,12 @@ class _Cloud:
 
     async def async_get_public_file(self, url, **kwargs):
         content = self.files[url.removeprefix("https://signed/")]
+        if content is None:
+            raise public_download.PublicDownloadError(
+                "object unavailable",
+                reason="http_status",
+                status=self.missing_status,
+            )
 
         async def chunks(size):
             yield content
@@ -350,6 +358,46 @@ def test_transport_failure_is_not_reported_as_a_storage_limit(tmp_path, monkeypa
     entity = _entity(tmp_path, _cloud())
     with pytest.raises(HomeAssistantError, match="Session photos unavailable"):
         asyncio.run(entity.async_download_session_photos())
+
+
+@pytest.mark.parametrize("batch_bytes,expected", [(8, [b"ok"]), (4, [])])
+def test_oversized_photo_is_skipped_without_bypassing_batch_budget(
+    tmp_path,
+    monkeypatch,
+    batch_bytes,
+    expected,
+):
+    cloud = _cloud()
+    cloud.files["IQ000001/-1234/ali_dreame/1.jpg"] = b"oversized"
+    cloud.files["IQ000001/-1234/ali_dreame/2.jpg"] = b"ok"
+    monkeypatch.setattr(archive, "MAX_SESSION_PHOTO_BYTES", 3)
+    monkeypatch.setattr(archive, "MAX_BATCH_BYTES", batch_bytes)
+    response = asyncio.run(_entity(tmp_path, cloud).async_download_session_photos())
+    assert response["limited"] is True
+    assert [
+        Path(photo["file"]).read_bytes() for photo in response["photos"]
+    ] == expected
+    assert not list(tmp_path.rglob("*.part"))
+
+
+@pytest.mark.parametrize("status", [404, 410, 403, 429, 500])
+def test_missing_signed_objects_do_not_hide_later_photos(tmp_path, status):
+    cloud = _cloud()
+    cloud.missing_status = status
+    missing = "ali_dreame/IQ1/deleted_1.json"
+    cloud.records.insert(0, _record(107, missing, 3000))
+    cloud.files[missing] = None
+    cloud.files["IQ000001/-1234/ali_dreame/1.jpg"] = None
+    entity = _entity(tmp_path, cloud)
+    if status not in (404, 410):
+        with pytest.raises(HomeAssistantError, match="Session photos unavailable"):
+            asyncio.run(entity.async_download_session_photos())
+        return
+    response = asyncio.run(entity.async_download_session_photos())
+    assert [Path(photo["file"]).read_bytes() for photo in response["photos"]] == [
+        b"\xff\xd8two"
+    ]
+    assert response["limited"] is False
 
 
 def test_listing_caps_total_photos_and_deduplicates_cloud_objects() -> None:

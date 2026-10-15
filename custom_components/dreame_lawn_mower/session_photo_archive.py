@@ -123,6 +123,11 @@ async def async_archive_session_photos(
                         if err.reason != "byte_limit":
                             raise
                         limited = True
+                        # An oversized object consumes its attempted allowance;
+                        # repeated rejects must not bypass the batch budget.
+                        downloaded += min(MAX_SESSION_PHOTO_BYTES, remaining)
+                        if remaining >= MAX_SESSION_PHOTO_BYTES:
+                            continue
                         break
                     if content is None:
                         continue

@@ -291,7 +291,10 @@ media source when `local` is absent. Configure a media directory before calling
 it. Each call scans up to 100 recent events to find 1–20 usable sessions and
 downloads at most 100 photos, 8 MiB per photo and 64 MiB in total, within two
 minutes. The archive is limited to 256 MiB per mower entity. The response includes
-`limited: true` when the photo-count or storage budget is reached. Saved photos
+`limited: true` when the photo-count, per-photo or storage budget is reached.
+Oversized photos and vendor-deleted objects are skipped so available photos can
+still be saved. Failed
+oversized downloads count against the batch budget. Saved photos
 are kept on failures and retries skip them. Remove older photos from the archive
 to free space; the integration never deletes them automatically. Media storage
 must support hard links for atomic saves that preserve existing files.

@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .public_download import MAX_PUBLIC_JSON_BYTES
+from .public_download import MAX_PUBLIC_JSON_BYTES, PublicDownloadError
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -158,11 +158,14 @@ async def async_get_session_photos(
             )
             if not url:
                 continue
-            content = await cloud.async_get_public_file(
+            content = await _read_optional_object(
+                cloud,
                 url,
                 deadline=deadline,
                 max_bytes=MAX_PUBLIC_JSON_BYTES,
             )
+            if content is None:
+                continue
             try:
                 summary = json.loads(content)
             except ValueError:
@@ -204,10 +207,31 @@ async def async_download_session_photo(
         )
         if not url:
             return None
-        return await cloud.async_get_public_file(
+        return await _read_optional_object(
+            cloud,
             url,
             deadline=deadline,
             max_bytes=min(max_bytes, MAX_SESSION_PHOTO_BYTES),
         )
 
     return await client._async_cloud_read(read)
+
+
+async def _read_optional_object(
+    cloud: DreameCloudSession,
+    url: str,
+    *,
+    deadline: float,
+    max_bytes: int,
+) -> bytes | None:
+    """Skip vendor-deleted objects while preserving other download failures."""
+    try:
+        return await cloud.async_get_public_file(
+            url,
+            deadline=deadline,
+            max_bytes=max_bytes,
+        )
+    except PublicDownloadError as err:
+        if err.status in (404, 410):
+            return None
+        raise
