@@ -71,6 +71,7 @@ from .map_cache import (
 from .map_image_variants import MapImageVariants
 from .map_presentation import map_rotation, map_style
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_scope
+from .map_switch_refresh import async_prepare_map_switch_metadata
 from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
 from .runtime_data import DreameLawnMowerConfigEntry
@@ -185,9 +186,13 @@ class DreameLawnMowerMapCamera(
         """Refresh enabled map cameras when transient map context changes."""
         context = self._map_refresh_context
         context_changed = context != self._last_refresh_context
+        switch_changed = self._map_switch_event != getattr(
+            self, "_last_map_switch_event_at", None
+        )
+        context_changed = context_changed or switch_changed
         if (
             self._last_refresh_context is not None
-            and context[0] != self._last_refresh_context[0]
+            and (context[0] != self._last_refresh_context[0] or switch_changed)
         ):
             self._invalidate_map_context(context)
         active = bool(
@@ -280,7 +285,9 @@ class DreameLawnMowerMapCamera(
             return None
         self._last_image_request_at = monotonic()
         context = self._map_refresh_context
-        if context != self._last_refresh_context:
+        if context != self._last_refresh_context or self._map_switch_event != getattr(
+            self, "_last_map_switch_event_at", None
+        ):
             self._invalidate_map_context(context)
         image = await self._async_camera_image_impl()
         if image is None:
@@ -294,7 +301,7 @@ class DreameLawnMowerMapCamera(
         changed_map = (
             self._last_refresh_context is not None
             and context[0] != self._last_refresh_context[0]
-        )
+        ) or self._map_switch_event != getattr(self, "_last_map_switch_event_at", None)
         drop_preview = (
             self._preview_saved_at is not None
             and self._last_refresh_context is not None
@@ -302,6 +309,7 @@ class DreameLawnMowerMapCamera(
             != (self._last_refresh_context[0], *self._last_refresh_context[2:])
         )
         self._last_refresh_context = context
+        self._last_map_switch_event_at = self._map_switch_event
         self._map_cache.invalidate_view(drop_image=changed_map or drop_preview)
         if changed_map or drop_preview:
             self._preview_saved_at = None
@@ -320,7 +328,7 @@ class DreameLawnMowerMapCamera(
             and self._selected_map_index is not None
         ):
             context = self._map_render_context
-            scope = preview_scope(self._descriptor.unique_id, context)
+            scope = preview_scope(self._descriptor.unique_id, context[:-1])
             if scope != self._preview_attempted_scope:
                 self._preview_attempted_scope = scope
                 try:
@@ -459,6 +467,10 @@ class DreameLawnMowerMapCamera(
                     source="map_camera",
                     message=safe_error,
                 )
+                if self._map_render_context != render_context:
+                    self._map_cache.invalidate_view(drop_image=True)
+                    self._map_refresh_pending = True
+                    return None
                 self._map_cache.last_error = safe_error
                 self.async_write_ha_state()
 
@@ -483,13 +495,17 @@ class DreameLawnMowerMapCamera(
         ):
             try:
                 await self._restart_preview.async_save(
-                    image, preview_scope(self._descriptor.unique_id, render_context)
+                    image,
+                    preview_scope(self._descriptor.unique_id, render_context[:-1]),
                 )
             except Exception:
                 _LOGGER.debug("Unable to save optional map restart preview")
 
     async def _async_refresh_map_view(self) -> DreameLawnMowerMapView:
         """Return a cached map view or refresh it on demand."""
+        if not await async_prepare_map_switch_metadata(self.coordinator):
+            return DreameLawnMowerMapView(source="app_action_map")
+        switch_event = self._map_switch_event
         try:
             view = await self._map_cache.async_get_view(
                 lambda: self.coordinator.client.async_refresh_map_view(
@@ -510,6 +526,8 @@ class DreameLawnMowerMapCamera(
                 source="map_camera",
                 message=safe_error,
             )
+            if switch_event != self._map_switch_event:
+                return DreameLawnMowerMapView(source="app_action_map")
             view = self._map_cache.store_error(safe_error)
             self.async_write_ha_state()
             return view
@@ -560,7 +578,14 @@ class DreameLawnMowerMapCamera(
     def _map_render_context(self) -> tuple[Any, ...]:
         """Capture map/style identity without rejecting normal telemetry updates."""
         context = self._map_refresh_context
-        return (context[0], *context[2:])
+        return (context[0], *context[2:], self._map_switch_event)
+
+    @property
+    def _map_switch_event(self) -> float | None:
+        """Fence transient renders without persisting a process-local receipt."""
+        return getattr(
+            getattr(self, "coordinator", None), "_last_map_switch_event_at", None
+        )
 
     @property
     def _map_refresh_context(self) -> tuple[Any, ...]:
@@ -604,6 +629,9 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
 
     async def _async_refresh_map_view(self) -> DreameLawnMowerMapView:
         """Return a cached live/vector map view or refresh it on demand."""
+        if not await async_prepare_map_switch_metadata(self.coordinator):
+            return DreameLawnMowerMapView(source="batch_vector_map")
+        switch_event = self._map_switch_event
         try:
             view = await self._map_cache.async_get_view(
                 lambda: self.coordinator.client.async_refresh_vector_map_view(
@@ -625,6 +653,8 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
                 source="map_camera",
                 message=safe_error,
             )
+            if switch_event != self._map_switch_event:
+                return DreameLawnMowerMapView(source="batch_vector_map")
             view = self._map_cache.store_error(safe_error, source="batch_vector_map")
             self.async_write_ha_state()
             return view
@@ -760,6 +790,8 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
 
     async def _async_refresh_and_render_map_image(self) -> bytes | None:
         """Fetch and cache a contact sheet without blocking camera requests."""
+        if not await async_prepare_map_switch_metadata(self.coordinator):
+            return None
         render_context = self._map_render_context
         try:
             app_maps = await self.coordinator.client.async_get_app_maps(
@@ -799,6 +831,10 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 source="map_camera",
                 message=safe_error,
             )
+            if self._map_render_context != render_context:
+                self._map_cache.invalidate_view(drop_image=True)
+                self._map_refresh_pending = True
+                return None
             self._map_cache.store_error(
                 safe_error,
                 source="app_maps_contact_sheet",
@@ -812,6 +848,10 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                         detail=safe_error,
                     )
                 )
+                if self._map_render_context != render_context:
+                    self._map_cache.invalidate_view(drop_image=True)
+                    self._map_refresh_pending = True
+                    return None
                 self._map_cache.store_image(fallback_image, placeholder=True)
             self.async_write_ha_state()
             return fallback_image

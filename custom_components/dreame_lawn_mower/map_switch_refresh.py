@@ -41,6 +41,7 @@ def observe_map_switch(
     coordinator._map_switch_pending_event = observed
     coordinator._map_switch_settle_until = monotonic() + MAP_SWITCH_SETTLE_SECONDS
     coordinator._invalidate_runtime_map_identity()
+    coordinator.client.invalidate_runtime_map_geometry()
     coordinator._invalidate_inflight_schedule_refreshes()
     coordinator._schedule_action_read_backoff = ScheduleActionReadBackoff()
     coordinator.app_maps_refreshed_at = None

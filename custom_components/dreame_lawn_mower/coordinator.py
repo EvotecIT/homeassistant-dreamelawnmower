@@ -2974,6 +2974,7 @@ class DreameLawnMowerCoordinator(
         if not await async_prepare_map_switch_metadata(self):
             return self.app_maps
         now = datetime.now(UTC)
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         if (
             not force
@@ -3002,6 +3003,8 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app maps: %s", err)
+            if switch_event != getattr(self, "_last_map_switch_event_at", None):
+                return self.app_maps
             refreshed_at = self.app_maps_refreshed_at
             if (
                 isinstance(refreshed_at, datetime) and refreshed_at > now
@@ -3012,6 +3015,10 @@ class DreameLawnMowerCoordinator(
             self.app_maps_refresh_succeeded = False
             return self.app_maps
 
+        if switch_event != getattr(self, "_last_map_switch_event_at", None):
+            # A switch can settle on the same index with different geometry.
+            # Keep newer cache state intact regardless of this read's outcome.
+            return self.app_maps
         payload = dict(app_maps)
         current_idx = active_map_index(payload)
         identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)

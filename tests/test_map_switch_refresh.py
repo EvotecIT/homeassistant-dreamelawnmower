@@ -251,3 +251,43 @@ def test_switch_fences_inflight_map_metadata_and_keeps_its_timestamp_expired(kin
             assert coordinator.batch_device_data_refreshed_at is None
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.parametrize("newer_geometry", [False, True])
+def test_same_index_switch_rejects_old_app_geometry(fails, newer_geometry):
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._schedule_metadata_refresh = Mock()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        retained = coordinator.app_maps
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def old_geometry(**kwargs):
+            started.set()
+            await release.wait()
+            if fails:
+                raise TimeoutError("Pre-switch download failed")
+            return {"map_list_valid": True, "current_map_index": 2, "old": True}
+
+        coordinator.client.async_get_app_maps = old_geometry
+        pending = asyncio.create_task(coordinator.async_refresh_app_maps(force=True))
+        await started.wait()
+        coordinator._record_device_snapshot(SimpleNamespace(map_switch_event_at=100))
+        coordinator._map_switch_settle_until = 0
+        with patch.object(refresh.asyncio, "sleep", new=AsyncMock()):
+            result = await coordinator._async_refresh_runtime_map_index(force=True)
+            assert result[:2] == (True, 2)
+        if newer_geometry:
+            coordinator.client.async_get_app_maps = AsyncMock(return_value={
+                "map_list_valid": True, "current_map_index": 2, "fresh": True,
+            })
+            retained = await coordinator.async_refresh_app_maps(force=True)
+        refreshed_at = coordinator.app_maps_refreshed_at
+        release.set()
+        assert await pending is retained
+        assert coordinator.app_maps is retained
+        assert coordinator.app_maps_refreshed_at == refreshed_at
+        assert coordinator.app_maps_refresh_succeeded is newer_geometry
+
+    asyncio.run(scenario())
