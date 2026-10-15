@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .calendar import schedule_calendar_selection
 from .const import DOMAIN
-from .control_options import current_maintenance_point_entries
+from .control_options import active_map_index, current_maintenance_point_entries
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
 from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
@@ -178,6 +178,14 @@ class DreameLawnMowerGoToMaintenancePointButton(
             raise ValueError(
                 "Fresh map metadata is required before moving to a maintenance point."
             )
+        map_index = active_map_index(self.coordinator.app_maps)
+        if map_index is None or (
+            self.coordinator.selected_map_index is not None
+            and self.coordinator.selected_map_index != map_index
+        ):
+            raise ValueError(
+                "The selected maintenance-point map must match the verified active map."
+            )
         point_id = self._point_id()
         if point_id is None:
             raise ValueError(
@@ -188,7 +196,9 @@ class DreameLawnMowerGoToMaintenancePointButton(
         if block_reason is not None:
             raise ValueError(block_reason)
         await async_run_mowing_command(
-            self.coordinator.client.async_go_to_maintenance_point(point_id)
+            self.coordinator.client.async_go_to_maintenance_point(
+                point_id, expected_map_index=map_index,
+            )
         )
         await self.coordinator.async_request_refresh()
 

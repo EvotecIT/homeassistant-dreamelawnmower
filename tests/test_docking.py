@@ -46,6 +46,8 @@ def _control_client() -> DreameLawnMowerClient:
     client._async_cloud = object()
     client._cloud_read_tasks = set()
     client._task_control_gate = asyncio.Lock()
+    client._task_control_admission_gate = asyncio.Lock()
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
     return client
 
 

@@ -70,6 +70,7 @@ def test_cancel_waits_for_pending_start_and_reads_its_result(monkeypatch, accoun
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session, account)
+            client.async_get_current_app_map_index = AsyncMock(return_value=0)
             fake = prepare_start(client)
             fake._map_select_time = 0.3
             client.async_refresh_authoritative_snapshot = AsyncMock(
@@ -122,6 +123,7 @@ def test_queued_start_checks_state_after_prior_control(monkeypatch, control):
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
+            client.async_get_current_app_map_index = AsyncMock(return_value=0)
             prepare_start(client)
             state_read = AsyncMock(return_value=snapshot("zone"))
             client.async_refresh_authoritative_snapshot = state_read
@@ -133,7 +135,7 @@ def test_queued_start_checks_state_after_prior_control(monkeypatch, control):
                 second = asyncio.create_task(
                     client.async_start_fresh_mowing()
                     if control == "fresh"
-                    else client.async_start_zone_mowing([2])
+                    else client.async_start_zone_mowing([2], expected_map_index=0)
                 )
                 await asyncio.sleep(0.02)
                 state_read.assert_not_awaited()
@@ -175,6 +177,7 @@ def test_queued_control_interruption_never_dispatches(monkeypatch, interruption)
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
+            client.async_get_current_app_map_index = AsyncMock(return_value=0)
             prepare_start(client)
             client.async_refresh_authoritative_snapshot = AsyncMock(
                 return_value=_task_snapshot(state="idle", active=False)
@@ -243,6 +246,7 @@ def test_control_queue_wait_has_a_deadline_without_dispatch(monkeypatch):
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
+            client.async_get_current_app_map_index = AsyncMock(return_value=0)
             prepare_start(client)
             client.async_refresh_authoritative_snapshot = AsyncMock(
                 return_value=_task_snapshot(state="idle", active=False)

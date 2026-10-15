@@ -69,6 +69,8 @@ def test_native_map_commands(monkeypatch, account_type, kind, reply):
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session, account_type)
+            if kind == "maintenance":
+                client.async_get_current_app_map_index = AsyncMock(return_value=0)
             snapshot = idle()
             if reply == "blocked":
                 snapshot.activity = snapshot.state = "mowing"
@@ -142,6 +144,8 @@ def test_native_map_command_cancellation_stops_followups(
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
+            if kind == "maintenance":
+                client.async_get_current_app_map_index = AsyncMock(return_value=0)
             client.async_refresh_authoritative_snapshot = AsyncMock(return_value=idle())
             operation = asyncio.create_task(
                 client.async_switch_current_map(1)

@@ -183,7 +183,9 @@ def test_go_to_maintenance_point_uses_selected_configured_id() -> None:
 
     asyncio.run(entity.async_press())
 
-    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(302)
+    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(
+        302, expected_map_index=0,
+    )
     assert coordinator.async_refresh.await_count == 2
     coordinator.async_request_refresh.assert_awaited_once()
 
@@ -215,7 +217,9 @@ def test_go_to_maintenance_point_uses_fresh_a2_app_map_id() -> None:
 
     asyncio.run(entity.async_press())
 
-    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(402)
+    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(
+        402, expected_map_index=0,
+    )
     assert coordinator.async_refresh.await_count == 2
     coordinator.async_request_refresh.assert_awaited_once()
 
@@ -234,7 +238,9 @@ def test_go_to_maintenance_point_allows_reporter_inactive_paused_state() -> None
 
     asyncio.run(entity.async_press())
 
-    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(402)
+    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(
+        402, expected_map_index=0,
+    )
     assert coordinator.async_refresh.await_count == 2
 
 

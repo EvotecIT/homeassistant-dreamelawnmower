@@ -977,7 +977,9 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
 
     asyncio.run(entity.async_start_mowing())
 
-    client.async_start_edge_mowing.assert_awaited_once_with([[3, 0]])
+    client.async_start_edge_mowing.assert_awaited_once_with(
+        [[3, 0]], expected_map_index=0,
+    )
     client.async_start_zone_mowing.assert_not_called()
     client.async_start_spot_mowing.assert_not_called()
     client.async_start_mowing.assert_not_called()
@@ -1088,7 +1090,9 @@ def test_lawn_mower_start_edge_service_uses_explicit_contours() -> None:
 
     asyncio.run(entity.async_start_edge_mowing([[1, 0], ("3", "0")]))
 
-    client.async_start_edge_mowing.assert_awaited_once_with([[1, 0], [3, 0]])
+    client.async_start_edge_mowing.assert_awaited_once_with(
+        [[1, 0], [3, 0]], expected_map_index=0,
+    )
     assert entity.coordinator.selected_mowing_action == MOWING_ACTION_EDGE
     assert entity.coordinator.selected_contour_id is None
     assert entity.coordinator.selected_zone_id is None
@@ -1576,7 +1580,9 @@ def test_lawn_mower_start_uses_selected_zone() -> None:
 
     asyncio.run(entity.async_start_mowing())
 
-    client.async_start_zone_mowing.assert_awaited_once_with([3])
+    client.async_start_zone_mowing.assert_awaited_once_with(
+        [3], expected_map_index=0,
+    )
     client.async_start_mowing.assert_not_called()
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
@@ -1603,7 +1609,9 @@ def test_lawn_mower_start_uses_selected_spot_area_id() -> None:
 
     asyncio.run(entity.async_start_mowing())
 
-    client.async_start_spot_mowing.assert_awaited_once_with([2])
+    client.async_start_spot_mowing.assert_awaited_once_with(
+        [2], expected_map_index=0,
+    )
     client.async_start_mowing.assert_not_called()
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
@@ -1681,7 +1689,9 @@ def test_lawn_mower_zone_service_uses_validated_current_map_ids() -> None:
 
     asyncio.run(entity.async_start_zone_mowing([1, 3]))
 
-    client.async_start_zone_mowing.assert_awaited_once_with([1, 3])
+    client.async_start_zone_mowing.assert_awaited_once_with(
+        [1, 3], expected_map_index=0,
+    )
     assert entity.coordinator.selected_mowing_action == MOWING_ACTION_ZONE
     assert entity.coordinator.selected_zone_id is None
     assert entity.coordinator.selected_contour_id is None
@@ -1718,7 +1728,9 @@ def test_lawn_mower_zone_service_raises_home_assistant_error_on_failed_confirmat
     ):
         asyncio.run(entity.async_start_zone_mowing([1]))
 
-    client.async_start_zone_mowing.assert_awaited_once_with([1])
+    client.async_start_zone_mowing.assert_awaited_once_with(
+        [1], expected_map_index=0,
+    )
     assert entity.coordinator.selected_mowing_action == "all_area"
     assert entity.coordinator.selected_zone_id == 1
     assert entity.coordinator.selected_contour_id == (3, 0)
@@ -1763,7 +1775,9 @@ def test_lawn_mower_spot_service_sends_saved_area_ids_not_coordinates() -> None:
 
     asyncio.run(entity.async_start_spot_mowing([2]))
 
-    client.async_start_spot_mowing.assert_awaited_once_with([2])
+    client.async_start_spot_mowing.assert_awaited_once_with(
+        [2], expected_map_index=0,
+    )
     assert entity.coordinator.selected_mowing_action == MOWING_ACTION_SPOT
     assert entity.coordinator.selected_spot_id == 2
     assert entity.coordinator.selected_zone_id is None
