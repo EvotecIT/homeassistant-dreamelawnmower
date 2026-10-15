@@ -51,11 +51,14 @@ operations behind clear boundaries:
 
 - Model, firmware, region, and account provisioning can change which advanced
   features the vendor makes available.
-- Live video is field-validated on the Dreame A2 and A3 AWD 1000. It currently
+- Live video is field-validated on the Dreame A2 and A3 AWD 1000, and on the MOVA
+  LiDAX Ultra 1000 with a US account and firmware `4.3.6_0529`. It currently
   requires a Linux x86_64 or aarch64 Home Assistant host, a provisioned account,
   and a mower state in which the vendor permits video.
-- 3D point-cloud generation and download are validated on the Dreame A2; other
-  mower families still need reports.
+- 3D point-cloud generation and download are validated on the Dreame A2.
+  Point-cloud download is also field-confirmed on the MOVA LiDAX Ultra 1000
+  with a US account and firmware `4.3.6_0529`; other mower families still need
+  reports.
 - Map rendering and map selection are supported, but editing no-go areas,
   virtual walls, and garden geometry is not.
 - Charging-period, rain-protection, and three-field anti-theft controls are
