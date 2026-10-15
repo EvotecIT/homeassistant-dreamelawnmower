@@ -1323,6 +1323,50 @@ class DreameLawnMowerClient(
         )
 
     @_serialized_task_control
+    async def async_start_point_patrol(
+        self, point_ids: Sequence[int] | None = None
+    ) -> Any:
+        """Visit configured patrol points without mowing.
+
+        When ``point_ids`` is omitted, every patrol point decoded from the active
+        app map is visited.
+        """
+        snapshot = await self.async_refresh_authoritative_snapshot()
+        block_reason = _maintenance_point_command_block_reason(snapshot)
+        if block_reason is not None:
+            raise _DreameLawnMowerCommandRejectedError(block_reason)
+        from .app_map_metadata import current_app_map_patrol_point_ids
+        from .mowing_tasks import build_point_patrol_request
+
+        if point_ids is None:
+            app_maps = await self.async_get_app_maps(include_objects=False)
+            point_ids = current_app_map_patrol_point_ids(app_maps)
+            if not point_ids:
+                raise _DreameLawnMowerCommandRejectedError(
+                    "No patrol point is configured on the active mower map."
+                )
+        return await self._async_call_mowing_task(
+            build_point_patrol_request(point_ids),
+            task_name="point patrol",
+        )
+
+    @_serialized_task_control
+    async def async_start_edge_patrol(
+        self, contour_ids: Sequence[Sequence[int]]
+    ) -> Any:
+        """Drive along one or more saved edge contours without mowing."""
+        snapshot = await self.async_refresh_authoritative_snapshot()
+        block_reason = _maintenance_point_command_block_reason(snapshot)
+        if block_reason is not None:
+            raise _DreameLawnMowerCommandRejectedError(block_reason)
+        from .mowing_tasks import build_edge_patrol_request
+
+        return await self._async_call_mowing_task(
+            build_edge_patrol_request(contour_ids),
+            task_name="edge patrol",
+        )
+
+    @_serialized_task_control
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active map only while idle and require map-list readback."""
         map_index = int(map_index)

@@ -363,6 +363,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
             },
         ],
         "maintenance_point_ids": [301],
+        "patrol_point_ids": [302],
         "point_type_codes": [1, 2],
         "point_record_validation": {
             "total_count": 5,
@@ -602,6 +603,7 @@ def test_app_maps_accept_three_value_maintenance_point_vectors() -> None:
 
     summary = result["maps"][0]["summary"]
     assert summary["maintenance_point_ids"] == [501, 502]
+    assert summary["patrol_point_ids"] == [504, 505]
     assert summary["point_type_codes"] == [1, 2]
     assert summary["point_record_validation"] == {
         "total_count": 5,

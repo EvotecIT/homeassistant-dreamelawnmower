@@ -105,6 +105,46 @@ start_edge_mowing:
       selector:
         object: {}
 
+start_point_patrol:
+  name: Start point patrol
+  description: >-
+    Send the mower to visit configured patrol points on the active map without
+    mowing. When point_ids is omitted, every patrol point on the active map is
+    visited. Use while the mower is docked or otherwise idle. Observed on MOVA
+    LiDAX Ultra 1000 firmware; other models may reject the request.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    point_ids:
+      name: Patrol point IDs
+      description: >-
+        Optional list of patrol point IDs from the active map, for example
+        [1, 2, 3]. Omit to visit all patrol points.
+      required: false
+      example: [1, 2, 3]
+
+start_edge_patrol:
+  name: Start edge patrol
+  description: >-
+    Drive along one or more explicit current-map edge contours without mowing.
+    Each contour ID is a two-item list in the form [edge_id, contour_index].
+    Use while the mower is docked or otherwise idle. Observed on MOVA LiDAX
+    Ultra 1000 firmware; other models may reject the request.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    contour_ids:
+      name: Contour IDs
+      description: List of edge contour ids, for example [[1, 0]].
+      required: true
+      example: [[1, 0]]
+      selector:
+        object: {}
+
 switch_current_map:
   name: Switch current map
   description: >-

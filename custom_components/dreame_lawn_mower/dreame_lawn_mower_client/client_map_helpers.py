@@ -62,6 +62,7 @@ from .exceptions import (
 )
 from .maintenance_point_records import (
     app_map_maintenance_point_ids,
+    app_map_patrol_point_ids,
     app_map_point_record_diagnostics,
     app_map_point_type_codes,
 )
@@ -616,6 +617,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "point_count": len(point_entries),
         "point_entry_shapes": _app_map_point_entry_shapes(point_entries),
         "maintenance_point_ids": app_map_maintenance_point_ids(point_entries),
+        "patrol_point_ids": app_map_patrol_point_ids(point_entries),
         "point_type_codes": app_map_point_type_codes(point_entries),
         "point_record_validation": app_map_point_record_diagnostics(point_entries),
         "semantic_count": len(semantic),
@@ -786,6 +788,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "point_count": summary.get("point_count"),
         "point_entry_shapes": summary.get("point_entry_shapes"),
         "maintenance_point_ids": summary.get("maintenance_point_ids"),
+        "patrol_point_ids": summary.get("patrol_point_ids"),
         "point_type_codes": summary.get("point_type_codes"),
         "point_record_validation": summary.get("point_record_validation"),
         "trajectory_count": summary.get("trajectory_count"),

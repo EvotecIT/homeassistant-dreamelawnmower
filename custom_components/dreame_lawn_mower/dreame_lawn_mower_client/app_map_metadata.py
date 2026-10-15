@@ -75,3 +75,40 @@ def verified_app_map_zone_names(
             return {}
         result[zone_id] = name.strip() or None if name else None
     return result
+
+
+def current_app_map_patrol_point_ids(app_maps: Any) -> list[int]:
+    """Return patrol point ids decoded from the active, verified app map."""
+    maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+    current_idx = (
+        app_maps.get("current_map_index") if isinstance(app_maps, Mapping) else None
+    )
+    if (
+        current_idx is None
+        or not isinstance(maps, Sequence)
+        or isinstance(maps, str | bytes | bytearray)
+    ):
+        return []
+    for item in maps:
+        if (
+            not isinstance(item, Mapping)
+            or item.get("idx") != current_idx
+            or not item.get("available")
+        ):
+            continue
+        summary = item.get("summary")
+        point_ids = (
+            summary.get("patrol_point_ids") if isinstance(summary, Mapping) else None
+        )
+        if not isinstance(point_ids, Sequence) or isinstance(
+            point_ids, str | bytes | bytearray
+        ):
+            return []
+        return [
+            point_id
+            for point_id in point_ids
+            if isinstance(point_id, int)
+            and not isinstance(point_id, bool)
+            and point_id > 0
+        ]
+    return []

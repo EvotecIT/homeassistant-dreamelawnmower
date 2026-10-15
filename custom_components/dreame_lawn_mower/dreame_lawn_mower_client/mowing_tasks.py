@@ -13,6 +13,10 @@ from .exceptions import (
 MOWING_TASK_EDGE = 101
 MOWING_TASK_ZONE = 102
 MOWING_TASK_SPOT = 103
+# Patrol operations observed on MOVA LiDAX Ultra 1000 (mova.mower.g2529c).
+# Operation 106 sits in the same range but its meaning is still unknown.
+MOWING_TASK_POINT_PATROL = 107
+MOWING_TASK_EDGE_PATROL = 108
 MOWING_TASK_MAINTENANCE_POINT = 109
 
 
@@ -42,14 +46,31 @@ def build_edge_mowing_request(
     contour_ids: Sequence[Sequence[int]],
 ) -> dict[str, Any]:
     """Build the Dreame app action used to mow saved map edges."""
-    normalized: list[list[int]] = []
-    for contour_id in contour_ids:
-        if len(contour_id) < 2:
-            raise ValueError("Each contour id must contain two integer values.")
-        normalized.append([int(contour_id[0]), int(contour_id[1])])
-    if not normalized:
-        raise ValueError("At least one contour id pair is required.")
-    return _build_mowing_task_request(MOWING_TASK_EDGE, "edge", normalized)
+    return _build_mowing_task_request(
+        MOWING_TASK_EDGE,
+        "edge",
+        _normalize_contour_ids(contour_ids),
+    )
+
+
+def build_edge_patrol_request(
+    contour_ids: Sequence[Sequence[int]],
+) -> dict[str, Any]:
+    """Build the app action that patrols saved map edges without mowing."""
+    return _build_mowing_task_request(
+        MOWING_TASK_EDGE_PATROL,
+        "edge",
+        _normalize_contour_ids(contour_ids),
+    )
+
+
+def build_point_patrol_request(point_ids: Sequence[int]) -> dict[str, Any]:
+    """Build the app action that visits configured patrol points."""
+    return _build_mowing_task_request(
+        MOWING_TASK_POINT_PATROL,
+        "point",
+        _normalize_area_ids(point_ids, area_type="patrol point"),
+    )
 
 
 def build_maintenance_point_request(
@@ -111,6 +132,19 @@ def ensure_mowing_task_succeeded(
             f"(result {failure_result!r}){suffix}."
         )
     return response
+
+
+def _normalize_contour_ids(
+    contour_ids: Sequence[Sequence[int]],
+) -> list[list[int]]:
+    normalized: list[list[int]] = []
+    for contour_id in contour_ids:
+        if len(contour_id) < 2:
+            raise ValueError("Each contour id must contain two integer values.")
+        normalized.append([int(contour_id[0]), int(contour_id[1])])
+    if not normalized:
+        raise ValueError("At least one contour id pair is required.")
+    return normalized
 
 
 def _normalize_area_ids(

@@ -41,6 +41,9 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.app_map_metadata import (
+    current_app_map_patrol_point_ids,
+)
 from .dreame_lawn_mower_client.feature_capabilities import (
     resolved_feature_capabilities,
 )
@@ -164,6 +167,20 @@ async def async_setup_entry(
         "start_edge_mowing",
         {vol.Required("contour_ids"): _validate_contour_ids},
         "async_start_edge_mowing",
+    )
+    platform.async_register_entity_service(
+        "start_point_patrol",
+        {
+            vol.Optional("point_ids"): [
+                vol.All(vol.Coerce(int), vol.Range(min=1)),
+            ],
+        },
+        "async_start_point_patrol",
+    )
+    platform.async_register_entity_service(
+        "start_edge_patrol",
+        {vol.Required("contour_ids"): _validate_contour_ids},
+        "async_start_edge_patrol",
     )
     platform.async_register_entity_service(
         "switch_current_map",
@@ -657,31 +674,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         """Start mowing for one or more explicit current-map edge contour ids."""
         normalized = _normalize_contour_ids(contour_ids)
         self._ensure_selected_map_matches_active()
-        contour_entries = current_contour_entries(
-            getattr(self.coordinator, "vector_map_details", None),
-            self.coordinator.app_maps,
-            self.coordinator.batch_device_data,
-            selected_map_index=self.coordinator.selected_map_index,
-        )
-        available = {
-            tuple(entry["contour_id"])
-            for entry in contour_entries
-            if isinstance(entry.get("contour_id"), tuple)
-        }
-        missing = [
-            tuple(contour_id)
-            for contour_id in normalized
-            if tuple(contour_id) not in available
-        ]
-        if missing:
-            missing_text = ", ".join(str(contour_id) for contour_id in missing)
-            available_text = ", ".join(
-                str(contour_id) for contour_id in sorted(available)
-            )
-            raise HomeAssistantError(
-                f"Edge contour {missing_text} is not available on the active map. "
-                f"Available contour ids: {available_text or 'none'}."
-            )
+        self._ensure_contour_ids_available(normalized)
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
@@ -700,6 +693,36 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             runtime_cache,
             observed_generation=observed_generation,
             session_started_at=time(),
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_start_point_patrol(
+        self, point_ids: list[int] | None = None
+    ) -> None:
+        """Visit configured patrol points on the active map without mowing."""
+        self._ensure_selected_map_matches_active()
+        normalized: list[int] | None = None
+        if point_ids:
+            normalized = [int(point_id) for point_id in point_ids]
+            self._ensure_requested_ids_available(
+                normalized,
+                available_ids=current_app_map_patrol_point_ids(
+                    self.coordinator.app_maps
+                ),
+                target_name="Patrol point",
+            )
+        await _async_run_targeted_mowing_command(
+            self.coordinator.client.async_start_point_patrol(normalized)
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_start_edge_patrol(self, contour_ids: list[list[int]]) -> None:
+        """Patrol one or more explicit current-map edge contours without mowing."""
+        normalized = _normalize_contour_ids(contour_ids)
+        self._ensure_selected_map_matches_active()
+        self._ensure_contour_ids_available(normalized)
+        await _async_run_targeted_mowing_command(
+            self.coordinator.client.async_start_edge_patrol(normalized)
         )
         await self.coordinator.async_request_refresh()
 
@@ -857,6 +880,34 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             raise HomeAssistantError(
                 "Selected map does not match the active mower map. "
                 "Switch the active map in the Dreame app first."
+            )
+
+    def _ensure_contour_ids_available(self, contour_ids: list[list[int]]) -> None:
+        """Reject edge contour ids that are absent from current-map metadata."""
+        contour_entries = current_contour_entries(
+            getattr(self.coordinator, "vector_map_details", None),
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        available = {
+            tuple(entry["contour_id"])
+            for entry in contour_entries
+            if isinstance(entry.get("contour_id"), tuple)
+        }
+        missing = [
+            tuple(contour_id)
+            for contour_id in contour_ids
+            if tuple(contour_id) not in available
+        ]
+        if missing:
+            missing_text = ", ".join(str(contour_id) for contour_id in missing)
+            available_text = ", ".join(
+                str(contour_id) for contour_id in sorted(available)
+            )
+            raise HomeAssistantError(
+                f"Edge contour {missing_text} is not available on the active map. "
+                f"Available contour ids: {available_text or 'none'}."
             )
 
     def _ensure_known_map_index(self, map_index: int) -> None:

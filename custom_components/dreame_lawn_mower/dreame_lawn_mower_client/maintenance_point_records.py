@@ -11,13 +11,23 @@ from .client_shared_helpers import _operation_value_type
 _REQUIRED_KEYS = frozenset({"id", "param", "point", "time", "type"})
 _SUPPORTED_POINT_VECTOR_LENGTHS = frozenset({2, 3})
 _MAINTENANCE_POINT_TYPE = 1
+_PATROL_POINT_TYPE = 2
 
 
 def app_map_maintenance_point_ids(entries: Sequence[Any]) -> list[int]:
     """Return positive ids from recognized app-map maintenance-point records."""
+    return _app_map_point_ids(entries, _MAINTENANCE_POINT_TYPE)
+
+
+def app_map_patrol_point_ids(entries: Sequence[Any]) -> list[int]:
+    """Return positive ids from recognized app-map patrol-point records."""
+    return _app_map_point_ids(entries, _PATROL_POINT_TYPE)
+
+
+def _app_map_point_ids(entries: Sequence[Any], point_type: int) -> list[int]:
     result: list[int] = []
     for entry in entries:
-        if not is_app_map_maintenance_point_record(entry):
+        if not _is_app_map_point_record(entry) or entry.get("type") != point_type:
             continue
         point_id = entry.get("id")
         if (
