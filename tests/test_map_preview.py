@@ -4,6 +4,7 @@ import asyncio
 import math
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from PIL import Image
@@ -113,10 +114,11 @@ def test_same_slot_switch_renews_restart_image_inside_write_cooldown(monkeypatch
             records.append(record)
 
         monkeypatch.setattr(preview_module, "preview_store", lambda *_:
-            SimpleNamespace(async_save=save))
+            SimpleNamespace(async_save=save, async_remove=AsyncMock()))
         monkeypatch.setattr(preview_module.time, "monotonic", lambda: 100.0)
         preview = RestartMapPreview(SimpleNamespace(), "entry")
         await preview.async_save(JPEG + b"old", "same-map-style", generation=None)
+        preview.invalidate(101)
         await preview.async_save(JPEG + b"new", "same-map-style", generation=101)
         await preview.async_save(JPEG + b"new", "same-map-style", generation=101)
         assert len(records) == 2
@@ -154,5 +156,80 @@ def test_opt_out_drains_pending_write_before_removal(monkeypatch):
         await preview.async_save(JPEG, "other-map")
         assert operations == ["save", "remove"]
         assert await preview.async_load("map") is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel_write", [False, True])
+def test_switch_drains_retired_write_before_reload_without_new_image(
+    monkeypatch, cancel_write
+):
+    async def exercise():
+        stored = None
+        writing, release = asyncio.Event(), asyncio.Event()
+
+        async def save(record):
+            nonlocal stored
+            writing.set()
+            await release.wait()
+            stored = record
+
+        async def remove():
+            nonlocal stored
+            stored = None
+
+        async def load():
+            return stored
+
+        async def execute(callback, *args):
+            return callback(*args)
+
+        monkeypatch.setattr(preview_module, "preview_store", lambda *_:
+            SimpleNamespace(async_save=save, async_remove=remove, async_load=load))
+        hass = SimpleNamespace(async_add_executor_job=execute)
+        preview = RestartMapPreview(hass, "entry")
+        pending = asyncio.create_task(preview.async_save(JPEG, "same-map"))
+        await writing.wait()
+        preview.invalidate(100)
+        assert await preview.async_load("same-map") is None
+        if cancel_write:
+            pending.cancel()
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        await preview.async_flush_invalidated()
+        await preview.async_save(JPEG, "same-map", generation=None)
+        assert stored is None
+        reloaded = RestartMapPreview(hass, "entry")
+        assert await reloaded.async_load("same-map") is None
+
+    asyncio.run(exercise())
+
+
+def test_switch_retires_a_pending_disk_load_before_it_can_repopulate_cache(monkeypatch):
+    async def exercise():
+        started, release = asyncio.Event(), asyncio.Event()
+        output = BytesIO()
+        Image.new("RGB", (120, 80), "green").save(output, format="JPEG")
+
+        async def load():
+            started.set()
+            await release.wait()
+            return encode_preview(output.getvalue(), "same-map")
+
+        async def execute(callback, *args):
+            return callback(*args)
+
+        monkeypatch.setattr(preview_module, "preview_store", lambda *_:
+            SimpleNamespace(async_load=load, async_remove=AsyncMock()))
+        preview = RestartMapPreview(
+            SimpleNamespace(async_add_executor_job=execute), "entry"
+        )
+        pending = asyncio.create_task(preview.async_load("same-map"))
+        await started.wait()
+        preview.invalidate(100)
+        await preview.async_flush_invalidated()
+        release.set()
+        assert await pending is None
+        assert await preview.async_load("same-map") is None
 
     asyncio.run(exercise())

@@ -109,32 +109,70 @@ class RestartMapPreview:
         self._last_saved = 0.0
         self._last_scope: str | None = None
         self._last_generation: float | None = None
+        self._generation: float | None = None
+        self._invalidated = False
         self._enabled = True
         self._write_lock = asyncio.Lock()
 
+    def invalidate(self, generation: float) -> None:
+        """Retire old pixels immediately; async owners drain the durable removal."""
+        self._generation = generation
+        self._invalidated = True
+        self._record = None
+        self._loaded = True
+        self._last_scope = None
+
+    async def async_flush_invalidated(self) -> None:
+        """Remove retired pixels before reload, even if no new render succeeds."""
+        async with self._write_lock:
+            await self._async_flush_invalidated_locked()
+
+    async def _async_flush_invalidated_locked(self) -> None:
+        while self._invalidated:
+            generation = self._generation
+            task = asyncio.create_task(self._store.async_remove())
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                await task
+                if generation == self._generation:
+                    self._invalidated = False
+                raise
+            if generation == self._generation:
+                self._invalidated = False
+
     async def async_load(self, scope: str) -> tuple[bytes, float] | None:
         """Read at most once; a later known map may match the cached record."""
-        if not self._enabled:
+        generation = self._generation
+        if not self._enabled or self._invalidated:
             return None
         if not self._loaded:
-            self._record = await self._store.async_load()
+            record = await self._store.async_load()
+            if generation != self._generation or self._invalidated:
+                return None
+            self._record = record
             self._loaded = True
         restored = await self._hass.async_add_executor_job(
             verified_preview, self._record, scope
         )
-        return restored if self._enabled else None
+        return restored if (
+            self._enabled and generation == self._generation and not self._invalidated
+        ) else None
 
     async def async_save(
         self, image: bytes, scope: str, *, generation: float | None = None
     ) -> None:
         """Save no more than once per minute, except for a different map/style."""
         async with self._write_lock:
-            if self._enabled:
+            if self._enabled and generation == self._generation:
+                await self._async_flush_invalidated_locked()
                 await self._async_save_locked(image, scope, generation)
 
     async def _async_save_locked(
         self, image: bytes, scope: str, generation: float | None
     ) -> None:
+        if generation != self._generation:
+            return
         now = time.monotonic()
         if (
             scope == self._last_scope and generation == self._last_generation
@@ -149,7 +187,11 @@ class RestartMapPreview:
             await asyncio.shield(task)
         except asyncio.CancelledError:
             await task
+            await self._async_flush_invalidated_locked()
             raise
+        if generation != self._generation:
+            await self._async_flush_invalidated_locked()
+            return
         self._last_scope = scope
         self._last_generation = generation
         self._last_saved = now

@@ -71,7 +71,11 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
-from .map_switch_refresh import async_prepare_map_switch_metadata, observe_map_switch
+from .map_switch_refresh import (
+    async_flush_restart_preview,
+    async_prepare_map_switch_metadata,
+    observe_map_switch,
+)
 from .mower_condition_history import MowerConditionHistory
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
@@ -955,9 +959,10 @@ class DreameLawnMowerCoordinator(
                     bluetooth_error,
                 )
             self.async_set_updated_data(snapshot)
-            if runtime_active and not getattr(
-                self, "_runtime_map_identity_verified", False
-            ):
+            if (
+                runtime_active
+                and not getattr(self, "_runtime_map_identity_verified", False)
+            ) or getattr(self, "_map_switch_inventory_pending_event", None) is not None:
                 # Push updates reset HA's polling interval. Acquire missing map
                 # identity through the existing coalesced background owner.
                 self._schedule_metadata_refresh(refresh_map_and_runtime=True)
@@ -3029,6 +3034,8 @@ class DreameLawnMowerCoordinator(
         ):
             # MAPL can settle before the complete download reflects the switch.
             # Retain its identity and keep this inventory eligible for retry.
+            self._map_switch_pending_event = self._map_switch_inventory_pending_event
+            self._invalidate_runtime_map_identity()
             return self.app_maps
         identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
         newer_geometry_at = self.app_maps_refreshed_at
@@ -3439,6 +3446,7 @@ class DreameLawnMowerCoordinator(
     async def _async_stop_owned_tasks(self) -> None:
         """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
+        await async_flush_restart_preview(self)
         await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
         self.client.set_update_callback(None)

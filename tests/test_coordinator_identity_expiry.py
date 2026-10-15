@@ -95,6 +95,31 @@ def test_poll_read_cannot_publish_after_identity_expires(fails) -> None:
     asyncio.run(scenario())
 
 
+def test_docked_mqtt_updates_resume_pending_switch_recovery() -> None:
+    async def scenario():
+        coordinator = _coordinator()
+        snapshot = SimpleNamespace(
+            available=True, mowing_session_active=False, activity="docked",
+            map_switch_event_at=100,
+        )
+        coordinator._last_map_switch_event_at = 100
+        coordinator._map_switch_inventory_pending_event = 100
+        coordinator._runtime_map_identity_verified = False
+        coordinator._schedule_metadata_refresh = Mock()
+        coordinator.async_set_updated_data = Mock()
+        coordinator.bluetooth_connected = None
+        coordinator.client.async_get_cached_snapshot = AsyncMock(return_value=snapshot)
+        coordinator.client.async_get_bluetooth_connected = AsyncMock(return_value=True)
+        for _ in range(2):
+            await coordinator._async_process_client_update()
+        assert coordinator._schedule_metadata_refresh.call_count == 2
+        coordinator._schedule_metadata_refresh.assert_called_with(
+            refresh_map_and_runtime=True
+        )
+
+    asyncio.run(scenario())
+
+
 def test_background_refresh_recovers_expired_identity() -> None:
     async def scenario() -> None:
         coordinator = _coordinator()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from time import monotonic
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 MAP_SWITCH_SETTLE_SECONDS = 2.0
 MAP_SWITCH_RETRY_DELAYS = (0.75, 1.5, 3.0)
+_LOGGER = logging.getLogger(__name__)
 
 
 def observe_map_switch(
@@ -44,6 +46,9 @@ def observe_map_switch(
     coordinator._map_switch_pending_event = observed
     coordinator._map_switch_inventory_pending_event = observed
     coordinator._map_switch_settle_until = monotonic() + MAP_SWITCH_SETTLE_SECONDS
+    preview = getattr(coordinator, "map_restart_preview", None)
+    if preview is not None:
+        preview.invalidate(observed)
     coordinator._invalidate_runtime_map_identity()
     coordinator.client.invalidate_runtime_map_geometry()
     coordinator._invalidate_inflight_schedule_refreshes()
@@ -55,6 +60,16 @@ def observe_map_switch(
     coordinator.schedules_refreshed_at = None
     coordinator.batch_device_data_refreshed_at = None
     coordinator._schedule_metadata_refresh(refresh_map_and_runtime=True)
+
+
+async def async_flush_restart_preview(coordinator: object) -> None:
+    """Drain optional preview retirement through existing refresh/stop owners."""
+    preview = getattr(coordinator, "map_restart_preview", None)
+    if preview is not None:
+        try:
+            await preview.async_flush_invalidated()
+        except Exception:  # Optional storage must not stop mower metadata recovery.
+            _LOGGER.debug("Unable to retire optional map restart preview")
 
 
 async def async_wait_for_map_switch(coordinator: DreameLawnMowerRefreshMixin) -> None:

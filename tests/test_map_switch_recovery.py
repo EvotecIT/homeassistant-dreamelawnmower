@@ -36,6 +36,29 @@ def test_overlapping_switches_confirm_latest_identity_after_intermediate_map():
     asyncio.run(scenario())
 
 
+def test_later_full_inventory_rearms_docked_identity_confirmation():
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        coordinator.client.async_get_app_maps = AsyncMock(return_value={
+            "map_list_valid": True, "current_map_index": 3,
+            "maps": [{"idx": 3, "created": True, "available": True}],
+        })
+        _switch(coordinator)
+        with patch.object(refresh, "MAP_SWITCH_RETRY_DELAYS", (0, 0, 0)):
+            await coordinator._async_refresh_runtime_map_index(force=True)
+        assert coordinator._runtime_active_map_index == 2
+        assert coordinator._map_switch_pending_event is None
+        await coordinator.async_refresh_app_maps()
+        assert coordinator._map_switch_pending_event == 100
+        coordinator.client.async_get_current_app_map_index.return_value = 3
+        await coordinator.async_refresh_app_maps()
+        assert coordinator.app_maps["current_map_index"] == 3
+        assert coordinator._map_switch_inventory_pending_event is None
+
+    asyncio.run(scenario())
+
+
 def test_switch_expires_previously_fresh_3d_objects():
     async def scenario():
         coordinator = _coordinator()

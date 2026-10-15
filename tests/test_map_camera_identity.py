@@ -334,7 +334,7 @@ def test_same_slot_camera_switch_updates_durable_preview_inside_cooldown(monkeyp
             records.append(record)
 
         monkeypatch.setattr(preview_module, "preview_store", lambda *_:
-            SimpleNamespace(async_save=save))
+            SimpleNamespace(async_save=save, async_remove=AsyncMock()))
         monkeypatch.setattr(preview_module.time, "monotonic", lambda: 100.0)
         entity = _camera()
         entity.coordinator = SimpleNamespace(
@@ -346,6 +346,7 @@ def test_same_slot_camera_switch_updates_durable_preview_inside_cooldown(monkeyp
         old, new = b"\xff\xd8\xffold", b"\xff\xd8\xffnew"
         await entity._async_save_restart_preview(old, entity._map_render_context)
         entity.coordinator._last_map_switch_event_at = 100
+        entity._restart_preview.invalidate(100)
         await entity._async_save_restart_preview(new, entity._map_render_context)
         assert len(records) == 2
         assert records[0]["scope"] == records[1]["scope"]
