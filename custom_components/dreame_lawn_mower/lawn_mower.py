@@ -755,8 +755,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         if zone_ids is not None:
             if not zone_ids:
                 raise HomeAssistantError("At least one zone id is required.")
+            requested_zone_ids = [int(zone_id) for zone_id in zone_ids]
             self._ensure_requested_ids_available(
-                zone_ids,
+                requested_zone_ids,
                 available_ids=[int(entry["area_id"]) for entry in current_zone_entries(
                     self.coordinator.batch_device_data,
                     self.coordinator.app_maps,
@@ -766,7 +767,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 target_name="Zone",
             )
             point_ids = current_app_map_patrol_point_ids_in_zones(
-                self.coordinator.app_maps, [int(zone_id) for zone_id in zone_ids]
+                self.coordinator.app_maps, requested_zone_ids
             )
             if not point_ids:
                 raise HomeAssistantError("No patrol point lies in the selected zones.")

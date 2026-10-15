@@ -593,12 +593,13 @@ def test_patrol_points_are_assigned_to_the_zone_that_contains_them() -> None:
     assert app_map_patrol_point_zones(zones, points) == {"1": 1, "2": 2}
 
 
-def test_point_patrol_service_visits_only_points_in_selected_zones() -> None:
+@pytest.mark.parametrize("zone_id", [1, "1"])
+def test_point_patrol_service_visits_only_points_in_selected_zones(zone_id) -> None:
     maps = _patrol_app_maps(patrol_point_ids=[1, 2, 3])
     maps["maps"][0]["summary"]["patrol_point_zones"] = {"1": 1, "2": 3, "3": 1}
     entity = _entity(app_maps=maps)
 
-    asyncio.run(entity.async_start_point_patrol(zone_ids=[1]))
+    asyncio.run(entity.async_start_point_patrol(zone_ids=[zone_id]))
 
     entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(
         [1, 3], expected_map_index=0,
