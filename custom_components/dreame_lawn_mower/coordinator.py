@@ -71,7 +71,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
-from .map_switch_refresh import async_wait_for_map_switch, observe_map_switch
+from .map_switch_refresh import async_prepare_map_switch_metadata, observe_map_switch
 from .mower_condition_history import MowerConditionHistory
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
@@ -489,7 +489,9 @@ class DreameLawnMowerCoordinator(
         self._pending_schedule_upload_active_indices: set[int] = set()
         self._batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None = None
         self._batch_schedule_read_tasks: set[asyncio.Task[dict[str, Any]]] = set()
-        self._batch_schedule_read_key: tuple[int | None, bool] | None = None
+        self._batch_schedule_read_key: (
+            tuple[int | None, bool, float | None] | None
+        ) = None
         self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
@@ -510,6 +512,8 @@ class DreameLawnMowerCoordinator(
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self._last_map_switch_event_at: float | None = None
+        self._map_switch_pending_event: float | None = None
+        self._map_switch_previous_index: int | None = None
         self._map_switch_settle_until = 0.0
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
@@ -1007,7 +1011,8 @@ class DreameLawnMowerCoordinator(
         force: bool = False,
     ) -> dict[str, Any] | None:
         """Refresh schedules through the fast batch path with app fallback."""
-        await async_wait_for_map_switch(self)
+        if not await async_prepare_map_switch_metadata(self):
+            return self.schedules
         now = datetime.now(UTC)
         refresh_generation = getattr(self, "_schedule_cache_generation", 0)
         if (
@@ -1058,6 +1063,8 @@ class DreameLawnMowerCoordinator(
                     map_indices=request_schedule_indices,
                 )
             except Exception as err:  # noqa: BLE001 - optional cloud capability
+                if not self._schedule_refresh_is_current(refresh_generation):
+                    return self.schedules
                 action_backoff.record_result(
                     now,
                     succeeded=False,
@@ -2113,7 +2120,8 @@ class DreameLawnMowerCoordinator(
         source: str = "batch_device_data_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached batch device data without failing the main poll."""
-        await async_wait_for_map_switch(self)
+        if not await async_prepare_map_switch_metadata(self):
+            return self.batch_device_data
         switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
@@ -2363,7 +2371,8 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh mower preferences after the mower announces a change."""
         async with self._preference_write_lock:
-            await async_wait_for_map_switch(self)
+            if not await async_prepare_map_switch_metadata(self):
+                return None
             switch_event = getattr(self, "_last_map_switch_event_at", None)
             preference_read_generation = self._begin_preference_read()
             preference_read_started_at = datetime.now(UTC)
@@ -2783,7 +2792,10 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any]:
         """Coalesce aligned schedule and batch-metadata cloud reads."""
         discover_map_index = map_index_hint is not None
-        key = (map_index_hint, discover_map_index)
+        key = (
+            map_index_hint, discover_map_index,
+            getattr(self, "_last_map_switch_event_at", None),
+        )
         loop = asyncio.get_running_loop()
         task = getattr(self, "_batch_schedule_read_task", None)
         completed_at = getattr(self, "_batch_schedule_read_completed_at", None)
@@ -2882,6 +2894,9 @@ class DreameLawnMowerCoordinator(
         source: str = "app_map_objects_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached read-only 3D map object metadata."""
+        if not await async_prepare_map_switch_metadata(self):
+            return self.app_map_objects
+        switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
             not force
@@ -2898,9 +2913,12 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app map objects: %s", err)
-            self.app_map_objects_refreshed_at = None
+            if switch_event == getattr(self, "_last_map_switch_event_at", None):
+                self.app_map_objects_refreshed_at = None
             return self.app_map_objects
 
+        if switch_event != getattr(self, "_last_map_switch_event_at", None):
+            return self.app_map_objects
         payload = {
             "captured_at": now.isoformat(),
             "source": source,
@@ -2917,7 +2935,8 @@ class DreameLawnMowerCoordinator(
         source: str = "vector_map_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached batch vector-map details without failing the main poll."""
-        await async_wait_for_map_switch(self)
+        if not await async_prepare_map_switch_metadata(self):
+            return self.vector_map_details
         switch_event = getattr(self, "_last_map_switch_event_at", None)
         now = datetime.now(UTC)
         if (
@@ -2932,7 +2951,8 @@ class DreameLawnMowerCoordinator(
             vector_map_details = await self.client.async_get_vector_map_details()
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh vector map details: %s", err)
-            self.vector_map_details_refreshed_at = None
+            if switch_event == getattr(self, "_last_map_switch_event_at", None):
+                self.vector_map_details_refreshed_at = None
             return self.vector_map_details
 
         if switch_event != getattr(self, "_last_map_switch_event_at", None):
@@ -2951,7 +2971,8 @@ class DreameLawnMowerCoordinator(
         source: str = "app_maps_auto",
     ) -> dict[str, Any] | None:
         """Refresh cached app-map payloads without failing the main poll."""
-        await async_wait_for_map_switch(self)
+        if not await async_prepare_map_switch_metadata(self):
+            return self.app_maps
         now = datetime.now(UTC)
         identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         if (

@@ -25,7 +25,7 @@ from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
 from .ha_tasks import create_background_task
-from .map_switch_refresh import async_wait_for_map_switch
+from .map_switch_refresh import async_read_settled_map_index, async_wait_for_map_switch
 from .performance import (
     DreameLawnMowerPerformanceCycle,
     DreameLawnMowerPerformanceSample,
@@ -78,6 +78,7 @@ class DreameLawnMowerRefreshMixin:
     """Keep blocking state refreshes separate from optional metadata hydration."""
 
     _runtime_map_identity_generation: int
+    _map_switch_pending_event: float | None
 
     if TYPE_CHECKING:
         # Methods supplied by the concrete coordinator and its other bases.
@@ -154,7 +155,7 @@ class DreameLawnMowerRefreshMixin:
     _runtime_active_map_index: int | None
     _runtime_map_index_refreshed_at: datetime | None
     _batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None
-    _batch_schedule_read_key: tuple[int | None, bool] | None
+    _batch_schedule_read_key: tuple[int | None, bool, float | None] | None
     _batch_schedule_read_completed_at: float | None
 
     def _snapshot_is_stale(
@@ -406,7 +407,7 @@ class DreameLawnMowerRefreshMixin:
             ):
                 return True, self._runtime_active_map_index, identity_generation
             try:
-                index = await self.client.async_get_current_app_map_index()
+                index = await async_read_settled_map_index(self)
             except asyncio.CancelledError:
                 if identity_generation == getattr(
                     self, "_runtime_map_identity_generation", 0

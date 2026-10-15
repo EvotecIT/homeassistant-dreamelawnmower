@@ -98,6 +98,7 @@ def test_switch_expires_map_scoped_caches_once_and_preserves_manual_selection():
 def test_switch_pair_shares_a_settled_authoritative_map_read():
     async def scenario():
         coordinator = _coordinator()
+        coordinator.client.async_get_current_app_map_index.return_value = 3
         coordinator._schedule_metadata_refresh = Mock()
         with patch.object(refresh, "monotonic", return_value=10):
             refresh.observe_map_switch(
@@ -123,7 +124,7 @@ def test_switch_pair_shares_a_settled_authoritative_map_read():
             await started.wait()
             coordinator.client.async_get_current_app_map_index.assert_not_awaited()
             release.set()
-            await read
+            assert (await read)[:2] == (True, 3)
         coordinator.client.async_get_current_app_map_index.assert_awaited_once()
 
     asyncio.run(scenario())
@@ -185,7 +186,7 @@ def test_identity_reader_queued_before_switch_waits_after_acquiring_ownership():
         async def read():
             reading.set()
             await finish_read.wait()
-            return 2
+            return 3 if getattr(coordinator, "_last_map_switch_event_at", None) else 2
 
         coordinator.client.async_get_current_app_map_index.side_effect = read
         with patch.object(coordinator_refresh, "async_wait_for_map_switch", new=wait):
@@ -205,7 +206,7 @@ def test_identity_reader_queued_before_switch_waits_after_acquiring_ownership():
             await asyncio.wait_for(settling.wait(), timeout=1)
             assert coordinator.client.async_get_current_app_map_index.await_count == 1
             settled.set()
-            assert (await queued)[:2] == (True, 2)
+            assert (await queued)[:2] == (True, 3)
             assert coordinator.client.async_get_current_app_map_index.await_count == 2
 
     asyncio.run(scenario())
