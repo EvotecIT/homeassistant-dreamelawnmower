@@ -656,6 +656,24 @@ def test_model_overrides_prevent_cross_model_code_guesses() -> None:
     assert mower_fault_active(0, model="mova.mower.x1234") is False
 
 
+@pytest.mark.parametrize("model", ["mova.mower.g2529c", "g2529f", "mova.mower.g2584a"])
+@pytest.mark.parametrize(
+    ("code", "name"),
+    [
+        (74, "patrol_task_completed"),
+        (75, "maintenance_point_reached"),
+        (76, "maintenance_point_unreachable"),
+        (77, "error_while_going_to_maintenance_point"),
+    ],
+)
+def test_mova_patrol_and_maintenance_point_notices(
+    model: str, code: int, name: str
+) -> None:
+    assert mower_device_code_name(code, model=model) == name
+    assert mower_device_code_tier(code, model=model) is MowerDeviceCodeTier.ATTENTION
+    assert mower_fault_active(code, model=model) is False
+
+
 def test_viax_250_uses_shared_codes_without_unverified_model_overrides() -> None:
     assert (
         mower_device_code_name(4, model="mova.mower.g2552")
