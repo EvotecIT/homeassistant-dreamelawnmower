@@ -222,5 +222,83 @@
     "entry_id_required": {
       "message": "Je načteno více položek sekaček Dreame; zadejte entry_id."
     }
+  },
+  "services": {
+    "start_scheduled_mowing": {
+      "name": "Spustit plánované sečení s kontrolou podmínek",
+      "description": "Zkontroluje podmínky a spustí úlohu, nebo ji přeskočí s důvodem. Vyžaduje online sekačku v dokovací stanici, neaktivní úlohu, známý stav deště, dostatek baterie a vypnuté vlastní plány na všech mapách. Úlohy neřadí do fronty ani neobnovuje."
+    },
+    "start_zone_mowing": {
+      "name": "Spustit sečení zón",
+      "description": "Spustí sečení uložených zón na aktivní mapě a potvrdí zahájení. Přesné potvrzení zón závisí na údajích úlohy od sekačky."
+    },
+    "start_spot_mowing": {
+      "name": "Spustit bodové sečení",
+      "description": "Spustí sečení uložených bodových oblastí na aktivní mapě a potvrdí zahájení. Přesné potvrzení oblastí závisí na údajích úlohy od sekačky."
+    },
+    "start_edge_mowing": {
+      "name": "Spustit sečení okrajů",
+      "description": "Spustí sečení zadaných okrajů aktivní mapy a potvrdí zahájení. ID okraje je dvojice [edge_id, contour_index]; přesné potvrzení režimu závisí na údajích úlohy."
+    },
+    "start_point_patrol": {
+      "name": "Spustit hlídku po bodech",
+      "description": "Navštíví body hlídky aktivní mapy bez sečení; bez point_ids navštíví všechny. Používejte v dokovací stanici nebo v klidu. Ověřeno na MOVA LiDAX Ultra 1000; jiné modely mohou požadavek odmítnout."
+    },
+    "start_edge_patrol": {
+      "name": "Spustit hlídku po okrajích",
+      "description": "Projede zadané okraje aktivní mapy bez sečení. ID tvoří dvojice [edge_id, contour_index]. Používejte v klidu. Ověřeno na MOVA LiDAX Ultra 1000; jiné modely mohou požadavek odmítnout."
+    },
+    "download_session_photos": {
+      "name": "Stáhnout fotografie úloh",
+      "description": "Uloží fotografie dokončených úloh do médií Home Assistanta a přeskočí již uložené soubory. Limit je 100 fotografií a 64 MiB na volání, archiv 256 MiB na entitu. Ověřeno na MOVA LiDAX Ultra 1000."
+    },
+    "download_person_photo": {
+      "name": "Stáhnout fotografii detekované osoby",
+      "description": "Uloží fotografii detekované osoby vedle fotografií úloh. Bez detected_at použije poslední uchované oznámení s kódem 27. Ověřeno na MOVA LiDAX Ultra 1000; jiné modely mohou používat jiné úložiště."
+    },
+    "switch_current_map": {
+      "name": "Přepnout aktuální mapu",
+      "description": "Přepne skutečnou aktivní mapu sekačky podle indexu. Používejte v dokovací stanici nebo v klidu; během sečení může sekačka požadavek odmítnout."
+    },
+    "cancel_current_task": {
+      "name": "Zrušit aktuální úlohu",
+      "description": "Ukončí aktuální úlohu bez návratu do stanice a počká na potvrzený neaktivní stav. Pokud sekačka již nepracuje, nic nezmění."
+    },
+    "plan_map_preference_mode_update": {
+      "name": "Připravit změnu režimu nastavení mapy",
+      "description": "Build or send a guarded preference-mode update for the selected map on the mower entity. This only changes the selected map between global and custom preference mode and does not require any zone selection. By default this is a dry run that only stores the candidate PREP request in the last preference write diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "plan_zone_mowing_preference_update": {
+      "name": "Připravit změnu nastavení sečení zóny",
+      "description": "Build or send a guarded mowing preference update for the selected map on the mower entity. Zone-scoped settings use the current Home Assistant map/zone selection scope unless zone_id is provided explicitly. Map-level preference_mode updates can be planned without any zone selection. By default this is a dry run that only stores the candidate PRE/PREP request in the last preference write diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "remote_control_step": {
+      "name": "Provést krok dálkového ovládání",
+      "description": "Send one validated manual-drive movement step to the mower. This can physically move the mower and is intended for short supervised tests only. The service is blocked while the mower is mowing, returning, mapping, fast mapping, in error, or below 20% battery."
+    },
+    "remote_control_stop": {
+      "name": "Zastavit dálkové ovládání",
+      "description": "Send a zero-motion remote-control step to stop manual driving."
+    },
+    "set_schedule_plan_enabled": {
+      "name": "Zapnout nebo vypnout plán sečení",
+      "description": "Build or send a guarded app-schedule enable/disable request. By default this is a dry run that only shows the request payload in a notification. Sending the request requires execute and confirm_schedule_write to both be true. Use only during supervised testing."
+    },
+    "set_schedule_task_start_time": {
+      "name": "Nastavit čas zahájení plánované úlohy",
+      "description": "Preview or change one existing all-area mowing start on an A2 V3 schedule. Qualified for map 0, plan 0. Preserves other tasks, names and enable flags. The mower must have finished its current task. Defaults to a dry run; sending requires execute and confirm_schedule_write. Creation, weekday changes and area edits remain unavailable."
+    },
+    "plan_schedule_upload": {
+      "name": "Připravit nahrání plánu",
+      "description": "Build or send a guarded full schedule upload for one map slot. Provide a list of decoded schedule plans in the same readable shape returned by the schedule probe and calendar helpers. By default this is a dry run that only stores the candidate SCHDIV2/SCHDDV2 request sequence in the last schedule write diagnostic sensor. Sending the upload requires execute and confirm_schedule_write to both be true."
+    },
+    "plan_maintenance_reset": {
+      "name": "Připravit reset údržby",
+      "description": "Build or send a guarded CMS maintenance counter reset. By default this is a dry run that only shows the candidate CMS request in a notification and the diagnostic sensor. Sending the request requires execute and confirm_maintenance_reset to both be true."
+    },
+    "plan_mowing_preference_update": {
+      "name": "Připravit změnu nastavení sečení",
+      "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    }
   }
 }

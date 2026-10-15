@@ -158,6 +158,7 @@ from .map_manager import DreameMapMowerMapManager
 from .map_decoder import DreameMowerMapDecoder
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 from .notice_events import remember_notice_events
+from .map_switch_events import is_map_switch_announcement
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -539,6 +540,12 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
             previous_changed_at
             if previous_value == value
             and isinstance(previous_changed_at, (int, float))
+            and (
+                key != "2.50"
+                or isinstance(previous_entry, dict)
+                and (previous_entry.get("code") in (None, 0))
+                == (payload.get("code") in (None, 0))
+            )
             else received_at
         )
         entry = {
@@ -578,7 +585,10 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
                 )
             entry["active_session_started_at"] = active_session_started_at
         self.realtime_properties[key] = entry
-        return key in _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS or (
+        switch_changed = is_map_switch_announcement(key, value) and (
+            key == "1.50" or changed_at != previous_changed_at
+        )
+        return switch_changed or key in _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS or (
             key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value
         )
 
