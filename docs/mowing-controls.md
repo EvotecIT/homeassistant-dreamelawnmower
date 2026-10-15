@@ -349,7 +349,7 @@ triggers:
 conditions:
   - condition: template
     value_template: >-
-      {{ state_attr('sensor.my_mower_last_mower_notification', 'code') == 27 }}
+      {{ trigger.to_state.attributes.get('code') == 27 }}
 actions:
   - delay: "00:00:30"
   - action: dreame_lawn_mower.download_person_photo
@@ -357,7 +357,7 @@ actions:
       entity_id: lawn_mower.my_mower
     data:
       detected_at: >-
-        {{ state_attr('sensor.my_mower_last_mower_notification', 'observed_at') }}
+        {{ trigger.to_state.attributes['observed_at'] }}
 ```
 
 The short delay gives the mower time to upload the photo.
