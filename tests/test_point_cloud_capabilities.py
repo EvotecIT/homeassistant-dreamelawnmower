@@ -51,6 +51,35 @@ def _map_attributes(coordinator):
     return camera.extra_state_attributes
 
 
+@pytest.mark.parametrize(
+    ("model", "video", "point_cloud"),
+    [
+        ("mova.mower.g2529c", "supported", "supported"),
+        ("mova.mower.g2529f", "supported", "unknown"),
+        ("mova.mower.g2583", "unknown", "unknown"),
+    ],
+    ids=["lidax-1000-confirmed", "lidax-2000-video-only", "viax-unconfirmed"],
+)
+def test_model_support_reaches_camera_and_diagnostics_without_download(
+    model, video, point_cloud
+):
+    coordinator = _coordinator(None)
+    coordinator.data.descriptor.model = model
+    expected = {
+        feature: {
+            "state": state, "source": "model" if state == "supported" else "unknown"
+        }
+        for feature, state in (("live_video", video), ("point_cloud", point_cloud))
+    }
+    attributes = _map_attributes(coordinator)
+    assert attributes["feature_capabilities"] == expected
+    assert (
+        build_coordinator_diagnostics(coordinator)["feature_capabilities"] == expected
+    )
+    assert attributes["mowing_map_api_path"]
+    assert attributes["point_cloud_api_path"]
+
+
 def test_validated_download_promotes_unknown_mower_across_map_and_diagnostics():
     content = (
         b"VERSION .7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n"

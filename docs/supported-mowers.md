@@ -22,7 +22,7 @@ brand name:
 | MOVA 600 Kit | `mova.mower.g2405b` | **Recognized** | Model identity and shared mower state/device-code semantics; uses the MOVA 600 manual-height control policy, while controls, maps, and media still need live validation |
 | MOVA 1000 | `mova.mower.g2405c` | **Recognized** | Model identity, station-brush maintenance code, and mowing-start lifecycle semantics; [MOVA documents dual maps, multi-zone mowing, and manual 2–6 cm cutting-height adjustment](https://www.mova.tech/products/mova-600-robot-lawn-mower); login, controls, maps, and media still need live validation |
 | MOVA LiDAX Ultra 800 | `mova.mower.g2529b` | **Field-reported** | MOVAhome EU login, core state and controls, maps, map selection, and mowing preferences on firmware `4.3.6_0453`; [the LiDAX Ultra family supports app-controlled 3–10 cm cutting height](https://www.mova.tech/products/lidax-ultra-series-robotic-lawn-mower); app-map connector corridors are distinguished from mowing zones |
-| MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
+| MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU and US login, commands, battery, and model-specific cloud property handling; on US firmware `4.3.6_0529`, also maps, live map position, cloud live video, point and edge patrol, and a validated 3D point-cloud export |
 | MOVA LiDAX Ultra 2000 | `mova.mower.g2529f` | **Field-reported** | MOVAhome US login, core state and commands, maps, and cloud live video on firmware `4.3.6_0453` |
 | MOVA LiDAX Ultra 2000 AWD | `mova.mower.g2584a` | **Field-reported** | MOVAhome US login, realtime state, zone mowing, docking, maps, and cloud live video on firmware `4.3.6_0439` |
 | MOVA VIAX 250 | `mova.mower.g2552`, `mova.mower.g2420a` | **Recognized** | Model identity and shared mower device-code semantics; dual-map and multi-zone capabilities are [documented by MOVA](https://www.mova.tech/products/viax-250-smart-robot-mower), while cutting height is manual-only; login, controls, maps, and media still need owner validation |
@@ -51,11 +51,14 @@ operations behind clear boundaries:
 
 - Model, firmware, region, and account provisioning can change which advanced
   features the vendor makes available.
-- Live video is field-validated on the Dreame A2 and A3 AWD 1000. It currently
+- Live video is field-validated on the Dreame A2 and A3 AWD 1000, and on the MOVA
+  LiDAX Ultra 1000 with a US account and firmware `4.3.6_0529`. It currently
   requires a Linux x86_64 or aarch64 Home Assistant host, a provisioned account,
   and a mower state in which the vendor permits video.
-- 3D point-cloud generation and download are validated on the Dreame A2; other
-  mower families still need reports.
+- 3D point-cloud generation and download are validated on the Dreame A2.
+  Point-cloud download is also field-confirmed on the MOVA LiDAX Ultra 1000
+  with a US account and firmware `4.3.6_0529`; other mower families still need
+  reports.
 - Map rendering and map selection are supported, but editing no-go areas,
   virtual walls, and garden geometry is not.
 - Charging-period, rain-protection, and three-field anti-theft controls are

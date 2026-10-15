@@ -34,6 +34,11 @@ MODEL_FEATURE_CAPABILITIES: Final[dict[str, dict[str, str]]] = {
     "dreame.mower.q2501a": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
     },
+    "mova.mower.g2529c": {
+        FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
+        # LiDAX Ultra 1000 returned a validated 57,678-point PCD on 4.3.6_0529.
+        FEATURE_POINT_CLOUD: CAPABILITY_SUPPORTED,
+    },
     "mova.mower.g2529f": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
     },
