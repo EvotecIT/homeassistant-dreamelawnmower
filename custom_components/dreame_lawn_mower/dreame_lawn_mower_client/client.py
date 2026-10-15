@@ -92,6 +92,7 @@ from .client_schedules import (
 )
 from .client_schedules import _DreameLawnMowerClientSchedulesMixin
 from .client_settings import _DreameLawnMowerClientSettingsMixin
+from .client_task_control import require_task_map_index as _require_task_map_index
 from .client_task_control import serialized_task_control as _serialized_task_control
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .cloud_session import DreameCloudSession as _DreameCloudSession
@@ -156,6 +157,9 @@ from .models import map_summary_from_map_data as map_summary_from_map_data
 from .models import remote_control_block_reason as remote_control_block_reason
 from .models import remote_control_state_safe as remote_control_state_safe
 from .models import snapshot_from_device as snapshot_from_device
+from .movement_safety import (
+    stationary_movement_block_reason as _stationary_movement_block_reason,
+)
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD as MOWING_PREFERENCE_MODE_FIELD,
 )
@@ -380,25 +384,6 @@ def _snapshot_blocks_idle_only_command(snapshot: DreameLawnMowerSnapshot) -> boo
         activity not in {"docked", "idle"}
         or state in _IDLE_ONLY_COMMAND_BLOCKED_STATES
     )
-
-
-def _maintenance_point_command_block_reason(
-    snapshot: DreameLawnMowerSnapshot,
-) -> str | None:
-    """Return why a maintenance-point movement is unsafe."""
-    state_block_reason = remote_control_block_reason(snapshot)
-    if state_block_reason is not None:
-        return state_block_reason
-
-    session_active = getattr(snapshot, "mowing_session_active", None)
-    control_state = (
-        snapshot_session_control_state(snapshot)
-        if session_active is not None
-        else str(getattr(snapshot, "activity", "") or "").casefold()
-    )
-    if control_state not in {"docked", "idle"}:
-        return "The mower must be idle or docked before moving."
-    return None
 
 
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
@@ -1312,7 +1297,7 @@ class DreameLawnMowerClient(
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
         snapshot = await self.async_refresh_authoritative_snapshot()
-        block_reason = _maintenance_point_command_block_reason(snapshot)
+        block_reason = _stationary_movement_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
         from .mowing_tasks import build_maintenance_point_request
@@ -1320,6 +1305,76 @@ class DreameLawnMowerClient(
         return await self._async_call_mowing_task(
             build_maintenance_point_request([int(point_id)]),
             task_name="maintenance point",
+        )
+
+    @_serialized_task_control
+    async def async_start_point_patrol(
+        self,
+        point_ids: Sequence[int] | None = None,
+        *,
+        expected_map_index: int,
+    ) -> Any:
+        """Visit configured patrol points without mowing.
+
+        When ``point_ids`` is omitted, every patrol point decoded from the active
+        verified app map is visited. Explicit IDs must belong to that map too.
+        Callers must supply ``expected_map_index`` to bind their selection
+        across queued controls, including when visiting every point.
+        """
+        from .app_map_metadata import current_app_map_patrol_point_ids
+        from .mowing_tasks import build_point_patrol_request
+
+        request = (
+            build_point_patrol_request(point_ids) if point_ids is not None else None
+        )
+        app_maps = await self.async_get_app_maps(include_objects=False)
+        _require_task_map_index(
+            expected_map_index, app_maps.get("current_map_index"),
+            task_name="point patrol",
+        )
+        available_ids = current_app_map_patrol_point_ids(app_maps)
+        if not available_ids:
+            raise _DreameLawnMowerCommandRejectedError(
+                "No patrol point is available on the verified active mower map."
+            )
+        if request is None:
+            request = build_point_patrol_request(available_ids)
+        if any(point_id not in available_ids for point_id in request["d"]["point"]):
+            raise _DreameLawnMowerCommandRejectedError(
+                "Every patrol point must belong to the verified active mower map."
+            )
+        snapshot = await self.async_refresh_authoritative_snapshot()
+        block_reason = _stationary_movement_block_reason(snapshot)
+        if block_reason is not None:
+            raise _DreameLawnMowerCommandRejectedError(block_reason)
+        current_map_index = await self.async_get_current_app_map_index()
+        _require_task_map_index(
+            app_maps.get("current_map_index"), current_map_index,
+            task_name="point patrol",
+        )
+        return await self._async_call_mowing_task(request, task_name="point patrol")
+
+    @_serialized_task_control
+    async def async_start_edge_patrol(
+        self,
+        contour_ids: Sequence[Sequence[int]],
+        *,
+        expected_map_index: int,
+    ) -> Any:
+        """Patrol saved contours on the caller's required validated map."""
+        snapshot = await self.async_refresh_authoritative_snapshot()
+        block_reason = _stationary_movement_block_reason(snapshot)
+        if block_reason is not None:
+            raise _DreameLawnMowerCommandRejectedError(block_reason)
+        current_map_index = await self.async_get_current_app_map_index()
+        _require_task_map_index(
+            expected_map_index, current_map_index, task_name="edge patrol",
+        )
+        from .mowing_tasks import build_edge_patrol_request
+
+        return await self._async_call_mowing_task(
+            build_edge_patrol_request(contour_ids),
+            task_name="edge patrol",
         )
 
     @_serialized_task_control

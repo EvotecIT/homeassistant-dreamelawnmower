@@ -223,3 +223,42 @@ missing start evidence are surfaced as failed actions. A repeated targeted call
 is rejected before dispatch while an active task's mode is unknown, or when the
 mower is running the same task type and the integration cannot prove that a
 different target was requested.
+
+### Patrol Services
+
+Two services start mower-native patrol tasks that drive the mower without
+mowing:
+
+- `dreame_lawn_mower.start_point_patrol` visits configured patrol points. Pass
+  `point_ids` to choose points, or omit it to visit every patrol point on the
+  active, hash-verified map. An explicit empty list is rejected. Patrol points
+  are app-map `point` records with `type: 2`
+  (maintenance points use `type: 1`).
+- `dreame_lawn_mower.start_edge_patrol` drives along explicit edge contours
+  using the same `[edge_id, contour_index]` pairs as `start_edge_mowing`.
+
+```yaml
+action: dreame_lawn_mower.start_edge_patrol
+target:
+  entity_id: lawn_mower.my_mower
+data:
+  contour_ids: [[1, 0]]
+```
+
+Both services require a docked or idle mower and check the mower
+acknowledgement. They use app action operations `107` (point patrol,
+`{"point": [ids]}`) and `108` (edge patrol, `{"edge": [[id, index]]}`).
+Both services retain the map used to validate the selection and check it again
+inside the command queue before sending the request. A changed or unavailable
+map fails without starting a patrol. Point patrol also refreshes map metadata
+and checks every requested point against the hash-verified active map. Keep
+the same map active in the vendor app while starting a patrol. Direct client
+callers must pass the map used to choose their targets as the keyword-only
+`expected_map_index` argument for both patrol methods; omitting it is rejected.
+
+These operations were verified on a MOVA LiDAX Ultra 1000
+(`mova.mower.g2529c`). The mower acknowledged each request and the MOVAhome app
+showed the matching patrol in progress. While patrolling, the mower reports the
+`mowing` activity and the `Patrol task started` notice. Other models may reject
+the requests. Operation `106` sits in the same range, but its purpose is still
+unknown and the integration does not use it.

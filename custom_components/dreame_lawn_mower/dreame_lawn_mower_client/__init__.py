@@ -141,6 +141,8 @@ from .mowing_preferences import (
 from .mowing_tasks import (
     MowingTaskResponseError,
     build_edge_mowing_request,
+    build_edge_patrol_request,
+    build_point_patrol_request,
     build_spot_mowing_request,
     build_zone_mowing_request,
     ensure_mowing_task_succeeded,
@@ -314,6 +316,8 @@ __all__ = [
     "build_map_probe_payload",
     "build_cms_set_request",
     "build_edge_mowing_request",
+    "build_edge_patrol_request",
+    "build_point_patrol_request",
     "build_schedule_enable_status_request",
     "build_schedule_upload_requests",
     "build_spot_mowing_request",

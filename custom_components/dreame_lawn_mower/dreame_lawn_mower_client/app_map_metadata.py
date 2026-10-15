@@ -1,4 +1,4 @@
-"""Zone labels from verified mower-native map records."""
+"""Control metadata from verified mower-native map records."""
 
 from __future__ import annotations
 
@@ -75,3 +75,43 @@ def verified_app_map_zone_names(
             return {}
         result[zone_id] = name.strip() or None if name else None
     return result
+
+
+def current_app_map_patrol_point_ids(app_maps: Any) -> list[int]:
+    """Return patrol point ids decoded from the active, verified app map."""
+    if not isinstance(app_maps, Mapping) or app_maps.get("map_list_valid") is not True:
+        return []
+    maps = app_maps.get("maps")
+    current_idx = app_maps.get("current_map_index")
+    if (
+        type(current_idx) is not int
+        or current_idx < 0
+        or not isinstance(maps, Sequence)
+        or isinstance(maps, str | bytes | bytearray)
+    ):
+        return []
+    candidates = [
+        item
+        for item in maps
+        if isinstance(item, Mapping)
+        and type(item.get("idx")) is int
+        and item["idx"] == current_idx
+    ]
+    if len(candidates) != 1:
+        return []
+    item = candidates[0]
+    if any(
+        item.get(flag) is not True for flag in ("created", "available", "hash_match")
+    ):
+        return []
+    summary = item.get("summary")
+    point_ids = (
+        summary.get("patrol_point_ids") if isinstance(summary, Mapping) else None
+    )
+    if not isinstance(point_ids, Sequence) or isinstance(
+        point_ids, str | bytes | bytearray
+    ):
+        return []
+    return [
+        point_id for point_id in point_ids if type(point_id) is int and point_id > 0
+    ]
