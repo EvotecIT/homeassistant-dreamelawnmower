@@ -228,12 +228,24 @@ _A1_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     ),
 }
 
+# MOVA app-plugin fault table: 74 FAULT_CRUISE_TASK_FINISH ("Patrol Task
+# Complete") was reported by a LiDAX Ultra 1000 g2529c when a point patrol
+# ended; 75-77 are the maintenance-point notices of the same table.
 _MOVA_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     **_definitions(
         MowerDeviceCodeTier.ERROR,
         {
             0: "robot_lifted",
             55: "cannot_start_low_battery",
+        },
+    ),
+    **_definitions(
+        MowerDeviceCodeTier.ATTENTION,
+        {
+            74: "patrol_task_completed",
+            75: "maintenance_point_reached",
+            76: "maintenance_point_unreachable",
+            77: "error_while_going_to_maintenance_point",
         },
     ),
 }
