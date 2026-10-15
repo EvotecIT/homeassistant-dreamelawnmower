@@ -116,7 +116,7 @@ class DreameCloudSession:
 
     async def async_get_property_history(
         self, did: str, key: str, *, limit: int = 3, time_start: int = 0,
-        deadline: float | None = None,
+        deadline: float | None = None, kind: str = "prop",
     ) -> Any:
         """Read history with account fields built after login or token renewal."""
         path = "/".join(self._strings[i] for i in (23, 25, 43))
@@ -124,7 +124,7 @@ class DreameCloudSession:
             f"/{path}",
             lambda: json.dumps(history_params(
                 self._strings, self._user_id, did, self._country,
-                key, "prop", limit, time_start,
+                key, kind, limit, time_start,
             ), separators=(",", ":")),
             timeout=20, deadline=deadline,
         )
