@@ -231,7 +231,8 @@ mowing:
 
 - `dreame_lawn_mower.start_point_patrol` visits configured patrol points. Pass
   `point_ids` to choose points, or omit it to visit every patrol point on the
-  active map. Patrol points are app-map `point` records with `type: 2`
+  active, hash-verified map. An explicit empty list is rejected. Patrol points
+  are app-map `point` records with `type: 2`
   (maintenance points use `type: 1`).
 - `dreame_lawn_mower.start_edge_patrol` drives along explicit edge contours
   using the same `[edge_id, contour_index]` pairs as `start_edge_mowing`.
@@ -247,6 +248,9 @@ data:
 Both services require a docked or idle mower and check the mower
 acknowledgement. They use app action operations `107` (point patrol,
 `{"point": [ids]}`) and `108` (edge patrol, `{"edge": [[id, index]]}`).
+Point patrol refreshes map metadata and checks every requested point against
+the verified active map before dispatch. If the map cannot be verified, the
+action fails without starting a patrol.
 
 These operations were verified on a MOVA LiDAX Ultra 1000
 (`mova.mower.g2529c`). The mower acknowledged each request and the MOVAhome app

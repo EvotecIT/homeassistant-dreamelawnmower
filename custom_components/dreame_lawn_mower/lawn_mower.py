@@ -702,7 +702,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         """Visit configured patrol points on the active map without mowing."""
         self._ensure_selected_map_matches_active()
         normalized: list[int] | None = None
-        if point_ids:
+        if point_ids is not None:
+            if not point_ids:
+                raise HomeAssistantError("At least one patrol point id is required.")
             normalized = [int(point_id) for point_id in point_ids]
             self._ensure_requested_ids_available(
                 normalized,
