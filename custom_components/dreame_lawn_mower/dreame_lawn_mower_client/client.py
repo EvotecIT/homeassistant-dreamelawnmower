@@ -1464,11 +1464,13 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(switch)
 
-    async def async_get_vector_map_details(self) -> dict[str, Any]:
+    async def async_get_vector_map_details(
+        self, *, app_maps: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Return JSON-safe parsed batch vector-map details."""
         from .client_vector_reads import async_vector_details
 
-        return await async_vector_details(self)
+        return await async_vector_details(self, prefetched_app_maps=app_maps)
 
     async def async_get_remote_control_support(
         self,
@@ -1691,6 +1693,7 @@ class DreameLawnMowerClient(
         label_scale: float = 1.0,
         current_map_index: int | None = None,
         style: MapRenderStyle | None = None,
+        app_maps: dict[str, Any] | None = None,
     ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
         from .client_vector_reads import async_vector_view
@@ -1698,7 +1701,7 @@ class DreameLawnMowerClient(
         return await async_vector_view(
             self, label_scale=label_scale,
             current_map_index=current_map_index,
-            style=style,
+            style=style, prefetched_app_maps=app_maps,
         )
 
     async def async_get_app_schedules(

@@ -121,7 +121,10 @@ async def _vector_geometry_available(
     )
 
 
-async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
+async def async_vector_details(
+    client: DreameLawnMowerClient, *,
+    prefetched_app_maps: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     async def read(cloud: DreameCloudSession) -> dict[str, Any]:
         generation = client._runtime_geometry_generation
         batch_error = None
@@ -131,7 +134,7 @@ async def async_vector_details(client: DreameLawnMowerClient) -> dict[str, Any]:
             data = None
             batch_error = str(err)
         hint = await _map_hint(client)
-        app_maps = None
+        app_maps = current_prefetched_app_maps(client, prefetched_app_maps)
         app_error = None
         needs_app_geometry = await _needs_app_geometry(data, hint)
         if needs_app_geometry:

@@ -191,3 +191,79 @@ def test_interactive_background_context_tracks_current_station_evidence():
     second = api.context(coordinator)
     assert second[-1].map_hash == OTHER_HASH
     assert first != second
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_normal_camera_keeps_station_without_a_mower_pose(monkeypatch, native):
+    import asyncio
+
+    from .test_app_action_live_map import native_maps
+    from .test_map_source_failures import configure_reads
+
+    maps = native_maps()
+    revision = maps["maps"][0]["md5"]
+    client = docked_client()
+    client._latest_snapshot = SimpleNamespace(available=True, activity="idle")
+    client._charger_history = ZoneMowingHistory(
+        chargers={"summary": ChargerPosition(200, 400, 0, 1, revision)}
+    )
+    configure_reads(monkeypatch, client, lambda: {}, lambda: maps)
+    view = (
+        asyncio.run(client.async_refresh_map_view(timeout=0, interval=0))
+        if native
+        else (client._sync_refresh_map_view(timeout=0, interval=0))
+    )
+    assert view.image_png
+    assert (view.details.get("charger_x"), view.details.get("charger_y")) == (200, 400)
+    assert view.details["position_x"] is None
+    assert view.summary.charger_present
+
+
+def test_live_path_camera_passes_cached_inventory_into_public_vector_read(monkeypatch):
+    import asyncio
+
+    from custom_components.dreame_lawn_mower.camera import (
+        DreameLawnMowerLivePathMapCamera,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_inventory import (  # noqa: E501
+        _app_map_inventory_identity,
+    )
+
+    from .test_map_camera_identity import _camera
+    from .test_map_source_failures import configure_reads
+
+    client = docked_client()
+    maps = _maps()
+    for entry in maps["maps"]:
+        entry["info"]["size"] = 100
+    client._latest_app_map_inventory_identity = _app_map_inventory_identity(
+        maps["maps"]
+    )
+    configure_reads(monkeypatch, client, _batch_payload, lambda: maps)
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(client=client, app_maps=maps)
+    view = asyncio.run(DreameLawnMowerLivePathMapCamera._async_refresh_map_view(entity))
+    assert view.image_png
+    assert (view.details.get("charger_x"), view.details.get("charger_y")) == (20, 40)
+
+
+def test_camera_render_context_changes_when_current_station_arrives():
+    import json
+
+    from custom_components.dreame_lawn_mower.camera import DreameLawnMowerMapCamera
+
+    from .test_map_camera_identity import _camera
+
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(
+        client=docked_client(), app_maps=_maps(), runtime_status_blob=None,
+        entry=SimpleNamespace(options={}),
+    )
+    initial = DreameLawnMowerMapCamera._map_refresh_context.fget(entity)
+    assert initial[-1] == (20, 40, HASH)
+    entity.coordinator.client._charger_history = ZoneMowingHistory()
+    missing = DreameLawnMowerMapCamera._map_refresh_context.fget(entity)
+    assert missing[-1] is None
+    assert initial != missing
+    # Camera preview scope remains portable, primitive data.
+    assert json.loads(json.dumps(initial))[-1] == [20, 40, HASH]

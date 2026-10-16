@@ -2972,7 +2972,9 @@ class DreameLawnMowerCoordinator(
             return self.vector_map_details
 
         try:
-            vector_map_details = await self.client.async_get_vector_map_details()
+            vector_map_details = await self.client.async_get_vector_map_details(
+                app_maps=self.app_maps,
+            )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh vector map details: %s", err)
             if switch_event == getattr(self, "_last_map_switch_event_at", None):
