@@ -118,6 +118,14 @@ direction through `mowing_direction_mode` plus `mowing_direction_degrees`. Use
 the dry-run result to inspect the candidate payload before confirming a live
 write.
 
+Recognized A3/A3 Pro variants offer **Rush** mowing efficiency alongside
+**Standard** and **Efficient**. Its wire value is `3`; `2` is not a supported
+choice. Other families retain their confirmed options. On A3 (`q2501`) variants,
+the EdgeMaster switch preserves the app's numeric attachment modes: off is
+`1` and on is `2`. It is unavailable when the reported mode does not confirm an
+installed attachment. Editing another setting preserves that numeric mode,
+including an unknown value reported by newer firmware.
+
 For normal dashboard and automation use, the integration also exposes:
 
 - **Selected Map Preference Mode**, a `select` entity with `Global` and

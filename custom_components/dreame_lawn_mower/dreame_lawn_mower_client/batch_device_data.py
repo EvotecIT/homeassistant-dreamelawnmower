@@ -479,9 +479,7 @@ def _decode_batch_preference_map_entry(
                 settings_inventory_valid = False
                 continue
             raw_area_id = raw_preference.get("id")
-            area_id = (
-                None if isinstance(raw_area_id, bool) else _to_int(raw_area_id)
-            )
+            area_id = None if isinstance(raw_area_id, bool) else _to_int(raw_area_id)
             if area_id is None:
                 area_id = _to_int(area_key)
             if area_id is None or area_id in area_ids:
@@ -556,7 +554,7 @@ def _decode_batch_preference_map_entry(
                 "obstacle_avoidance_sensitivity": _to_int(
                     raw_preference.get("obstacleAvoidanceSensitivity")
                 ),
-                "edge_cutting_attachment": _bool_or_none(
+                "edge_cutting_attachment": _to_int(
                     raw_preference.get("edgeCuttingAttachment")
                 ),
                 "steering_mode": _to_int(raw_preference.get("steeringMode")),

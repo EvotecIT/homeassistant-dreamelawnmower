@@ -1881,7 +1881,10 @@ class DreameLawnMowerClient(
         from .client_app_reads import async_run_app_read
         from .device_settings_read_plan import read_maintenance
 
-        result = await async_run_app_read(self, read_maintenance(include_raw))
+        result = await async_run_app_read(
+            self,
+            read_maintenance(include_raw, model=self._descriptor.model),
+        )
         return result
 
     async def async_plan_maintenance_reset(
@@ -2131,6 +2134,31 @@ class DreameLawnMowerClient(
             include_objects=include_objects, include_object_urls=include_object_urls,
         )
 
+    async def async_get_app_backup_map(
+        self,
+        index: int,
+        *,
+        chunk_size: int = 400,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
+        """Inspect a verified backup with the shared serialized read-only transport.
+
+        Raw geometry is omitted unless explicitly requested. This does not
+        restore a backup or change the active map.
+        """
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+            raise ValueError("Backup map index must be a non-negative integer.")
+        from .client_map_reads import async_read_maps
+
+        return await async_read_maps(
+            self,
+            chunk_size=chunk_size,
+            include_payload=include_payload,
+            include_objects=False,
+            include_object_urls=False,
+            backup_index=index,
+        )
+
     async def async_get_current_app_map_index(self) -> int | None:
         """Read the active map index without downloading map payloads."""
         from .client_app_reads import async_read_app_action
@@ -2337,7 +2365,6 @@ class DreameLawnMowerClient(
             raise
         finally:
             _active_point_cloud_trace.reset(trace_token)
-
 
     async def async_get_cloud_properties(
         self,

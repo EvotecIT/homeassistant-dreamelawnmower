@@ -8,6 +8,7 @@ from homeassistant.components.sensor import SensorEntity, SensorEntityDescriptio
 from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.device_code_guidance import mower_device_code_context
 from .entity import DreameLawnMowerEntity
 
 _DESCRIPTIONS = {
@@ -63,6 +64,23 @@ class DreameLawnMowerConditionSensor(DreameLawnMowerEntity, SensorEntity):
         }
         if self._kind == "notification":
             attributes["recent"] = self.coordinator.mower_condition_history.recent()
+        snapshot = self.coordinator.data
+        current_code = getattr(
+            snapshot,
+            "error_code" if self._kind == "error" else "status_notice_code",
+            None,
+        )
+        # Historical events can belong to an earlier firmware. Attach current
+        # guidance only while this exact condition is still confirmed active.
+        if (
+            getattr(snapshot, "available", False)
+            and event.get("active") is True and current_code == event.get("code")
+        ):
+            attributes["guidance"] = mower_device_code_context(
+                current_code,
+                model=self._descriptor.model,
+                firmware=getattr(snapshot, "firmware_version", None),
+            )
         return attributes
 
     def _event(self) -> dict[str, Any] | None:

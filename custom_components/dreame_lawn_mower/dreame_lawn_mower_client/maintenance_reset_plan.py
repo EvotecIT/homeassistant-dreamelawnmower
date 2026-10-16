@@ -49,12 +49,20 @@ def plan_maintenance_reset(
             "Could not read CMS maintenance counters before planning reset."
         )
 
-    updated_values = reset_cms_counter(values, item)
+    model = status.get("model")
+    model = model if isinstance(model, str) else None
+    edge_mode = status.get("edge_trimmer_mode")
+    edge_mode = edge_mode if type(edge_mode) is int else None
+    updated_values = reset_cms_counter(
+        values, item, model=model, edge_trimmer_mode=edge_mode,
+    )
     request = build_cms_set_request(updated_values)
     before = maintenance_item_status(status, item)
     planned_status = maintenance_status_from_app_data(
         {"value": updated_values},
         source="planned_maintenance_reset",
+        model=model,
+        edge_trimmer_mode=edge_mode,
     )
     after = maintenance_item_status(planned_status, item)
     result: dict[str, Any] = {

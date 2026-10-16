@@ -17,7 +17,11 @@ from .const import DOMAIN
 from .control_options import active_map_index, current_maintenance_point_entries
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
-from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
+from .dreame_lawn_mower_client.maintenance import (
+    MaintenanceItem,
+    maintenance_item_status,
+    maintenance_items_for_model,
+)
 from .entity import DreameLawnMowerEntity
 from .manual_control import maintenance_point_movement_block_reason
 from .mowing_command import async_run_mowing_command
@@ -56,7 +60,9 @@ async def async_setup_entry(
         ]
         + [
             DreameLawnMowerResetMaintenanceButton(coordinator, item)
-            for item in MAINTENANCE_ITEMS
+            for item in maintenance_items_for_model(
+                coordinator.client.descriptor.model, include_optional=True,
+            )
         ]
     )
 
@@ -601,6 +607,15 @@ class DreameLawnMowerResetMaintenanceButton(
         self._attr_unique_id = (
             f"{self._descriptor.unique_id}_reset_maintenance_{item.key}"
         )
+
+    @property
+    def available(self) -> bool:
+        """Keep the optional edge reset unavailable without installation proof."""
+        if self._item.key == "edge_trimmer":
+            return self.coordinator.data is not None and maintenance_item_status(
+                self.coordinator.maintenance_status, self._item,
+            ) is not None
+        return super().available
 
     async def async_press(self) -> None:
         """Reset the selected maintenance counter and refresh cached status."""
