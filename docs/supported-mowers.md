@@ -80,6 +80,13 @@ operations behind clear boundaries:
 
 ## Help Expand Support
 
+The client also recognizes the app's broader A1, A1 Pro, A2, A3 and A3 Pro
+families when a new suffix variant appears. It keeps known retail names and
+explicit cloud product names, using a family name only as a fallback. See
+[model families and versioned device-code catalogs](dreame-app-catalog.md) for
+the observed variant inventory and compatibility limits. Recognition does not
+promote a new variant to field-reported or validated support.
+
 Support across Dreame, MOVA, and rebadged mower variants will improve fastest
 with real-world reports. If your mower is recognized but not yet validated, or
 if it exposes a different raw model string than this README shows, please open a

@@ -222,6 +222,52 @@ def test_display_name_for_model_prefers_known_mapping_over_fallback_name() -> No
 
 
 @pytest.mark.parametrize(
+    ("family", "expected_name"),
+    [
+        ("p2255", "A1"),
+        ("g2422", "A1 Pro"),
+        ("g2540", "A1 Pro"),
+        ("g2408", "A2"),
+        ("g2568", "A2"),
+        ("q2501", "A3"),
+        ("g2541", "A3 Pro"),
+    ],
+)
+@pytest.mark.parametrize("suffix", ["", "z", "r2"])
+def test_app_family_names_cover_base_and_suffix_without_inventing_skus(
+    family: str, expected_name: str, suffix: str
+) -> None:
+    assert display_name_for_model(f"dreame.mower.{family}{suffix}") == expected_name
+
+
+def test_family_name_preserves_cloud_product_name_and_exact_retail_identity() -> None:
+    assert (
+        display_name_for_model("dreame.mower.q2501c", fallback_name="A3 AWD 2000")
+        == "A3 AWD 2000"
+    )
+    assert display_name_for_model("dreame.mower.q2501a") == "A3 AWD 1000"
+    assert display_name_for_model("dreame.mower.g2568d") == "A2 3000"
+    assert display_name_for_model("dreame.mower.g2540d") == "A1 Pro 2000"
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "mova.mower.g2568a",
+        "other.mower.q2501a",
+        "dreame.vacuum.g2408",
+        "dreame.mower.g2408-invalid",
+        "dreame.mower.g2408.extra",
+        "dreame.mower.g9999a",
+    ],
+)
+def test_family_name_does_not_guess_across_brands_or_invalid_identifiers(
+    model: str,
+) -> None:
+    assert display_name_for_model(model) == model
+
+
+@pytest.mark.parametrize(
     ("model", "expected_name"),
     [
         ("dreame.mower.g2540d", "A1 Pro 2000"),
