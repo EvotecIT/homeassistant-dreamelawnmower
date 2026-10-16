@@ -333,11 +333,12 @@ actions:
 When the mower detects a person it reports notice code `27` (human detected)
 and stores a photo next to the session photos as `<unix seconds>_person.jpg`.
 No session summary lists these photos. `dreame_lawn_mower.download_person_photo`
-looks for the photo of one detection by trying the names from 20 seconds before
+looks for the photo of one detection by trying the names from 60 seconds before
 to 3 seconds after the notice, nearest the expected second first, and saves the
 first one found to the same media folder as the session photos. On a MOVA LiDAX
-Ultra 1000 (`mova.mower.g2529c`) the photo was named one second before Home
-Assistant observed the notice, so one request is normally enough. A missing
+Ultra 1000 (`mova.mower.g2529c`) the photo was usually named one second before
+Home Assistant observed the notice, so one request is normally enough; one
+detection was observed 26 seconds after its photo, hence the wider window. A missing
 photo returns an empty `photos` list. Without `detected_at`, the latest retained
 human-detection notice is used.
 
