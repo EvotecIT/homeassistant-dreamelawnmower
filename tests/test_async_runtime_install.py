@@ -299,36 +299,21 @@ def test_async_runtime_preparation_injects_session_and_reuses_assets(
     asyncio.run(scenario())
 
 
-def test_native_installer_adapter_preserves_selective_zip_reads(monkeypatch):
-    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
-        android_build_artifact,
-    )
-
-    from .test_android_build_artifact import _build_zip
-
-    content = _build_zip()
-    monkeypatch.setattr(native, "LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE", len(content))
-
+def test_native_installer_adapter_downloads_anonymous_runtime_bundle(monkeypatch):
     async def scenario():
         async def handler(request):
-            start, end = (int(v) for v in request.headers["Range"][6:].split("-"))
-            return web.Response(
-                status=206,
-                body=content[start : end + 1],
-                headers={"Content-Range": f"bytes {start}-{end}/{len(content)}"},
-            )
+            assert "Range" not in request.headers
+            assert "Authorization" not in request.headers
+            assert "Cookie" not in request.headers
+            return web.Response(body=b"pinned-runtime-bundle")
 
-        async with server(monkeypatch, handler) as url, ClientSession() as session:
+        async with server(monkeypatch, handler) as url, ClientSession(
+            headers={"Authorization": "private", "Cookie": "private=1"},
+        ) as session:
             http = native._RuntimeHttp(session)
-            result = await asyncio.to_thread(
-                android_build_artifact.read_android_build_zip_entries,
-                url,
-                ["SYSTEM/lib64/liblog.so"],
-                expected_size=len(content),
-                http_client=http,
-                timeout=3,
-            )
-            assert result == {"SYSTEM/lib64/liblog.so": b"android-log"}
+            result = await asyncio.to_thread(http.get, url, timeout=3)
+            assert result.status_code == 200
+            assert result.content == b"pinned-runtime-bundle"
             assert not http.tasks
             assert not session.closed
 
