@@ -184,6 +184,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Найдавніше скошена зона"
+      },
       "state_name": {
         "name": "Стан",
         "state": {

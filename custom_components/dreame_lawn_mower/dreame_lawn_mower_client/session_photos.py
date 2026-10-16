@@ -161,33 +161,10 @@ async def async_get_session_photos(
             if session.object_name in seen_sessions:
                 continue
             seen_sessions.add(session.object_name)
-            url = await cloud.async_get_interim_file_url(
-                descriptor.did,
-                descriptor.model,
-                session.object_name,
-                deadline=deadline,
-                require_response=True,
+            summary = await _async_read_session_summary(
+                cloud, client, session.object_name, deadline=deadline
             )
-            if not url:
-                continue
-            try:
-                content = await _read_optional_object(
-                    cloud,
-                    url,
-                    deadline=deadline,
-                    max_bytes=MAX_PUBLIC_JSON_BYTES,
-                )
-            except HttpResponseError as err:
-                if err.reason == "byte_limit":
-                    continue
-                raise
-            if content is None:
-                continue
-            try:
-                summary = json.loads(content)
-            except ValueError:
-                continue
-            if not isinstance(summary, Mapping):
+            if summary is None:
                 continue
             usable_sessions += 1
             for name in session_photo_names(summary):
@@ -233,6 +210,44 @@ async def async_download_session_photo(
         )
 
     return await client._async_cloud_read(read)
+
+
+async def _async_read_session_summary(
+    cloud: DreameCloudSession,
+    client: DreameLawnMowerClient,
+    object_name: str,
+    *,
+    deadline: float,
+) -> Mapping[str, Any] | None:
+    """Download and decode one session summary; ``None`` when unusable."""
+    descriptor = client._descriptor
+    url = await cloud.async_get_interim_file_url(
+        descriptor.did,
+        descriptor.model,
+        object_name,
+        deadline=deadline,
+        require_response=True,
+    )
+    if not url:
+        return None
+    try:
+        content = await _read_optional_object(
+            cloud,
+            url,
+            deadline=deadline,
+            max_bytes=MAX_PUBLIC_JSON_BYTES,
+        )
+    except HttpResponseError as err:
+        if err.reason == "byte_limit":
+            return None
+        raise
+    if content is None:
+        return None
+    try:
+        summary = json.loads(content)
+    except ValueError:
+        return None
+    return summary if isinstance(summary, Mapping) else None
 
 
 async def _read_optional_object(

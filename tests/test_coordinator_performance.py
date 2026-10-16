@@ -521,6 +521,11 @@ def test_metadata_hydration_serializes_shared_vendor_protocol_calls() -> None:
         batch_started = asyncio.Event()
         release_app_maps = asyncio.Event()
         release_schedules = asyncio.Event()
+        history_started, release_history = asyncio.Event(), asyncio.Event()
+
+        async def read_history(**kwargs):
+            history_started.set()
+            await release_history.wait()
 
         async def refresh_app_maps(*, force: bool) -> dict[str, object]:
             assert force is False
@@ -561,6 +566,10 @@ def test_metadata_hydration_serializes_shared_vendor_protocol_calls() -> None:
         coordinator.async_refresh_weather_protection = complete
         coordinator.async_refresh_maintenance_status = complete
         coordinator.async_refresh_work_log_totals = complete
+        coordinator.async_refresh_zone_mowing_sessions = read_history
+        coordinator.hass = SimpleNamespace(
+            async_create_background_task=lambda coro, name: asyncio.create_task(coro),
+        )
         coordinator.async_refresh_voice_settings = complete
         task = asyncio.create_task(
             coordinator._async_refresh_metadata(
@@ -588,6 +597,11 @@ def test_metadata_hydration_serializes_shared_vendor_protocol_calls() -> None:
         assert "app_maps" in sample["phases_ms"]
         assert "schedules" in sample["phases_ms"]
         assert "batch_device_data" in sample["phases_ms"]
+        await asyncio.wait_for(history_started.wait(), timeout=1)
+        assert not release_history.is_set()
+        history_task = coordinator._zone_history_refresh_task
+        release_history.set()
+        await history_task
 
     asyncio.run(scenario())
 
@@ -627,6 +641,7 @@ def test_metadata_hydration_retries_only_missing_core_phase() -> None:
         coordinator.async_refresh_weather_protection = complete
         coordinator.async_refresh_maintenance_status = complete
         coordinator.async_refresh_work_log_totals = complete
+        coordinator.async_refresh_zone_mowing_sessions = complete
         coordinator.async_refresh_voice_settings = complete
 
         with patch(
@@ -730,6 +745,7 @@ def test_metadata_hydration_forces_incomplete_app_map_retry() -> None:
         coordinator.async_refresh_weather_protection = complete
         coordinator.async_refresh_maintenance_status = complete
         coordinator.async_refresh_work_log_totals = complete
+        coordinator.async_refresh_zone_mowing_sessions = complete
         coordinator.async_refresh_voice_settings = complete
 
         with patch(

@@ -184,6 +184,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Najdawniej skoszona strefa"
+      },
       "state_name": {
         "name": "Stan",
         "state": {

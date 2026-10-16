@@ -137,6 +137,32 @@ The changing observation timestamp is excluded from Recorder history, while
 the numeric duration remains available for normal HA history. This checkpoint
 limit is separate from Recorder retention and the optional saved map preview.
 
+## Zone mowing history
+
+**Least Recently Mowed Zone** identifies the active map's zone with the oldest
+known completed whole-zone mowing. A newer interrupted run does not replace its
+last completion. Edge-only, spot and patrol tasks do not count as whole-zone
+completion.
+
+The integration reads at most 30 recent session summaries. A summary is attributed
+only when its explicit map hash matches the current, uniquely identified,
+hash-verified map revision. Changing or editing a map can therefore make old
+history unknown. Zone numbers alone never establish map identity.
+
+Hydration reads up to five new summaries per pass, preserving successful reads
+when another download fails. Partial history is eligible for retry after 30
+seconds; complete history refreshes every five minutes. This optional work runs
+separately after schedule and other metadata refreshes, and remains owned by the
+coordinator for shutdown.
+
+The sensor is unavailable while history is incomplete or unattributed, or when
+any active zone has no known completion in the observed window. Absence from this
+window does not mean a zone has never been mowed. The attributes retain the known
+per-zone dates and expose `history_complete`, `history_attributable`,
+`observed_sessions` and `unknown_zone_ids`, alongside `zone_id`,
+`last_completed_at` and the ordered `zones` list. Invalid timestamps cannot claim
+completion or prevent sensor updates.
+
 ## Optional diagnostics
 
 Many reverse-engineering and validation helpers are disabled by default. Enable

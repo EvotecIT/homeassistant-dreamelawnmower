@@ -184,6 +184,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Zona cortada hace más tiempo"
+      },
       "state_name": {
         "name": "Estado",
         "state": {

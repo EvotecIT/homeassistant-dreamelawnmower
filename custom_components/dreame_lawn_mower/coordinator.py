@@ -71,6 +71,10 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
+from .dreame_lawn_mower_client.zone_mowing_history import (
+    ZoneMowingHistory,
+    async_get_zone_mowing_records,
+)
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview
 from .map_switch_refresh import (
     async_flush_restart_preview,
@@ -134,6 +138,7 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 WORK_LOG_TOTALS_REFRESH_INTERVAL = timedelta(minutes=15)
+ZONE_MOWING_HISTORY_REFRESH_INTERVAL = timedelta(minutes=5)
 DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
 PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS = 1
 BATCH_SCHEDULE_RESULT_COALESCE_SECONDS = 1.0
@@ -477,6 +482,8 @@ class DreameLawnMowerCoordinator(
         self.voice_settings_refreshed_at: datetime | None = None
         self.work_log_totals: DreameLawnMowerWorkLogTotals | None = None
         self.work_log_totals_refreshed_at: datetime | None = None
+        self.zone_mowing_sessions: ZoneMowingHistory | None = None
+        self.zone_mowing_sessions_refreshed_at: datetime | None = None
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_action_read_backoff = ScheduleActionReadBackoff()
@@ -556,6 +563,7 @@ class DreameLawnMowerCoordinator(
         self._last_device_settings_event_at: float | None = None
         self._last_mowing_preferences_event_at: float | None = None
         self._metadata_refresh_task: asyncio.Task[None] | None = None
+        self._zone_history_refresh_task: asyncio.Task[None] | None = None
         self._metadata_shutdown_close_task: asyncio.Task[None] | None = None
         self._client_close_task: asyncio.Task[None] | None = None
         self._metadata_refresh_semaphore = asyncio.Semaphore(
@@ -3344,6 +3352,41 @@ class DreameLawnMowerCoordinator(
         self.work_log_totals_refreshed_at = now
         return totals
 
+    async def async_refresh_zone_mowing_sessions(
+        self,
+        *,
+        force: bool = False,
+    ) -> ZoneMowingHistory | None:
+        """Refresh per-zone outcomes of recent sessions, reusing read summaries."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.zone_mowing_sessions is not None
+            and self.zone_mowing_sessions_refreshed_at is not None
+            and now - self.zone_mowing_sessions_refreshed_at
+            < (ZONE_MOWING_HISTORY_REFRESH_INTERVAL
+               if self.zone_mowing_sessions.complete else timedelta(seconds=30))
+        ):
+            return self.zone_mowing_sessions
+
+        try:
+            sessions = await async_get_zone_mowing_records(
+                self.client, known=self.zone_mowing_sessions
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh zone mowing history: %s", err)
+            self.zone_mowing_sessions = ZoneMowingHistory(
+                self.zone_mowing_sessions.sessions if self.zone_mowing_sessions else {},
+                self.zone_mowing_sessions.pending if self.zone_mowing_sessions else (),
+                history_available=False,
+            )
+            self.zone_mowing_sessions_refreshed_at = now
+            return self.zone_mowing_sessions
+
+        self.zone_mowing_sessions = sessions
+        self.zone_mowing_sessions_refreshed_at = now
+        return sessions
+
     async def async_refresh_voice_settings(
         self,
         *,
@@ -3455,6 +3498,7 @@ class DreameLawnMowerCoordinator(
     async def _async_stop_owned_tasks(self) -> None:
         """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
+        self._cancel_metadata_refresh()
         photo_owner = getattr(self, "_real_scene_owner", None)
         if photo_owner is not None:
             await photo_owner.async_close()
