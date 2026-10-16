@@ -23,7 +23,6 @@ from typing import Protocol
 
 import requests
 
-from .android_build_artifact import _HttpResponse, read_android_build_zip_entries
 from .video_runtime import DreameLawnMowerVideoRuntimeError
 from .xp2p_host_probe import probe_xp2p_host_worker
 from .xp2p_host_runtime import DreameLawnMowerXp2pHostAssets
@@ -34,7 +33,7 @@ from .xp2p_host_worker_blob import (
 )
 
 RUNTIME_LAYOUT_VERSION = "1"
-LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "4"
+LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "5"
 TENCENT_XP2P_VERSION = "2.4.50"
 TENCENT_XP2P_AAR_URL = (
     "https://repo.maven.apache.org/maven2/com/tencent/iot/thirdparty/android/"
@@ -119,58 +118,56 @@ AOSP_VNDK_FILES = {
     ),
 }
 
-LARGE_PAGE_ANDROID_BUILD_ID = "15885347"
-LARGE_PAGE_ANDROID_BUILD_TARGET = "aosp_cf_arm64_only_phone-userdebug"
-LARGE_PAGE_ANDROID_BUILD_ARTIFACT = "aosp_cf_arm64_only_phone-target_files-15885347.zip"
-LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE = 2_223_019_107
-LARGE_PAGE_ANDROID_BUILD_ARTIFACT_URL = (
-    "https://androidbuildinternal.googleapis.com/android/internal/build/v3/"
-    f"builds/{LARGE_PAGE_ANDROID_BUILD_ID}/"
-    f"{LARGE_PAGE_ANDROID_BUILD_TARGET}/attempts/latest/artifacts/"
-    f"{LARGE_PAGE_ANDROID_BUILD_ARTIFACT}/url"
+# Public Google SDK android-36 default ARM64 image, revision 2. The small
+# mirrored subset includes source provenance and the vendor's NOTICE file.
+LARGE_PAGE_ANDROID_RUNTIME_SOURCE = "android-36/default/arm64-v8a/revision-2"
+LARGE_PAGE_AOSP_BUNDLE_URL = (
+    "https://github.com/EvotecIT/homeassistant-dreamelawnmower/releases/download/"
+    "v0.2.153/aosp-android16-arm64-runtime-r02.tar.gz"
 )
-LARGE_PAGE_ANDROID_RUNTIME_APEX = "SYSTEM/apex/com.android.runtime.apex"
-LARGE_PAGE_ANDROID_RUNTIME_APEX_SHA256 = (
-    "6e320d2a2537a66dfb24812b84d5ecd3be536df91e534a6a472cfbc20ba8a8f9"
+LARGE_PAGE_AOSP_BUNDLE_SHA256 = (
+    "4a1bc1aa00ffe8d67564e44d2d448634d3b008000e021648131f9eb7ab11d2a8"
 )
 LARGE_PAGE_AOSP_RUNTIME_FILES = {
     "bin/linker64": (
         "bin/linker64",
-        "fdf3b18b361fbe341785694d2f3fea9319990fc4094da3b0c18ad8d9f093015a",
+        "30ed9bea070250e0b080c8a84d8398baab1b4eb95a90bfced82a94d5f235144b",
         0o755,
     ),
-    "lib64/bionic/libc.so": (
+    "lib/bionic/libc.so": (
         "lib/bionic/libc.so",
-        "ca50882f8f3dd01821378d529740096f177f272f68bcb701759c727d50bcdae6",
+        "d3f8599b8b3f00101a31f94ac170ceb5875ee8446c201cb18382b2e02df84301",
         0o644,
     ),
-    "lib64/bionic/libm.so": (
+    "lib/bionic/libm.so": (
         "lib/bionic/libm.so",
-        "fdc7c200502aed34a521437c6d47034f3e472262de6435e554ce5c52c034dc7d",
+        "44433149f62eeb8f09f38ecd3566683fac01a0f89de6ea6d15f6e4deca1ba4bc",
         0o644,
     ),
-    "lib64/bionic/libdl.so": (
+    "lib/bionic/libdl.so": (
         "lib/bionic/libdl.so",
-        "ce8156bace0ce59e220f69666bd1d6bb4ba275d66ec8052f04c674a415eb99fc",
+        "9f6447d910742a57b398a6a3f31746e02302ee9547da6d02757f001058a69df3",
         0o644,
     ),
-}
-LARGE_PAGE_AOSP_SYSTEM_FILES = {
-    "SYSTEM/lib64/ld-android.so": (
+    "lib/ld-android.so": (
         "lib/ld-android.so",
-        "5dbbe8389b417d3abea5f022cf630cf79bc6909b8404a8765c271978c7bd655e",
+        "39f9d2d397dc43df40d6d52432c15946bb2797d5907dbd0605cee28e26a43502",
+        0o644,
     ),
-    "SYSTEM/lib64/libc++.so": (
+    "lib/libc++.so": (
         "lib/libc++.so",
-        "cb118e98c74d3454858921123b9b51ba13df9cad7dfa141dd892c453661a4d78",
+        "2267f93b8b3c9d1967f1833d5f71c7312213c43bb291250cf772800763037fb9",
+        0o644,
     ),
-    "SYSTEM/lib64/liblog.so": (
+    "lib/liblog.so": (
         "lib/liblog.so",
-        "a3833794cd68202018930e130e238b206cd5a0c322050ccb8af8fe4e58f3e4b3",
+        "efcce90970ed85d61b9c05791ad76ff5f573035b1c0f7d2a3839063c7db5d1a0",
+        0o644,
     ),
-    "SYSTEM/lib64/libz.so": (
+    "lib/libz.so": (
         "lib/libz.so",
-        "0d85c66c4db2364393205cdb8adaed01ade4d89443347ea867c8a91c32d30270",
+        "45f9234190e46eac2484944def75893cadbed4f751deaed674ed0341c7a229b1",
+        0o644,
     ),
 }
 
@@ -192,6 +189,14 @@ _MANIFEST_NAME = "runtime-manifest.json"
 _INSTALL_LOCK = threading.Lock()
 _EXT4_EXTENTS_FLAG = 0x00080000
 _EXTENT_MAGIC = 0xF30A
+
+
+class _HttpResponse(Protocol):
+    @property
+    def status_code(self) -> int: ...
+
+    @property
+    def content(self) -> bytes: ...
 
 
 class _HttpClient(Protocol):
@@ -436,8 +441,8 @@ def _install_runtime(
             None if use_large_page_runtime else AOSP_RUNTIME_COMMIT
         ),
         "aosp_vndk_commit": None if use_large_page_runtime else AOSP_VNDK_COMMIT,
-        "android_build_id": (
-            LARGE_PAGE_ANDROID_BUILD_ID if use_large_page_runtime else None
+        "android_runtime_source": (
+            LARGE_PAGE_ANDROID_RUNTIME_SOURCE if use_large_page_runtime else None
         ),
         "qemu_version": QEMU_VERSION if architecture == "x86_64" else None,
         "files": _expected_installed_hashes(
@@ -497,29 +502,39 @@ def _install_large_page_aosp_runtime(
     http_client: _HttpClient,
     timeout: float,
 ) -> None:
-    entry_names = (
-        LARGE_PAGE_ANDROID_RUNTIME_APEX,
-        *LARGE_PAGE_AOSP_SYSTEM_FILES,
-    )
-    entries = read_android_build_zip_entries(
-        LARGE_PAGE_ANDROID_BUILD_ARTIFACT_URL,
-        entry_names,
-        expected_size=LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE,
-        http_client=http_client,
+    bundle = _download_verified(
+        http_client,
+        LARGE_PAGE_AOSP_BUNDLE_URL,
+        LARGE_PAGE_AOSP_BUNDLE_SHA256,
         timeout=timeout,
+        label="large-page AOSP runtime bundle",
     )
-    apex = entries[LARGE_PAGE_ANDROID_RUNTIME_APEX]
-    _require_hash(
-        apex,
-        LARGE_PAGE_ANDROID_RUNTIME_APEX_SHA256,
-        "large-page AOSP Bionic runtime",
-    )
-    _install_apex_files(target, apex, LARGE_PAGE_AOSP_RUNTIME_FILES)
-    for source, (
-        relative_target,
-        expected_hash,
-    ) in LARGE_PAGE_AOSP_SYSTEM_FILES.items():
-        _write_verified(target / relative_target, entries[source], expected_hash)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(bundle), mode="r:gz") as archive:
+            for source, (relative_target, expected_hash, mode) in (
+                LARGE_PAGE_AOSP_RUNTIME_FILES.items()
+            ):
+                member = archive.getmember(source)
+                if not member.isfile():
+                    raise DreameLawnMowerVideoRuntimeError(
+                        f"AOSP runtime bundle member was not a regular file: {source}."
+                    )
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise DreameLawnMowerVideoRuntimeError(
+                        f"AOSP runtime bundle omitted {source}."
+                    )
+                # Read only explicitly pinned members; never extract archive paths.
+                _write_verified(
+                    target / relative_target,
+                    stream.read(),
+                    expected_hash,
+                    mode=mode,
+                )
+    except (KeyError, tarfile.TarError, OSError) as err:
+        raise DreameLawnMowerVideoRuntimeError(
+            "AOSP runtime bundle was malformed or incomplete."
+        ) from err
 
 
 def _install_apex_files(
@@ -602,14 +617,7 @@ def _expected_installed_hashes(
         LARGE_PAGE_AOSP_RUNTIME_FILES if use_large_page_runtime else AOSP_RUNTIME_FILES
     )
     system_hashes = (
-        {
-            relative_target: expected_hash
-            for relative_target, expected_hash in (
-                LARGE_PAGE_AOSP_SYSTEM_FILES.values()
-            )
-        }
-        if use_large_page_runtime
-        else {
+        {} if use_large_page_runtime else {
             relative_target: expected_hash
             for relative_target, (_url, expected_hash) in AOSP_VNDK_FILES.items()
         }
