@@ -86,10 +86,18 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             if expired:
                 # Revoked identity permits labelled projection of the retained
                 # frame, never a new frame that could erase its history.
-                return self._position_tracker.resolve(
+                position = self._position_tracker.resolve(
                     map_index=map_index, geometry=geometry, contains=contains,
                     snapshot=self._latest_snapshot, allow_geometry_change=False,
                 )
+                if self._position_tracker.geometry == geometry:
+                    # A docked mower has no live session. Readers may still
+                    # judge against the frame the tracker accepted; the
+                    # observed frame and its fences stay untouched.
+                    self._position_frame = _PositionFrame(
+                        map_index, geometry, contains, charger,
+                    )
+                return position
             if self._runtime_geometry_map_index not in (None, map_index):
                 # Reading another slot cannot claim the verified current scope,
                 # even before that scope's first geometry read has completed.
@@ -125,7 +133,13 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             frame = self._position_frame
             if (
                 frame is None
-                or (frame.map_index, frame.geometry) != self._observed_map_geometry
+                # A newer committed frame supersedes the remembered one. Without
+                # a live session none is committed; the tracker's own geometry
+                # check in resolve() then decides.
+                or self._observed_map_geometry
+                not in (None, (frame.map_index, frame.geometry))
+                # The station is only valid in the frame the evidence is bound to.
+                or self._position_tracker.geometry != frame.geometry
                 or self._runtime_geometry_map_index not in (None, frame.map_index)
                 or self._runtime_live_geometry_identity not in (None, frame.geometry)
             ):
@@ -259,6 +273,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         with self._runtime_geometry_lock:
             self._retire_runtime_live_tracking_locked()
             self._observed_map_geometry = None
+            self._position_frame = None
             self._runtime_geometry_revision += 1
 
     def _retire_runtime_live_tracking_locked(self) -> None:

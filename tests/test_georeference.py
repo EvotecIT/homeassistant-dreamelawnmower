@@ -39,7 +39,8 @@ from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
 from custom_components.dreame_lawn_mower.option_updates import EntryUpdateSnapshot
 from tests.runtime_fixtures import runtime_hass
 
-from .test_app_action_live_map import publish, tracked_client
+from .test_app_action_live_map import native_maps, publish, tracked_client
+from .test_vector_map import _client
 
 # Calibration measured on a real lawn: the station at native (1160, -20).
 REFERENCE = {
@@ -350,4 +351,52 @@ def test_map_switch_retires_the_frame_until_it_is_observed_again() -> None:
 
     client.invalidate_runtime_map_geometry()
 
+    assert client.current_map_position() is None
+
+
+def test_docked_since_startup_without_telemetry_sits_on_the_station() -> None:
+    """Reported at home: docked since restart, no live session, station known."""
+    client = _client()
+    client._sync_get_vector_map_batch_data = lambda: {}
+    client._sync_get_current_app_map_index = lambda: 0
+    client._sync_get_app_maps = lambda **kwargs: native_maps()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    # The host has not verified a live map identity: no session since startup.
+    client.runtime_map_identity_expires_at = None
+    client._latest_snapshot = SimpleNamespace(
+        available=True, activity="docked", state="charging_completed",
+        charging=False, docked=True,
+    )
+    client.charger_position = ChargerPosition(40, 30, 0, 1)
+    assert client.current_map_position() is None
+
+    details = client._sync_get_vector_map_details()
+    position = client.current_map_position()
+
+    assert details["position_status"] == "known_dock"
+    assert (details["position_x"], details["position_y"]) == (40, 30)
+    assert position is not None
+    assert (position.x, position.y, position.status) == (40, 30, "known_dock")
+    assert position.details()["position_source"] == details["position_source"]
+
+
+def test_docked_reader_never_places_a_station_from_a_superseded_frame() -> None:
+    client = _client()
+    client._sync_get_vector_map_batch_data = lambda: {}
+    client._sync_get_current_app_map_index = lambda: 0
+    client._sync_get_app_maps = lambda **kwargs: native_maps()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    client.runtime_map_identity_expires_at = None
+    client._latest_snapshot = SimpleNamespace(
+        available=True, activity="docked", state="charging_completed", docked=True,
+    )
+    client.charger_position = ChargerPosition(40, 30, 0, 1)
+    client._sync_get_vector_map_details()
+    assert client.current_map_position() is not None
+
+    # Evidence bound to another geometry retires the remembered frame.
+    client._position_tracker._geometry = "f" * 64
+    assert client.current_map_position() is None
+    client._position_tracker._geometry = None
+    client.invalidate_runtime_map_geometry()
     assert client.current_map_position() is None
