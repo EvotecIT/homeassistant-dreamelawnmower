@@ -23,8 +23,9 @@ from .test_family_preferences_and_maintenance import _raw_preference
 
 
 @pytest.mark.parametrize("execute", [False, True])
+@pytest.mark.parametrize("preference_mode", [0, 1])
 def test_native_edge_reset_requires_fresh_context_and_preserves_sibling_counters(
-    monkeypatch, execute
+    monkeypatch, execute, preference_mode
 ):
     strings = cloud_strings("dreame")
     values = [100, -1, 300, 600, 77]
@@ -40,12 +41,17 @@ def test_native_edge_reset_requires_fresh_context_and_preserves_sibling_counters
             assert action["d"]["value"] == [100, -1, 300, 0, 77]
             values[:] = action["d"]["value"]
             data = {"value": values.copy()}
+        elif action["t"] == "PRE":
+            data = _raw_preference(2)
+            data[2] = action["d"]["region"]
         else:
             data = {
                 "CMS": {"value": values.copy()},
                 "MAPL": [[0, 1, 1, 1, 0]],
-                "PREI": {"type": 0, "ver": [[0, 8]]},
-                "PRE": _raw_preference(2),
+                "PREI": {
+                    "type": preference_mode,
+                    "ver": [[0, 8]] if preference_mode == 0 else [[11, 8], [12, 8]],
+                },
             }[action["t"]]
         return web.json_response(
             {"code": 0, "data": {"result": {"out": [{"r": 0, "d": data}]}}}

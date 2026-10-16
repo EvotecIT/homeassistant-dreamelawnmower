@@ -175,15 +175,39 @@ def _read_edge_trimmer_context(
         entry = next((item for item in maps if item.get("idx") == index), None)
         if not isinstance(entry, Mapping) or not entry.get("available"):
             return result
-        whole_map = next(
+        # Custom mode advertises zones rather than area 0. Each surviving PRE
+        # record already passed identity and revision checks in the shared reader.
+        # An installed mode in any current zone establishes the device attachment;
+        # unavailable/unknown siblings must not replace that positive evidence.
+        records = [
+            item
+            for item in entry.get("preferences", [])
+            if isinstance(item, Mapping)
+            and (
+                (entry.get("mode") == 0 and item.get("area_id") == 0)
+                or (
+                    entry.get("mode") == 1
+                    and type(item.get("area_id")) is int
+                    and item["area_id"] > 0
+                )
+            )
+        ]
+        modes = [item.get("edge_cutting_attachment") for item in records]
+        mode = next(
             (
-                item
-                for item in entry.get("preferences", [])
-                if isinstance(item, Mapping) and item.get("area_id") == 0
+                candidate
+                for candidate in (2, 1)
+                if any(type(value) is int and value == candidate for value in modes)
             ),
             None,
         )
-        mode = whole_map.get("edge_cutting_attachment") if whole_map else None
+        if (
+            mode is None
+            and modes
+            and not entry.get("errors")
+            and all(type(value) is int and value == 0 for value in modes)
+        ):
+            mode = 0
         if type(mode) is int and mode in (0, 1, 2):
             result.update(
                 maintenance_status_from_app_data(

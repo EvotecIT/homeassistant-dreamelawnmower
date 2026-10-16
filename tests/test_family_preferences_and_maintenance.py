@@ -252,3 +252,64 @@ def test_unproven_attachment_context_cannot_reset_edge_counter(problem):
             model=status["model"],
             edge_trimmer_mode=status.get("edge_trimmer_mode"),
         )
+
+
+@pytest.mark.parametrize(
+    ("zone_modes", "expected"),
+    [([1, 2], 2), ([0, 1], 1), ([0, 2], 2), ([0, 0], 0), ([7, 7], None)],
+)
+def test_custom_zone_preferences_establish_only_validated_attachment_context(
+    zone_modes,
+    expected,
+):
+    def read(action, **kwargs):
+        command = action["t"]
+        if command == "PRE":
+            area = action["d"]["region"]
+            data = _raw_preference(zone_modes[area - 11])
+            data[2] = area
+        else:
+            data = {
+                "CMS": {"value": [100, -1, 100, 600, 99]},
+                "MAPL": [[0, 1, 1, 1, 0]],
+                "PREI": {"type": 1, "ver": [[11, 8], [12, 8]]},
+            }[command]
+        return {"m": "r", "r": 0, "d": data}
+
+    status = run_app_read(read_maintenance(model="dreame.mower.q2501c"), read)
+    assert status.get("edge_trimmer_mode") == expected
+    assert (maintenance_item_status(status, "edge_trimmer") is not None) is (
+        expected in (1, 2)
+    )
+    if expected in (1, 2):
+        assert reset_cms_counter(
+            status["raw_cms"],
+            "edge_trimmer",
+            model=status["model"],
+            edge_trimmer_mode=status["edge_trimmer_mode"],
+        ) == [100, -1, 100, 0, 99]
+
+
+@pytest.mark.parametrize("problem", ["stale_revision", "wrong_map"])
+def test_custom_positive_attachment_needs_its_own_current_revision_and_map(problem):
+    def read(action, **kwargs):
+        command = action["t"]
+        if command == "PRE":
+            area = action["d"]["region"]
+            data = _raw_preference(2 if area == 11 else 0)
+            data[2] = area
+            if area == 11:
+                data[0 if problem == "stale_revision" else 1] = (
+                    7 if problem == "stale_revision" else 1
+                )
+        else:
+            data = {
+                "CMS": {"value": [100, -1, 100, 600]},
+                "MAPL": [[0, 1, 1, 1, 0]],
+                "PREI": {"type": 1, "ver": [[11, 8], [12, 8]]},
+            }[command]
+        return {"m": "r", "r": 0, "d": data}
+
+    status = run_app_read(read_maintenance(model="dreame.mower.q2501c"), read)
+    assert status["available"] is True
+    assert maintenance_item_status(status, "edge_trimmer") is None

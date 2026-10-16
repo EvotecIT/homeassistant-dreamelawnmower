@@ -19,9 +19,9 @@ class AppModelProfile:
 
     camera: bool
     pin_code: bool
-    map_learning: bool = False
-    two_eye: bool = False
-    cruise_history: bool = False
+    map_learning: bool | None = None
+    two_eye: bool | None = None
+    cruise_history: bool | None = None
     all_wheel_drive: bool | None = None
     built_in_cellular: bool | None = None
     ai_mapping: bool | None = None
@@ -41,13 +41,49 @@ class AppModelProfile:
         }
 
 
+# The researched local_config modules explicitly set these false flags; they
+# are observed values rather than defaults for unresearched profile fields.
 APP_MODEL_PROFILES: Final[dict[str, AppModelProfile]] = {
-    "p2255": AppModelProfile(camera=False, pin_code=True),
-    "g2422": AppModelProfile(camera=False, pin_code=True),
-    "g2540": AppModelProfile(camera=False, pin_code=True),
-    "g2408": AppModelProfile(camera=True, pin_code=True),
-    "g2568": AppModelProfile(camera=True, pin_code=True, built_in_cellular=True),
+    "p2255": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=False,
+        pin_code=True,
+    ),
+    "g2422": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=False,
+        pin_code=True,
+    ),
+    "g2540": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=False,
+        pin_code=True,
+    ),
+    "g2408": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=True,
+        pin_code=True,
+    ),
+    "g2568": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=True,
+        pin_code=True,
+        built_in_cellular=True,
+    ),
     "q2501": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
         camera=True,
         pin_code=True,
         all_wheel_drive=True,
@@ -55,6 +91,9 @@ APP_MODEL_PROFILES: Final[dict[str, AppModelProfile]] = {
         ai_mapping=True,
     ),
     "g2541": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
         camera=True,
         pin_code=True,
         all_wheel_drive=True,
@@ -75,8 +114,20 @@ APP_MODEL_PROFILES: Final[dict[str, AppModelProfile]] = {
         two_eye=True,
         cruise_history=True,
     ),
-    "g2529": AppModelProfile(camera=True, pin_code=True),
-    "g2538": AppModelProfile(camera=True, pin_code=True),
+    "g2529": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=True,
+        pin_code=True,
+    ),
+    "g2538": AppModelProfile(
+        map_learning=False,
+        two_eye=False,
+        cruise_history=False,
+        camera=True,
+        pin_code=True,
+    ),
 }
 
 

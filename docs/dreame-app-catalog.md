@@ -102,6 +102,11 @@ remain distinct from explicit false values. A camera flag does not establish
 live-video provisioning, and an app flag does not authorize a device command.
 Runtime and device-advertised evidence retain their stronger precedence.
 
+The researched local configuration modules explicitly set the map-learning,
+dual-camera and cruise-history flags to false outside the two-eye profiles.
+Those values are recorded explicitly; omitted fields in a new or unresearched
+profile stay unknown.
+
 For a previously unnamed variant, a useful sanitized report includes the full
 raw model ID, vendor product name, account region, firmware and hardware
 versions, advertised capabilities and the affected read-only response. Exclude
@@ -146,9 +151,12 @@ profiles retain the 3,600-minute interval. Negative counters represent
 unavailable data rather than fresh consumables.
 
 On `q2501`, CMS slot 3 is a 6,000-minute edge-trimmer counter. The client confirms
-the installed attachment using a validated preference read on the active map
+the installed attachment using validated preference reads on the active map
 before exposing or resetting that counter. This optional context read has a
-five-second budget. If it fails, ordinary CMS counters remain available and
+five-second budget. Global mode uses area 0; custom mode can confirm installation
+through any current, validated zone record with mode 1 or 2. Unknown, wrong-map
+or stale-revision records do not establish installation. If context fails,
+ordinary CMS counters remain available and
 the extra slot stays diagnostic. Resetting a counter preserves every other
 slot, including unknown extensions. No maintenance reset is performed by
 discovery or by a read-only probe.

@@ -5,6 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.dreame_lawn_mower.debug import _collect_triage_summary
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    app_model_profiles,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.compatibility import (
     build_compatibility_summary,
 )
@@ -98,12 +101,30 @@ def test_absent_and_false_app_flags_remain_distinct_from_unsupported():
     assert result["camera_hardware"]["state"] == "unknown"
     assert result["all_wheel_drive"]["app_profile_flag"] is None
     assert result["all_wheel_drive"]["source"] == "unknown"
+    for feature in ("map_learning", "dual_camera_ui", "cruise_history_ui"):
+        assert result[feature]["app_profile_flag"] is False
+        assert result[feature]["source"] == "app_profile"
     assert (
         resolve_feature_capability(
             "live_video", descriptor=SimpleNamespace(model="dreame.mower.p2255")
         ).state
         == "unsupported"
     )
+
+
+def test_omitted_fields_in_a_new_profile_have_no_asserted_evidence(monkeypatch):
+    monkeypatch.setitem(
+        app_model_profiles.APP_MODEL_PROFILES,
+        "g9999",
+        app_model_profiles.AppModelProfile(camera=True, pin_code=True),
+    )
+    report = profile_capability_evidence(
+        descriptor=SimpleNamespace(model="dreame.mower.g9999a"),
+    )
+    for feature in ("map_learning", "dual_camera_ui", "cruise_history_ui"):
+        assert report[feature]["app_profile_flag"] is None
+        assert report[feature]["source"] == "unknown"
+        assert report[feature]["app_profile_builds"] == []
 
 
 def test_runtime_capability_evidence_precedes_app_ui_flags():

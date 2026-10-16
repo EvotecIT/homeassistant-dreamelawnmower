@@ -251,7 +251,9 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     assert result["maps"][0]["preferences"][0]["mowing_direction_degrees"] == 40
     assert result["maps"][0]["preferences"][0]["edge_mowing_walk_mode_name"] == "side"
     assert result["maps"][0]["preferences"][0]["turning_method_name"] == "efficient"
-    assert result["maps"][0]["preferences"][0]["edge_cutting_attachment"] == 0
+    attachment = result["maps"][0]["preferences"][0]["edge_cutting_attachment"]
+    assert type(attachment) is int
+    assert attachment == 0
     assert result["maps"][0]["preferences"][0]["obstacle_avoidance_ai_classes"] == [
         "people",
         "animals",
