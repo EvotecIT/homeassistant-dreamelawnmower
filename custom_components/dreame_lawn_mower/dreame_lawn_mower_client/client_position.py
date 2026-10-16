@@ -24,6 +24,7 @@ def vector_map_position(
         geometry=map_position_identity(vector_map),
         contains=lambda x, y: position_within_vector_map(vector_map, (x, y)),
         expected_generation=expected_generation,
+        charger=vector_map.charger,
     )
 
 

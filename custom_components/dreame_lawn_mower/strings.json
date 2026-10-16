@@ -178,6 +178,11 @@
     }
   },
   "entity": {
+    "device_tracker": {
+      "gps_position": {
+        "name": "GPS position"
+      }
+    },
     "event": {
       "person_detection": {
         "name": "Person detection"
@@ -234,6 +239,14 @@
     }
   },
   "services": {
+    "set_georeference": {
+      "name": "Set map georeference",
+      "description": "Store the calibration that converts native map coordinates to GPS: one map point tied to its latitude and longitude, and the compass heading of the map's +Y axis. Does not reload the integration."
+    },
+    "clear_georeference": {
+      "name": "Clear map georeference",
+      "description": "Remove the stored map-to-GPS calibration. The GPS position becomes unknown until a new calibration is set."
+    },
     "start_scheduled_mowing": {
       "name": "Start guarded scheduled mowing",
       "description": "Refresh eligibility and start an explicit task, or skip immediately with a reason. Requires a docked, online mower, known inactive task and rain-delay state, sufficient battery, and disabled native schedules on every map. Does not queue a run or resume an existing task. Returns per-entity status and reason when response data is requested."

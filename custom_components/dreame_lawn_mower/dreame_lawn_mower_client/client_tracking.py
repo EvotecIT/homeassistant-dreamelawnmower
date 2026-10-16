@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,7 +11,11 @@ from typing import TYPE_CHECKING
 
 from .client_transport import _DreameLawnMowerClientTransport
 from .models import DreameLawnMowerStatusBlob
-from .position_tracking import POSITION_MAX_AGE_SECONDS, position_timestamp
+from .position_tracking import (
+    POSITION_MAX_AGE_SECONDS,
+    position_at_charger,
+    position_timestamp,
+)
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
@@ -28,6 +33,20 @@ class _RuntimeTrailCheckpoint:
     suspended_at: float
 
 
+@dataclass(frozen=True, slots=True)
+class _PositionFrame:
+    """The last map frame a position was judged against, kept for readers.
+
+    It lets consumers that never request a map read judge new telemetry with
+    the same tracker, containment test and station as the map camera.
+    """
+
+    map_index: int
+    geometry: str
+    contains: Callable[[int, int], bool]
+    charger: tuple[int, int] | None
+
+
 class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
 
@@ -39,6 +58,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     _runtime_live_task_id: int | None
     _runtime_trail_checkpoint: _RuntimeTrailCheckpoint | None = None
     _runtime_live_packet_admitted: bool = False
+    _position_frame: _PositionFrame | None = None
     _runtime_session_active: bool | None
     _last_runtime_track_blob_hex: str | None
     _runtime_live_geometry_identity: str | None
@@ -57,6 +77,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     def _observe_runtime_geometry(
         self, *, map_index: int, geometry: str,
         contains: Callable[[int, int], bool], expected_generation: int | None = None,
+        charger: tuple[int, int] | None = None,
     ) -> MowerPosition | None:
         """Commit one current observation atomically, rejecting overtaken reads."""
         with self._runtime_geometry_lock:
@@ -83,10 +104,41 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 self._observed_map_geometry = frame
                 self._runtime_geometry_revision += 1
             self._bind_runtime_live_geometry(map_index, geometry)
+            self._position_frame = _PositionFrame(
+                map_index, geometry, contains, charger,
+            )
             return self._position_tracker.resolve(
                 map_index=map_index, geometry=geometry, contains=contains,
                 snapshot=self._latest_snapshot,
             )
+
+    def current_map_position(self) -> MowerPosition | None:
+        """Judge the latest telemetry against the last observed map frame.
+
+        Map reads observe the frame; telemetry callbacks feed the tracker. This
+        reader joins both without a cloud read or an image request, using the
+        same tracker, containment test and station as the map camera, so a
+        position consumer cannot depend on someone viewing the map.
+        """
+        with self._runtime_geometry_lock:
+            self._expire_runtime_live_tracking()
+            frame = self._position_frame
+            if (
+                frame is None
+                or (frame.map_index, frame.geometry) != self._observed_map_geometry
+                or self._runtime_geometry_map_index not in (None, frame.map_index)
+                or self._runtime_live_geometry_identity not in (None, frame.geometry)
+            ):
+                return None
+            position = self._position_tracker.resolve(
+                map_index=frame.map_index, geometry=frame.geometry,
+                contains=frame.contains, snapshot=self._latest_snapshot,
+                allow_geometry_change=False,
+            )
+            snapshot = self._latest_snapshot
+        return position_at_charger(
+            position, snapshot, frame.charger, frame.map_index, time.time()
+        )
 
     def _bind_runtime_live_geometry(self, map_index: int, geometry: str) -> None:
         """Discard trails when a verified slot's coordinate frame is replaced."""

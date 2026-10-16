@@ -24,6 +24,7 @@ from .const import (
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
     CONF_DID,
+    CONF_GEOREFERENCE,
     CONF_HOST,
     CONF_MAC,
     CONF_MAP_BACKGROUND,
@@ -388,6 +389,9 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 options[CONF_MAP_ROTATION] = int(options[CONF_MAP_ROTATION])
             if CONF_MAP_ROTATIONS in self._entry_options:
                 options[CONF_MAP_ROTATIONS] = self._entry_options[CONF_MAP_ROTATIONS]
+            # Set by an action, not by this form: saving the form keeps it.
+            if CONF_GEOREFERENCE in self._entry_options:
+                options[CONF_GEOREFERENCE] = self._entry_options[CONF_GEOREFERENCE]
             if self._entry_options.get(CONF_MAP_RESTART_PREVIEW) and not options.get(
                 CONF_MAP_RESTART_PREVIEW
             ):

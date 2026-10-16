@@ -64,6 +64,11 @@
     "xp2p_runner_mode": {"options": {"process": "Dauerhafter Prozess", "one-shot": "Einmaliger Befehl"}}
   },
   "entity": {
+    "device_tracker": {
+      "gps_position": {
+        "name": "GPS-Position"
+      }
+    },
     "event": {
       "person_detection": {
         "name": "Personenerkennung"
@@ -87,6 +92,14 @@
     }
   },
   "services": {
+    "set_georeference": {
+      "name": "Karte georeferenzieren",
+      "description": "Speichert die Kalibrierung, die native Kartenkoordinaten in GPS umrechnet: ein Kartenpunkt mit seinem Breiten- und Längengrad sowie die Kompassrichtung der +Y-Achse der Karte. Lädt die Integration nicht neu."
+    },
+    "clear_georeference": {
+      "name": "Georeferenzierung löschen",
+      "description": "Entfernt die gespeicherte Karten-GPS-Kalibrierung. Die GPS-Position ist unbekannt, bis eine neue Kalibrierung gesetzt wird."
+    },
     "start_scheduled_mowing": {
       "name": "Geplantes Mähen mit Sicherheitsprüfung starten",
       "description": "Prüft die Bedingungen und startet die Aufgabe oder überspringt sie mit Begründung. Erfordert einen online angedockten Mäher, eine inaktive Aufgabe, bekannten Regenstatus, genügend Akku und deaktivierte native Zeitpläne auf allen Karten. Keine Warteschlange oder Fortsetzung."

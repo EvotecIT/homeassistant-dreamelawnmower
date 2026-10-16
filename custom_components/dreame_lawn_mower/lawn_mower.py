@@ -58,6 +58,11 @@ from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
 )
 from .entity import DreameLawnMowerEntity
+from .georeference import (
+    Georeference,
+    register_georeference_services,
+    store_georeference,
+)
 from .mowing_command import (
     async_run_mowing_command as _async_run_targeted_mowing_command,
 )
@@ -251,6 +256,7 @@ async def async_setup_entry(
         },
         "async_plan_zone_mowing_preference_update",
     )
+    register_georeference_services(platform)
     async_add_entities([DreameLawnMower(coordinator)])
 
 
@@ -844,6 +850,16 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await _async_run_targeted_mowing_command(
             self.coordinator.async_switch_current_map(normalized_map_index)
         )
+
+    async def async_set_georeference(self, **fields: Any) -> None:
+        """Store the map-to-GPS calibration without reloading the mower."""
+        store_georeference(
+            self.hass, self.coordinator.entry, Georeference.parse(fields)
+        )
+
+    async def async_clear_georeference(self) -> None:
+        """Remove the map-to-GPS calibration without reloading the mower."""
+        store_georeference(self.hass, self.coordinator.entry, None)
 
     async def async_cancel_current_task(self) -> None:
         """End the current mower task without returning to the dock."""
