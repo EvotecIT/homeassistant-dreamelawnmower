@@ -48,6 +48,7 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
         self._attr_unique_id = f"{self._descriptor.unique_id}_gps_position"
         self._position_status: str | None = None
         self._position_observed_at: str | None = None
+        self._written_available: bool | None = None
         self._update_position()
 
     @property
@@ -57,7 +58,14 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Describe the evidence behind the published coordinates."""
+        """Describe the evidence behind the published coordinates.
+
+        ``position_observed_at`` is when the evidence for the published state
+        was first seen. It is not refreshed while the location and status stay
+        the same (a docked mower), so it is not a freshness signal: the status
+        is. ``current`` expires on its own when telemetry stops and
+        ``known_dock`` lasts only while the mower reports being docked.
+        """
         return {
             "position_status": self._position_status,
             "position_observed_at": self._position_observed_at,
@@ -65,27 +73,34 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        self._update_position()
-        super()._handle_coordinator_update()
+        # Repeated identical evidence would write one history row per poll.
+        if self._update_position() or self.available != self._written_available:
+            super()._handle_coordinator_update()
 
-    def _update_position(self) -> None:
+    def async_write_ha_state(self) -> None:
+        """Remember what was last published to suppress identical writes."""
+        self._written_available = self.available
+        super().async_write_ha_state()
+
+    def _update_position(self) -> bool:
+        """Recompute the position, returning whether the published one changed."""
         georeference = entry_georeference(self.coordinator.entry)
         reader = getattr(self.coordinator.client, "current_map_position", None)
         position = reader() if callable(reader) else None
+        latitude = longitude = None
+        observed_at = None
         if position is None or position.status not in CURRENT_POSITION_STATUSES:
-            self._attr_latitude = self._attr_longitude = None
-            self._position_status = (
-                position.status if position is not None else "unavailable"
-            )
-            self._position_observed_at = None
-            return
-        self._position_status = position.status
-        self._position_observed_at = datetime.fromtimestamp(
-            position.observed_at, UTC
-        ).isoformat()
-        if georeference is None:
-            self._attr_latitude = self._attr_longitude = None
-            return
-        self._attr_latitude, self._attr_longitude = georeference.to_gps(
-            position.x, position.y
-        )
+            status = position.status if position is not None else "unavailable"
+        else:
+            status = position.status
+            observed_at = datetime.fromtimestamp(position.observed_at, UTC).isoformat()
+            if georeference is not None:
+                latitude, longitude = georeference.to_gps(position.x, position.y)
+        if (latitude, longitude, status) == (
+            self._attr_latitude, self._attr_longitude, self._position_status
+        ):
+            return False
+        self._attr_latitude, self._attr_longitude = latitude, longitude
+        self._position_status = status
+        self._position_observed_at = observed_at
+        return True

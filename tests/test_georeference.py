@@ -400,3 +400,42 @@ def test_docked_reader_never_places_a_station_from_a_superseded_frame() -> None:
     client._position_tracker._geometry = None
     client.invalidate_runtime_map_geometry()
     assert client.current_map_position() is None
+
+
+def test_tracker_writes_only_when_location_status_or_availability_change(
+    monkeypatch,
+) -> None:
+    from homeassistant.helpers.entity import Entity
+
+    tracker, coordinator = _tracker(None, {CONF_GEOREFERENCE: REFERENCE})
+    writes = []
+    # Stand in for HA's state machine, keeping the tracker's own bookkeeping.
+    monkeypatch.setattr(Entity, "async_write_ha_state", lambda self: writes.append(
+        (self.latitude, self.extra_state_attributes["position_observed_at"])
+    ))
+    reader = coordinator.client.current_map_position
+
+    def dock(at):
+        reader.return_value = MowerPosition(1160, -20, None, at, 0, "known_dock")
+        tracker._handle_coordinator_update()
+
+    dock(1000.0)
+    first = writes[-1]
+    for later in (1030.0, 1060.0, 1090.0):
+        dock(later)
+    # Docked, the station is re-asserted every poll: one write, not four.
+    assert writes == [first]
+    assert first[1] == datetime.fromtimestamp(1000.0, UTC).isoformat()
+
+    reader.return_value = MowerPosition(5000, 2000, None, 1100.0, 0, "current")
+    tracker._handle_coordinator_update()
+    assert len(writes) == 2
+    reader.return_value = MowerPosition(5000, 2000, None, 1100.0, 0, "last_known")
+    tracker._handle_coordinator_update()
+    assert len(writes) == 3 and writes[-1][0] is None
+
+    coordinator.last_update_success = False
+    tracker._handle_coordinator_update()
+    assert len(writes) == 4
+    tracker._handle_coordinator_update()
+    assert len(writes) == 4
