@@ -117,7 +117,7 @@ state; it does not become a saved telemetry observation. Station reports are kep
 in the bounded recent-session cache and selected again when maps change.
 
 Charging alone does not supply coordinates. Without a matching station report or
-valid saved dock observation, position-free heartbeats show **Docked · map position
+valid saved dock observation, position-free heartbeats show **Docked Â· map position
 unavailable**. The integration does not use a maintenance point or the last route
 endpoint as an invented dock location. Camera attributes expose `position_status`,
 `position_source`, and `position_observed_at` for the same evidence.
