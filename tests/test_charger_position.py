@@ -11,9 +11,13 @@ from PIL import Image
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_projection import (  # noqa: E501
     vector_map_projection,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (  # noqa: E501
+    DreameLawnMowerMapView,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
     parse_batch_vector_map,
     render_vector_map_png,
+    vector_map_to_details,
     with_charger,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_history import (  # noqa: E501
@@ -22,6 +26,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_hi
     async_get_zone_mowing_records,
     charger_position,
 )
+from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 
 from .test_session_photos import _client, _Cloud, _record
 from .test_vector_map import _batch_payload
@@ -146,3 +151,21 @@ def test_interactive_overlay_places_a_docked_mower_on_the_station() -> None:
 
     away = mowing_map_overlay(scene, None, map_index=scene.map_index, active=False)
     assert away["position"] is None
+
+
+def test_camera_exposes_the_station_in_mower_position_units() -> None:
+    vector_map = parse_batch_vector_map(_batch_payload())
+
+    def attributes(details: dict) -> dict:
+        view = DreameLawnMowerMapView(source="batch_vector_map", details=details)
+        return map_camera_attributes(
+            view, image_cached=True, refreshed_at=None, last_error=None
+        )
+
+    known = attributes(
+        vector_map_to_details(with_charger(vector_map, ChargerPosition(119, 50, 0, 1)))
+    )
+    assert (known["charger_x"], known["charger_y"]) == (119, 50)
+
+    unknown = attributes(vector_map_to_details(vector_map))
+    assert (unknown["charger_x"], unknown["charger_y"]) == (None, None)

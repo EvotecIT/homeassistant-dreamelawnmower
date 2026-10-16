@@ -627,6 +627,9 @@ def vector_map_to_details(
         "pathway_count": len(vector_map.paths),
         "contour_count": len(vector_map.contours),
         "contour_ids": contour_ids,
+        # Same map units as the mower position, so both can share one transform.
+        "charger_x": None if vector_map.charger is None else vector_map.charger[0],
+        "charger_y": None if vector_map.charger is None else vector_map.charger[1],
         "clean_point_count": len(vector_map.clean_points),
         "clean_point_ids": list(vector_map.clean_point_ids),
         "clean_points": [

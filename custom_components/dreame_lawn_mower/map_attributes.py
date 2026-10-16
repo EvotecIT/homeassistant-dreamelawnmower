@@ -128,6 +128,8 @@ def map_camera_attributes(
             "position_source": details.get("position_source"),
             "position_observed_at": details.get("position_observed_at"),
             "docked": details.get("docked"),
+            "charger_x": details.get("charger_x"),
+            "charger_y": details.get("charger_y"),
             "map_has_live_path": details.get("has_live_path"),
             "map_available_vector_map_count": details.get("available_map_count"),
             "map_available_vector_maps": details.get("available_maps"),
