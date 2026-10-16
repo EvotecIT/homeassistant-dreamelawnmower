@@ -72,6 +72,7 @@ class MowerPosition:
     observed_at: float
     map_index: int
     status: str = "current"
+    source: str | None = None
 
     def details(self) -> dict[str, Any]:
         """Metadata shared by camera and interactive-map consumers."""
@@ -80,10 +81,37 @@ class MowerPosition:
             "position_observed_at": datetime.fromtimestamp(
                 self.observed_at, UTC
             ).isoformat(),
-            "position_source": "observed_docked_pose"
-            if self.status == "known_dock"
-            else "runtime_telemetry",
+            "position_source": self.source
+            or (
+                "observed_docked_pose"
+                if self.status == "known_dock"
+                else "runtime_telemetry"
+            ),
         }
+
+
+CHARGER_SOURCE = "reported_charging_station"
+
+
+def position_at_charger(
+    position: MowerPosition | None,
+    snapshot: Any,
+    charger: tuple[int, int] | None,
+    map_index: int,
+    now: float,
+) -> MowerPosition | None:
+    """A docked mower sits on its reported station, not where it was last seen.
+
+    Charging produces no fresh pose, so the retained one is wherever the mower
+    was observed on its way back. The station reported by task summaries is the
+    better evidence while the state says the mower is docked.
+    """
+    if charger is None or not snapshot_is_docked(snapshot):
+        return position
+    # The docked state is the fresh evidence; the station gives its location.
+    return MowerPosition(
+        charger[0], charger[1], None, now, map_index, "known_dock", CHARGER_SOURCE
+    )
 
 
 class MowerPositionTracker:
@@ -125,10 +153,12 @@ class MowerPositionTracker:
                 return None
             return {
                 "geometry": self._geometry,
-                "last": asdict(replace(last, status="last_known", heading=None))
+                "last": _checkpoint_record(
+                    replace(last, status="last_known", heading=None)
+                )
                 if last
                 else None,
-                "dock": asdict(dock) if dock else None,
+                "dock": _checkpoint_record(dock) if dock else None,
             }
 
     def restore_checkpoint(self, record: Any, *, now: datetime | None = None) -> None:
@@ -281,6 +311,13 @@ class MowerPositionTracker:
                 ):
                     return replace(self._last, status="last_known", heading=None)
             return None
+
+
+def _checkpoint_record(position: MowerPosition) -> dict[str, Any]:
+    """Persist the stable pose fields; the evidence source is runtime-only."""
+    record = asdict(position)
+    record.pop("source", None)
+    return record
 
 
 def _checkpoint_position(record: Any, status: str, now: float) -> MowerPosition | None:

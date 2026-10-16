@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -15,7 +16,7 @@ from .client_map_helpers import (
 )
 from .client_position import apply_position_metadata, vector_map_position
 from .models import DreameLawnMowerMapView
-from .position_tracking import map_position_identity
+from .position_tracking import map_position_identity, position_at_charger
 from .vector_map import (
     DreameLawnMowerVectorMap,
     _parse_drawable_batch_vector_map,
@@ -160,6 +161,10 @@ def geometry_map_view(
         segments = (
             client._runtime_live_track_segments
             if runtime_context_matches and not history_only else ()
+        )
+    if not history_only:
+        position = position_at_charger(
+            position, snapshot, vector_map.charger, vector_map.map_index, time.time()
         )
     if session_active is False and not history_only:
         vector_map.mow_paths = ()

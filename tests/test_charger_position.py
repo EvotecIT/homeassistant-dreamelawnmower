@@ -98,3 +98,51 @@ def test_station_is_drawn_inside_the_frame_only() -> None:
     )
     px, py = (round(value) for value in projection.point(119, 50))
     assert marked.getpixel((px, py)) != plain.getpixel((px, py))
+
+
+def test_docked_mower_is_drawn_on_the_reported_station() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.position_tracking import (  # noqa: E501
+        MowerPosition,
+        position_at_charger,
+    )
+
+    last_seen = MowerPosition(10, 20, 90.0, 100.0, 0, "last_known")
+    docked = SimpleNamespace(available=True, activity="docked", docked=True)
+    mowing = SimpleNamespace(available=True, activity="mowing", docked=False)
+
+    at_station = position_at_charger(last_seen, docked, (119, 50), 0, 500.0)
+    assert (at_station.x, at_station.y, at_station.status) == (119, 50, "known_dock")
+    assert at_station.observed_at == 500.0
+    assert at_station.details()["position_source"] == "reported_charging_station"
+    assert position_at_charger(last_seen, mowing, (119, 50), 0, 500.0) is last_seen
+    assert position_at_charger(last_seen, docked, None, 0, 500.0) is last_seen
+
+
+def test_interactive_overlay_places_a_docked_mower_on_the_station() -> None:
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (  # noqa: E501
+        map_render_style,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (  # noqa: E501
+        build_mowing_map_scene,
+        mowing_map_overlay,
+    )
+
+    vector_map = with_charger(
+        parse_batch_vector_map(_batch_payload()), ChargerPosition(119, 50, 0, 1)
+    )
+    scene = build_mowing_map_scene(vector_map, style=map_render_style())
+    assert scene.charger == (119, 50)
+
+    overlay = mowing_map_overlay(
+        scene, None, map_index=scene.map_index, active=False, docked=True
+    )
+    px, py = scene.projection.point(119, 50)
+    assert overlay["position"]["x"] == px
+    assert overlay["position"]["y"] == py
+    assert overlay["position_status"] == "known_dock"
+    assert overlay["position_source"] == "reported_charging_station"
+
+    away = mowing_map_overlay(scene, None, map_index=scene.map_index, active=False)
+    assert away["position"] is None
