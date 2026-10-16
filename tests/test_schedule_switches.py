@@ -18,7 +18,10 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DreameLawnMowerCommandRejectedError,
 )
-from custom_components.dreame_lawn_mower.switch import schedule_plan_entries
+from custom_components.dreame_lawn_mower.switch import (
+    schedule_plan_entries,
+    schedule_switch_entries,
+)
 
 
 @pytest.mark.parametrize("upload", [False, True])
@@ -115,6 +118,42 @@ def test_schedule_plan_entries_ignore_unavailable_or_malformed_plans() -> None:
         )
         == []
     )
+
+
+def test_schedule_switch_entries_skip_empty_plan_slots() -> None:
+    """Unused slots (no name, no task, disabled) stay hidden, like the app."""
+    schedules = {
+        "schedules": [
+            {
+                "idx": 0,
+                "label": "map 0",
+                "available": True,
+                "plans": [
+                    {"plan_id": 0, "enabled": False, "name": "", "weeks": []},
+                    {"plan_id": 1, "enabled": False, "weeks": [{"tasks": []}]},
+                    {"plan_id": 2, "enabled": True, "weeks": []},
+                    {"plan_id": 3, "enabled": False, "name": "Weekend"},
+                    {
+                        "plan_id": 4,
+                        "enabled": False,
+                        "weeks": [
+                            {
+                                "week_day_name": "sat",
+                                "tasks": [{"start_time": "10:00"}],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+    assert len(schedule_plan_entries(schedules)) == 5
+    assert [item["plan_id"] for item in schedule_switch_entries(schedules)] == [
+        2,
+        3,
+        4,
+    ]
 
 
 def test_schedule_write_reconciles_shared_cache_and_listeners() -> None:
