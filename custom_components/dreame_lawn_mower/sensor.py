@@ -38,6 +38,7 @@ from .dreame_lawn_mower_client.maintenance import (  # noqa: F401
     MAINTENANCE_ITEMS,
     MaintenanceItem,
     maintenance_item_status,
+    maintenance_items_for_model,
     maintenance_status_attributes,
 )
 from .dreame_lawn_mower_client.models import _mower_terminology
@@ -495,7 +496,9 @@ async def async_setup_entry(
         + [DreameLawnMowerRainProtectionDurationSensor(coordinator)]
         + [
             DreameLawnMowerMaintenanceRemainingSensor(coordinator, item)
-            for item in MAINTENANCE_ITEMS
+            for item in maintenance_items_for_model(
+                coordinator.client.descriptor.model, include_optional=True,
+            )
         ]
         + [DreameLawnMowerLastMaintenanceResetSensor(coordinator)]
         + [DreameLawnMowerLastPreferenceWriteSensor(coordinator)]

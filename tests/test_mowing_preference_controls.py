@@ -438,6 +438,7 @@ def test_active_preference_select_reads_and_writes_custom_zone() -> None:
     )
     entity = object.__new__(DreameLawnMowerPreferenceSelect)
     entity.coordinator = coordinator
+    entity._descriptor = coordinator.client.descriptor
     entity._preference_description = description
     entity._attr_name = description.name
 

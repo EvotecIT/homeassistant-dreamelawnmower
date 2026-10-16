@@ -239,6 +239,11 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Read-only probe for mower-native app map payloads."
     )
     parser.add_argument(
+        "--backup-index",
+        type=int,
+        help="Inspect a backup map through MAPBI/MAPBD without restoring it.",
+    )
+    parser.add_argument(
         "--chunk-size",
         type=int,
         default=400,
@@ -407,6 +412,12 @@ def _int_or_none(value: Any) -> int | None:
 async def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+    if args.backup_index is not None and args.backup_index < 0:
+        parser.error("--backup-index must be non-negative")
+    if args.backup_index is not None and (
+        args.probe_object_downloads or args.include_object_urls
+    ):
+        parser.error("Backup inspection does not query current-map object URLs")
 
     username = os.environ["DREAME_USERNAME"]
     password = os.environ["DREAME_PASSWORD"]
@@ -434,14 +445,29 @@ async def main() -> None:
         descriptor=devices[args.device_index],
     )
     try:
-        payload = await client.async_get_app_maps(
-            chunk_size=args.chunk_size,
-            include_payload=args.include_payload or args.render_dir is not None,
-            include_objects=not args.skip_objects,
-            include_object_urls=(
-                args.include_object_urls or args.probe_object_downloads
-            ),
-        )
+        if args.backup_index is not None:
+            backup = await client.async_get_app_backup_map(
+                args.backup_index,
+                chunk_size=args.chunk_size,
+                include_payload=args.include_payload or args.render_dir is not None,
+            )
+            payload = {
+                "source": "app_action_backup_map",
+                "available": backup["available"],
+                "backup_index": args.backup_index,
+                "maps": [backup],
+                "map_count": 1,
+                "current_map_index": None,
+            }
+        else:
+            payload = await client.async_get_app_maps(
+                chunk_size=args.chunk_size,
+                include_payload=args.include_payload or args.render_dir is not None,
+                include_objects=not args.skip_objects,
+                include_object_urls=(
+                    args.include_object_urls or args.probe_object_downloads
+                ),
+            )
         if args.render_dir:
             payload["rendered_maps"] = render_app_maps_to_directory(
                 payload,

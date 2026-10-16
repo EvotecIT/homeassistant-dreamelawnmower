@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .model_families import dreame_model_family
+
 MOWING_PREFERENCE_PROPERTY_KEY = "2.52"
 MOWING_PREFERENCE_MODE_FIELD = "preference_mode"
 
@@ -28,7 +30,14 @@ MOWING_DIRECTION_METHOD_NAMES = {
 MOWING_EFFICIENCY_MODE_NAMES = {
     0: "standard",
     1: "efficient",
+    3: "rush",
 }
+
+
+def mowing_efficiency_modes(model: str | None) -> tuple[int, ...]:
+    """Return app-confirmed choices without treating unused index 2 as a mode."""
+    return (0, 1, 3) if dreame_model_family(model) in {"q2501", "g2541"} else (0, 1)
+
 
 EDGE_MOWING_WALK_MODE_NAMES = {
     0: "line",
@@ -51,10 +60,7 @@ OBSTACLE_AI_CLASSES = (
     (4, "objects"),
 )
 
-OBSTACLE_AI_CLASS_BITS = {
-    name: bit
-    for bit, name in OBSTACLE_AI_CLASSES
-}
+OBSTACLE_AI_CLASS_BITS = {name: bit for bit, name in OBSTACLE_AI_CLASSES}
 
 # MOVAhome exposes only the master obstacle-recognition control for these
 # classes on this model. Objects remains independently writable.
@@ -157,7 +163,9 @@ def decode_mowing_preference_payload(payload: Sequence[Any]) -> dict[str, Any]:
         "obstacle_avoidance_ai_classes": _ai_class_names(obstacle_ai_mask),
         "edge_mowing_safe": _bool_at(values, 16, default=True),
         "obstacle_avoidance_sensitivity": _int_at(values, 17),
-        "edge_cutting_attachment": _bool_at(values, 18),
+        # Newer A3 firmware uses 1=closed and 2=edge. Preserve the numeric
+        # setting even when editing an unrelated field or an unknown variant.
+        "edge_cutting_attachment": _int_at(values, 18),
         "steering_mode": _int_at(values, 19),
         "cutter_position_height": _int_at(values, 20),
         "_raw_payload": tuple(values),
@@ -266,11 +274,7 @@ def encode_mowing_preference_payload(preference: Mapping[str, Any]) -> list[int]
             continue
         while len(values) <= index:
             values.append(0)
-        values[index] = (
-            _encode_bool(preference.get(field))
-            if field == "edge_cutting_attachment"
-            else _required_int(preference, field)
-        )
+        values[index] = _required_int(preference, field)
     return values
 
 
@@ -284,7 +288,43 @@ def apply_mowing_preference_changes(
     updated = dict(preference)
     changed_fields: list[str] = []
     for field, value in changes.items():
-        normalized_field, normalized_value = _normalize_preference_change(field, value)
+        if field == "edge_cutting_attachment":
+            normalized_field = field
+            if dreame_model_family(model) == "q2501":
+                normalized_value = (
+                    (2 if value else 1)
+                    if isinstance(value, bool)
+                    else _normalize_int(field, value)
+                )
+                current_mode = preference.get(field)
+                if (
+                    type(current_mode) is not int
+                    or current_mode not in (1, 2)
+                    or normalized_value not in (1, 2)
+                ):
+                    raise ValueError(
+                        "Edge trimming requires an installed attachment "
+                        "and a supported mode."
+                    )
+            else:
+                normalized_value = (
+                    int(value)
+                    if isinstance(value, bool)
+                    else _normalize_int(field, value)
+                )
+                if normalized_value not in (0, 1):
+                    raise ValueError(
+                        "Edge trimming mode is not supported by this model."
+                    )
+        else:
+            normalized_field, normalized_value = _normalize_preference_change(
+                field, value
+            )
+        if (
+            normalized_field == "efficient_mode"
+            and normalized_value not in mowing_efficiency_modes(model)
+        ):
+            raise ValueError("Mowing efficiency is not supported by this model.")
         previous_value = _current_preference_value(updated, normalized_field)
         if previous_value == normalized_value:
             continue
@@ -422,7 +462,6 @@ def _normalize_preference_change(field: str, value: Any) -> tuple[str, Any]:
         "edge_mowing_obstacle_avoidance",
         "obstacle_avoidance_enabled",
         "edge_mowing_safe",
-        "edge_cutting_attachment",
     }:
         return field, _normalize_bool(field, value)
     if field == "obstacle_avoidance_ai_classes":

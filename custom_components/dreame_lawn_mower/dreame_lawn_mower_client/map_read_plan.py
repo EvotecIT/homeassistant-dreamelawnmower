@@ -133,17 +133,31 @@ def download_map(
     include_payload: bool,
     deadline: float | None = None,
     remaining_bytes: list[int] | None = None,
+    backup: bool = False,
 ) -> Generator[AppReadRequest, Any]:
     """Read and verify one selected map before exposing its geometry."""
     deadline = _read_deadline(deadline)
     info_result = yield AppReadRequest(
-        {"m": "g", "t": "MAPI", "d": {"idx": entry["idx"]}},
-        retry_count=2, timeout=20, deadline=deadline,
+        {"m": "g", "t": "MAPBI" if backup else "MAPI", "d": {"idx": entry["idx"]}},
+        retry_count=2,
+        timeout=20,
+        deadline=deadline,
     )
     info = _app_action_data(info_result)
-    entry["info"] = _json_safe(info, max_depth=4)
+    # Backup summaries are safe to share without the opt-in geometry payload.
+    # Firmware may attach additional private fields to metadata responses.
+    entry["info"] = _json_safe(
+        {key: info[key] for key in ("idx", "size", "hash") if key in info}
+        if backup and isinstance(info, Mapping)
+        else info,
+        max_depth=4,
+    )
     size = info.get("size") if isinstance(info, Mapping) else None
     expected_hash = info.get("hash") if isinstance(info, Mapping) else None
+    if backup and not isinstance(expected_hash, str):
+        raise DreameLawnMowerConnectionError(
+            "Backup map metadata has no verification hash."
+        )
     if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
         raise DreameLawnMowerConnectionError("map_info_missing_size")
     if size > MAX_APP_MAP_BYTES:
@@ -173,7 +187,10 @@ def download_map(
         return
     cache.pop(entry["idx"], None)
     payload_text, chunk_count, received_size = yield from read_map_text(
-        size=size, chunk_size=chunk_size, deadline=deadline,
+        size=size,
+        chunk_size=chunk_size,
+        deadline=deadline,
+        backup_index=entry["idx"] if backup else None,
     )
     encoded = payload_text.encode("utf-8")
     payload_hash = hashlib.md5(encoded).hexdigest()
@@ -237,11 +254,13 @@ def read_map_text(
     size: int,
     chunk_size: int,
     deadline: float | None = None,
+    backup_index: int | None = None,
 ) -> Generator[AppReadRequest, Any, tuple[str, int, int]]:
     deadline = _read_deadline(deadline)
     chunk_size = _validate_app_map_chunk_size(chunk_size)
     if (
-        not isinstance(size, int) or isinstance(size, bool)
+        not isinstance(size, int)
+        or isinstance(size, bool)
         or not 0 < size <= MAX_APP_MAP_BYTES
     ):
         raise DreameLawnMowerConnectionError("App map exceeds the byte budget.")
@@ -256,8 +275,12 @@ def read_map_text(
         chunk_result = yield AppReadRequest(
             {
                 "m": "g",
-                "t": "MAPD",
-                "d": {"start": offset, "size": requested_size},
+                "t": "MAPBD" if backup_index is not None else "MAPD",
+                "d": {
+                    "start": offset,
+                    "size": requested_size,
+                    **({"idx": backup_index} if backup_index is not None else {}),
+                },
             },
             retry_count=2,
             timeout=20,
@@ -301,3 +324,27 @@ def read_map_text(
         chunk_count += 1
     _read_deadline(deadline)
     return chunks.decode("utf-8"), chunk_count, offset
+
+
+def read_backup_map(
+    index: int,
+    *,
+    chunk_size: int = 400,
+    include_payload: bool = False,
+    deadline: float | None = None,
+) -> Generator[AppReadRequest, Any, dict[str, Any]]:
+    """Inspect one backup without selecting, restoring or replacing an active map."""
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise ValueError("Backup map index must be a non-negative integer.")
+    chunk_size = _validate_app_map_chunk_size(chunk_size)
+    entry: dict[str, Any] = {"idx": index, "available": False}
+    # Backups must never enter the active-map cache or inventory.
+    yield from download_map(
+        {},
+        entry,
+        chunk_size=chunk_size,
+        include_payload=include_payload,
+        deadline=deadline,
+        backup=True,
+    )
+    return {"source": "app_action_backup_map", "backup_index": index, **entry}

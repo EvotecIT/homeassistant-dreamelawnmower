@@ -168,6 +168,27 @@ per-zone dates and expose `history_complete`, `history_attributable`,
 `last_completed_at` and the ordered `zones` list. Invalid timestamps cannot claim
 completion or prevent sensor updates.
 
+## Maintenance by model
+
+Maintenance sensors keep the mower's positional CMS counters. Recognized
+A3/A3 Pro variants use a 50-hour robot-maintenance interval and omit the
+cleaning-brush entity. The two-eye `g2420`/`g2566` profiles also omit that entity
+while retaining the 60-hour interval. Other existing families retain their
+existing maintenance selection and 60-hour interval.
+Negative counters are unavailable.
+
+A3 (`q2501`) variants also have an optional **Edge Trimmer Remaining** sensor
+and a disabled-by-default reset button. They require both a non-negative counter
+and fresh, validated preference evidence of an installed attachment. If that
+read fails, ordinary maintenance remains available. Counter resets preserve
+the other slots and require the existing explicit write confirmation when
+called through the service.
+
+**Last Mower Error** and **Last Mower Notification** include recovery checks and
+any known ambiguity in the code's firmware-dependent meaning while that exact
+condition is active. These attributes describe the current confirmed condition;
+they do not reclassify cleared history or clear faults.
+
 ## Optional diagnostics
 
 Many reverse-engineering and validation helpers are disabled by default. Enable

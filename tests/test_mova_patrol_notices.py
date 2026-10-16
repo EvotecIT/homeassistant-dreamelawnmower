@@ -35,6 +35,9 @@ def test_patrol_completion_reaches_current_and_retained_mova_notices(source):
     assert history.observe(snapshot)
     retained = object.__new__(DreameLawnMowerConditionSensor)
     retained._kind = "notification"
-    retained.coordinator = SimpleNamespace(mower_condition_history=history)
+    retained.coordinator = SimpleNamespace(
+        mower_condition_history=history, data=snapshot,
+    )
+    retained._descriptor = snapshot.descriptor
     assert retained.native_value == "Patrol task completed"
     assert retained.extra_state_attributes["code"] == 74

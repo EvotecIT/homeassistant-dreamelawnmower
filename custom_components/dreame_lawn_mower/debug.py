@@ -17,15 +17,16 @@ from .dreame_lawn_mower_client.app_protocol import (
     mower_property_hint,
     mower_realtime_property_name,
 )
+from .dreame_lawn_mower_client.device_code_guidance import mower_device_code_context
 from .dreame_lawn_mower_client.map_probe import MAP_CANDIDATE_TERMS
+from .dreame_lawn_mower_client.model_identity import descriptor_identity_summary
 from .dreame_lawn_mower_client.models import (
-    MODEL_NAME_MAP,
     SUPPORTED_MODEL_MARKER,
     remote_control_block_reason,
     remote_control_state_safe,
 )
 
-DIAGNOSTIC_SCHEMA_VERSION = 11
+DIAGNOSTIC_SCHEMA_VERSION = 12
 UNKNOWN_REALTIME_PREFIX = "UNKNOWN_REALTIME_"
 
 REDACT_KEYS = {
@@ -606,12 +607,13 @@ def _collect_triage_summary(
     """Return a compact first-read summary for user bug reports."""
     descriptor = getattr(snapshot, "descriptor", None)
     model = getattr(descriptor, "model", None)
+    identity = descriptor_identity_summary(descriptor)
     capabilities = tuple(getattr(snapshot, "capabilities", ()) or ())
     issues: list[str] = []
     suggested_next_capture: list[str] = []
     state_warnings = list(state_reconciliation.get("warnings", []) or [])
 
-    if model not in MODEL_NAME_MAP:
+    if not identity["recognized"]:
         issues.append("model_not_in_known_model_map")
     if model and SUPPORTED_MODEL_MARKER not in model:
         issues.append("model_does_not_match_mower_marker")
@@ -633,7 +635,20 @@ def _collect_triage_summary(
 
     return {
         "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
-        "known_model": model in MODEL_NAME_MAP,
+        "known_model": identity["recognized"],
+        "model_identity": identity,
+        "device_code_context": {
+            "error": mower_device_code_context(
+                getattr(snapshot, "error_code", None),
+                model=model,
+                firmware=getattr(snapshot, "firmware_version", None),
+            ),
+            "notice": mower_device_code_context(
+                getattr(snapshot, "status_notice_code", None),
+                model=model,
+                firmware=getattr(snapshot, "firmware_version", None),
+            ),
+        },
         "model": _normalize_debug_value(model),
         "display_model": _normalize_debug_value(
             getattr(descriptor, "display_model", None)
@@ -643,12 +658,8 @@ def _collect_triage_summary(
         "error": {
             "active": bool(state_reconciliation.get("error", {}).get("active")),
             "code": _normalize_debug_value(getattr(snapshot, "error_code", None)),
-            "display": _normalize_debug_value(
-                getattr(snapshot, "error_display", None)
-            ),
-            "source": _normalize_debug_value(
-                getattr(snapshot, "error_source", None)
-            ),
+            "display": _normalize_debug_value(getattr(snapshot, "error_display", None)),
+            "source": _normalize_debug_value(getattr(snapshot, "error_source", None)),
         },
         "status_notice": {
             "code": _normalize_debug_value(
