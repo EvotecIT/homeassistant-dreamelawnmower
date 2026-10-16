@@ -70,6 +70,7 @@
           "map_restart_preview": "Conserva un'anteprima della mappa dopo il riavvio", "map_label_scale": "Scala delle etichette della mappa",
           "map_rotation": "Rotazione della mappa",
           "map_theme": "Tema della mappa",
+          "map_background": "Sfondo della mappa",
           "map_stroke_scale": "Spessore delle linee della mappa",
           "map_marker_scale": "Dimensione degli indicatori sulla mappa",
           "map_marker_image": "Indicatore personalizzato del robot tagliaerba",
@@ -86,6 +87,7 @@
           "map_restart_preview": "Disattivato per impostazione predefinita. Salva in Home Assistant un JPEG privato della mappa (fino a 2 MB). Vengono usate solo anteprime di meno di 24 ore durante il caricamento della mappa corrispondente; non rappresentano lo stato in tempo reale. Disattivare questa opzione o eliminare l’integrazione rimuove l’anteprima salvata.",
           "map_rotation": "Rotazione predefinita per le mappe senza un’impostazione specifica. Per le singole mappe usa l’entità Rotazione della mappa selezionata.",
           "map_theme": "Scegli una combinazione di colori chiara, scura, notturna o ad alto contrasto per tutte le mappe generate localmente.",
+          "map_background": "Standard disegna i prati su uno sfondo uniforme. Foto reale posiziona sotto la mappa la foto dall'alto del giardino del robot, se il robot la fornisce.",
           "map_stroke_scale": "Regola lo spessore dei confini e dei percorsi della mappa da 0,5 a 3.",
           "map_marker_scale": "Regola la dimensione dei punti sulla mappa e dell’indicatore della posizione attuale del robot tagliaerba da 0,5 a 3.",
           "map_marker_image": "File PNG, JPEG o WebP facoltativo nella cartella config/www di Home Assistant, ad esempio mower/marker.png o /local/mower/marker.png. I file esterni a questa cartella e quelli più grandi di 1 MB vengono ignorati.",
@@ -126,6 +128,12 @@
         "dark": "Scuro",
         "midnight": "Mezzanotte",
         "high_contrast": "Contrasto elevato"
+      }
+    },
+    "map_background": {
+      "options": {
+        "standard": "Standard",
+        "real_scene": "Foto reale"
       }
     },
     "map_spot_area_style": {
@@ -301,6 +309,16 @@
     "plan_mowing_preference_update": {
       "name": "Preparare la modifica delle preferenze di taglio",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Riproduci audio tramite il tagliaerba",
+      "description": "Riproduce un file audio locale tramite l’altoparlante del tagliaerba usando il video in diretta cloud. La riproduzione è limitata a 60 secondi.",
+      "fields": {
+        "file_path": {
+          "name": "Percorso del file",
+          "description": "Percorso assoluto di un file audio locale consentito, ad esempio /media/hello.mp3."
+        }
+      }
     }
   }
 }

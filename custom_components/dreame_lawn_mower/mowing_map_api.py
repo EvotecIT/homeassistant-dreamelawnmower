@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any
 
 from aiohttp import web
@@ -14,11 +15,19 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.http import HomeAssistantView
 
-from .const import CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE, DOMAIN
+from .const import (
+    CONF_MAP_BACKGROUND,
+    CONF_MAP_LABEL_SCALE,
+    DEFAULT_MAP_BACKGROUND,
+    DEFAULT_MAP_LABEL_SCALE,
+    DOMAIN,
+)
 from .control_options import active_map_index
 from .dreame_lawn_mower_client.map_inventory import _app_map_inventory_identity
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
+from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
 from .map_presentation import map_style
+from .real_scene_cache import real_scene_owner
 from .runtime_data import get_coordinator
 
 MOWING_MAP_API_KEY = "mowing_map_api"
@@ -55,6 +64,9 @@ class MowingMapAPI:
         self._failures: OrderedDict[str, tuple[Any, tuple[Any, ...], float]] = (
             OrderedDict()
         )
+        self._photo_layers: OrderedDict[tuple[str, str, str], bytes] = OrderedDict()
+        self._photo_inflight: dict[tuple[str, str, str], asyncio.Task[bytes]] = {}
+        self._photo_render_lock = asyncio.Lock()
 
     def coordinator(self, entry_id: str) -> Any:
         """Resolve a loaded integration, never a cached unloaded instance."""
@@ -104,6 +116,7 @@ class MowingMapAPI:
     async def scene(self, entry_id: str) -> _SceneEntry:
         """Reuse a recent static scene and share one bounded background refresh."""
         coordinator = self.coordinator(entry_id)
+        real_scene_owner(coordinator).request()
         context = self.context(coordinator)
         cached = self._cache.get(entry_id)
         failure = self._failures.get(entry_id)
@@ -180,10 +193,79 @@ class MowingMapAPI:
             self._cache.popitem(last=False)
         return entry
 
+    def _require_photo_context(
+        self, entry_id: str, entry: _SceneEntry, digest: str,
+    ) -> None:
+        coordinator = entry.coordinator
+        if (
+            coordinator is not self.coordinator(entry_id)
+            or self._cache.get(entry_id) is not entry
+            or entry.context != self.context(coordinator)
+        ):
+            raise web.HTTPConflict(text="The map changed while its photo was loading.")
+        photo = _real_scene_for(entry)
+        if photo is None or photo.digest != digest:
+            raise web.HTTPNotFound(headers=_HEADERS)
+
+    async def photo_layer(
+        self, entry_id: str, entry: _SceneEntry, photo: RealSceneImage,
+    ) -> bytes:
+        """Bound and coalesce photo transforms; disconnected waiters retain work."""
+        self._require_photo_context(entry_id, entry, photo.digest)
+        key = (entry_id, entry.scene.revision, photo.digest)
+        layer = self._photo_layers.get(key)
+        if layer is not None:
+            self._photo_layers.move_to_end(key)
+            return layer
+        task = self._photo_inflight.get(key)
+        if task is None:
+            if len(self._photo_inflight) >= _MAX_ENTRIES:
+                raise web.HTTPServiceUnavailable(headers={"Retry-After": "5"})
+            task = self.hass.async_create_task(
+                self._load_photo_layer(entry_id, entry, photo, key),
+                f"{DOMAIN} real-scene layer",
+            )
+            self._photo_inflight[key] = task
+            task.add_done_callback(lambda done: self._finish_photo_layer(key, done))
+        layer = await asyncio.shield(task)
+        self._require_photo_context(entry_id, entry, photo.digest)
+        return layer
+
+    async def _load_photo_layer(
+        self, entry_id: str, entry: _SceneEntry, photo: RealSceneImage,
+        key: tuple[str, str, str],
+    ) -> bytes:
+        async with self._photo_render_lock:
+            self._require_photo_context(entry_id, entry, photo.digest)
+            layer = await self.hass.async_add_executor_job(
+                _render_real_scene_layer, entry.scene, photo,
+            )
+        self._require_photo_context(entry_id, entry, photo.digest)
+        self._photo_layers[key] = layer
+        while len(self._photo_layers) > _MAX_ENTRIES:
+            self._photo_layers.popitem(last=False)
+        return layer
+
+    def _finish_photo_layer(
+        self, key: tuple[str, str, str], task: asyncio.Task[bytes],
+    ) -> None:
+        if self._photo_inflight.get(key) is task:
+            self._photo_inflight.pop(key)
+        if not task.cancelled():
+            task.exception()
+
     async def purge_entry(self, entry_id: str) -> None:
         """Drop private state and drain a pending read during entry unload."""
         self._cache.pop(entry_id, None)
         self._failures.pop(entry_id, None)
+        photos = [task for key, task in self._photo_inflight.items()
+                  if key[0] == entry_id]
+        if photos:
+            await asyncio.gather(*(asyncio.shield(task) for task in photos),
+                                 return_exceptions=True)
+        for key in tuple(self._photo_layers):
+            if key[0] == entry_id:
+                self._photo_layers.pop(key)
         task = self._inflight.get(entry_id)
         if task is not None:
             # The client read uses a worker thread: cancellation would stop the
@@ -220,6 +302,7 @@ class MowingMapView(HomeAssistantView):
                     f"{mowing_map_api_path(entry_id)}/background/{scene.revision}"
                 ),
                 "overlay": entry.coordinator.client.mowing_map_runtime_overlay(scene),
+                "real_scene_path": _real_scene_path(entry_id, entry),
             },
             headers=_HEADERS,
         )
@@ -252,6 +335,79 @@ class MowingMapBackgroundView(HomeAssistantView):
         )
 
 
+def _real_scene_for(entry: _SceneEntry) -> RealSceneImage | None:
+    """Return the camera's photo only when it belongs to this scene's map."""
+    coordinator = entry.coordinator
+    real_scene = real_scene_owner(coordinator).current
+    if (
+        real_scene is None
+        or coordinator.entry.options.get(CONF_MAP_BACKGROUND, DEFAULT_MAP_BACKGROUND)
+        != "real_scene"
+        or real_scene.map_index != entry.scene.map_index
+    ):
+        return None
+    return real_scene
+
+
+def _real_scene_path(entry_id: str, entry: _SceneEntry) -> str | None:
+    real_scene = _real_scene_for(entry)
+    if real_scene is None:
+        return None
+    return (
+        f"{mowing_map_api_path(entry_id)}/real-scene/"
+        f"{entry.scene.revision}/{real_scene.digest}"
+    )
+
+
+def _render_real_scene_layer(
+    scene: MowingMapScene, real_scene: RealSceneImage
+) -> bytes:
+    """Warp the photo into the exact canvas of the transparent background."""
+    from PIL import Image
+
+    canvas = Image.new(
+        "RGBA", (scene.projection.width, scene.projection.height), (0, 0, 0, 0)
+    )
+    if not paint_real_scene(
+        canvas, real_scene, scene.projection.point_exact, opacity=1.0
+    ):
+        return b""
+    output = BytesIO()
+    canvas.save(output, format="PNG")
+    return output.getvalue()
+
+
+class MowingMapRealSceneView(HomeAssistantView):
+    """Serve the real-scene photo layer for one advertised background."""
+
+    url = f"{MOWING_MAP_API_PATH}/{{entry_id}}/real-scene/{{revision}}/{{digest}}"
+    name = "api:dreame_lawn_mower:mowing_map_real_scene"
+    requires_auth = True
+
+    def __init__(self, api: MowingMapAPI) -> None:
+        self._api = api
+
+    async def get(
+        self, request: web.Request, entry_id: str, revision: str, digest: str
+    ) -> web.Response:
+        coordinator = self._api.authorize(request, entry_id)
+        entry = self._api._cache.get(entry_id)
+        if (
+            entry is None
+            or entry.coordinator is not coordinator
+            or entry.context != self._api.context(coordinator)
+            or entry.scene.revision != revision
+        ):
+            raise web.HTTPConflict(text="Refresh the map scene before its photo.")
+        real_scene = _real_scene_for(entry)
+        if real_scene is None or real_scene.digest != digest:
+            raise web.HTTPNotFound(headers=_HEADERS)
+        layer = await self._api.photo_layer(entry_id, entry, real_scene)
+        if not layer:
+            raise web.HTTPNotFound(headers=_HEADERS)
+        return web.Response(body=layer, content_type="image/png", headers=_HEADERS)
+
+
 @callback
 def async_setup_mowing_map_api(hass: HomeAssistant) -> MowingMapAPI:
     """Register read-only map delivery once per HA instance."""
@@ -262,5 +418,6 @@ def async_setup_mowing_map_api(hass: HomeAssistant) -> MowingMapAPI:
     api = MowingMapAPI(hass)
     hass.http.register_view(MowingMapView(api))
     hass.http.register_view(MowingMapBackgroundView(api))
+    hass.http.register_view(MowingMapRealSceneView(api))
     domain_data[MOWING_MAP_API_KEY] = api
     return api

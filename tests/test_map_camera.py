@@ -116,6 +116,16 @@ def test_camera_setup_only_omits_definitively_unsupported_video(
         "DreameLawnMowerVideoCamera",
         _entity("live_video"),
     )
+    registered: list[str] = []
+    monkeypatch.setattr(
+        camera_module,
+        "async_get_current_platform",
+        lambda: SimpleNamespace(
+            async_register_entity_service=lambda name, *_args, **_kwargs: (
+                registered.append(name)
+            )
+        ),
+    )
 
     asyncio.run(
         camera_module.async_setup_entry(
@@ -126,6 +136,7 @@ def test_camera_setup_only_omits_definitively_unsupported_video(
     )
 
     assert ("live_video" in added) is video_expected
+    assert registered == (["play_audio"] if video_expected else [])
 
 
 def test_map_camera_attributes_include_app_map_summary_counts() -> None:

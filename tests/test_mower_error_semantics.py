@@ -37,6 +37,61 @@ mower_device_code_tier = device_code_semantics.mower_device_code_tier
 mower_fault_active = device_code_semantics.mower_fault_active
 
 
+@pytest.mark.parametrize(
+    "model", ["dreame.mower.g2408", "dreame.mower.g2568a", "g2568d"]
+)
+def test_a2_startup_and_new_map_codes_preserve_versioned_app_meanings(
+    model: str,
+) -> None:
+    assert mower_device_code_name(25, model=model) == "startup_or_map_data_error"
+    # Keep the existing hard-fault policy until firmware behavior establishes
+    # that the app's working-message presentation is safe to downgrade.
+    assert mower_fault_active(25, model=model) is True
+    assert mower_device_code_name(47, model=model) == "new_map_created"
+    assert mower_device_code_tier(47, model=model) is MowerDeviceCodeTier.INFO
+    assert mower_device_code_name(59, model=model) == "battery_temperature_too_low"
+
+
+@pytest.mark.parametrize(
+    ("model", "code", "name", "tier"),
+    [
+        ("dreame.mower.q2501a", 19, "left_front_drive_wheel_error", "error"),
+        ("dreame.mower.g2541e", 19, "left_front_drive_wheel_error", "error"),
+        ("dreame.mower.q2501c", 45, "right_front_drive_wheel_error", "error"),
+        ("dreame.mower.g2541g", 45, "right_front_drive_wheel_error", "error"),
+        ("dreame.mower.q2501a", 39, "edge_blades_worn", "attention"),
+        ("dreame.mower.g2541e", 39, "camera_dirty", "alert"),
+        ("dreame.mower.q2501a", 46, "boundary_detection_completed", "info"),
+        ("dreame.mower.g2541e", 46, "right_blade_disc_blocked", "error"),
+        ("dreame.mower.q2501a", 47, "edge_blade_disc_blocked", "error"),
+        ("dreame.mower.g2541e", 47, "new_map_created", "info"),
+    ],
+)
+def test_a3_catalog_keeps_front_wheel_and_cutter_meanings_family_specific(
+    model: str, code: int, name: str, tier: str
+) -> None:
+    assert mower_device_code_name(code, model=model) == name
+    assert mower_device_code_tier(code, model=model) == tier
+
+
+@pytest.mark.parametrize(
+    ("model", "code", "name"),
+    [
+        ("dreame.mower.p2255", 19, "emergency_stop_pressed"),
+        ("dreame.mower.g2422", 73, "robot_lifted"),
+        ("dreame.mower.g2540d", 19, "location_lost"),
+        ("mova.mower.g2529c", 55, "cannot_start_low_battery"),
+        ("mova.mower.g2408", 25, "map_file_damaged"),
+        ("other.mower.q2501a", 47, "new_map_created"),
+        ("dreame.vacuum.q2501a", 47, "new_map_created"),
+    ],
+)
+def test_app_catalog_preserves_unverified_firmware_and_other_brand_semantics(
+    model: str, code: int, name: str
+) -> None:
+    assert mower_device_code_name(code, model=model) == name
+
+
 class _ErrorDevice:
     def __init__(
         self,
@@ -118,6 +173,44 @@ def _snapshot(
         device,
         previous_snapshot=previous_snapshot,
     )
+
+
+@pytest.mark.parametrize(
+    ("model", "code", "name", "is_fault"),
+    [
+        ("dreame.mower.g2568a", 25, "startup_or_map_data_error", True),
+        ("dreame.mower.g2408", 47, "new_map_created", False),
+        ("dreame.mower.q2501c", 47, "edge_blade_disc_blocked", True),
+        ("dreame.mower.g2541g", 46, "right_blade_disc_blocked", True),
+        ("dreame.mower.g2541g", 47, "new_map_created", False),
+    ],
+)
+def test_versioned_family_codes_reach_status_and_snapshot_consumers(
+    model: str, code: int, name: str, is_fault: bool
+) -> None:
+    device = SimpleNamespace(
+        info=SimpleNamespace(model=model),
+        capability=SimpleNamespace(new_state=True),
+    )
+    device.get_property = lambda prop: (
+        code if prop is DreameMowerProperty.ERROR else None
+    )
+    status = DreameMowerDeviceStatus(device)
+    assert status.error_name == name
+    assert status.has_error is is_fault
+
+    snapshot = _snapshot(code, "vacuum_error", model=model)
+    assert snapshot.raw_error_code == code
+    if is_fault:
+        assert snapshot.activity == "error"
+        assert snapshot.error_code == code
+        assert snapshot.error_name == name
+        assert snapshot.status_notice_code is None
+    else:
+        assert snapshot.activity == "paused"
+        assert snapshot.error_code is None
+        assert snapshot.status_notice_code == code
+        assert snapshot.status_notice_name == name
 
 
 @pytest.mark.parametrize(

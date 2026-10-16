@@ -24,6 +24,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerDockWithoutStoppingButton,
     DreameLawnMowerEndCurrentTaskButton,
+    DreameLawnMowerFindMowerButton,
     DreameLawnMowerResetMaintenanceButton,
 )
 from custom_components.dreame_lawn_mower.coordinator import (
@@ -723,6 +724,38 @@ def test_dock_without_stopping_button_reports_rejected_action() -> None:
     )
 
     with pytest.raises(HomeAssistantError, match="Dock request was rejected"):
+        asyncio.run(entity.async_press())
+
+
+def test_find_mower_button_calls_locator_client_action() -> None:
+    called: list[bool] = []
+
+    async def find() -> dict[str, int]:
+        called.append(True)
+        return {"r": 0}
+
+    entity = object.__new__(DreameLawnMowerFindMowerButton)
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_find_mower=find)
+    )
+
+    asyncio.run(entity.async_press())
+
+    assert called == [True]
+
+
+def test_find_mower_button_reports_rejected_action() -> None:
+    async def reject() -> None:
+        raise DreameLawnMowerConnectionError(
+            "The mower rejected the find mower request"
+        )
+
+    entity = object.__new__(DreameLawnMowerFindMowerButton)
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_find_mower=reject)
+    )
+
+    with pytest.raises(HomeAssistantError, match="rejected the find mower"):
         asyncio.run(entity.async_press())
 
 

@@ -70,6 +70,7 @@
           "map_restart_preview": "Сохранять предпросмотр карты после перезапуска", "map_label_scale": "Масштаб подписей на карте",
           "map_rotation": "Поворот карты",
           "map_theme": "Тема карты",
+          "map_background": "Фон карты",
           "map_stroke_scale": "Толщина линий карты",
           "map_marker_scale": "Размер маркеров на карте",
           "map_marker_image": "Пользовательский маркер газонокосилки",
@@ -86,6 +87,7 @@
           "map_restart_preview": "По умолчанию выключено. Сохраняет в Home Assistant один приватный JPEG карты (до 2 МБ). При загрузке соответствующей карты используются только предпросмотры младше 24 часов; это не текущее состояние косилки. Отключение опции или удаление интеграции удаляет сохранённый предпросмотр.",
           "map_rotation": "Поворот по умолчанию для карт без отдельной настройки. Для конкретной карты используйте сущность Поворот выбранной карты.",
           "map_theme": "Выберите единую светлую, тёмную, ночную или высококонтрастную цветовую схему для всех карт, создаваемых локально.",
+          "map_background": "Стандартный рисует газоны на однотонном фоне. Реальное фото помещает под карту снимок сада сверху от газонокосилки, если она его предоставляет.",
           "map_stroke_scale": "Изменяйте толщину границ и маршрутов на карте в диапазоне от 0,5 до 3.",
           "map_marker_scale": "Изменяйте размер точек на карте и маркера текущего положения газонокосилки в диапазоне от 0,5 до 3.",
           "map_marker_image": "Необязательный файл PNG, JPEG или WebP в каталоге config/www Home Assistant, например mower/marker.png или /local/mower/marker.png. Файлы вне этого каталога и файлы размером более 1 МБ игнорируются.",
@@ -126,6 +128,12 @@
         "dark": "Тёмная",
         "midnight": "Полночь",
         "high_contrast": "Высокая контрастность"
+      }
+    },
+    "map_background": {
+      "options": {
+        "standard": "Стандартный",
+        "real_scene": "Реальное фото"
       }
     },
     "map_spot_area_style": {
@@ -301,6 +309,16 @@
     "plan_mowing_preference_update": {
       "name": "Подготовить изменение настроек кошения",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Воспроизвести звук через газонокосилку",
+      "description": "Воспроизводит локальный аудиофайл через динамик газонокосилки с использованием облачного видеопотока. Воспроизведение ограничено 60 секундами.",
+      "fields": {
+        "file_path": {
+          "name": "Путь к файлу",
+          "description": "Абсолютный путь к разрешённому локальному аудиофайлу, например /media/hello.mp3."
+        }
+      }
     }
   }
 }

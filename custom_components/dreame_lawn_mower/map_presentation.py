@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .const import (
+    CONF_MAP_BACKGROUND,
     CONF_MAP_MARKER_SCALE,
     CONF_MAP_MOWING_PATH_STYLE,
     CONF_MAP_ROTATION,
@@ -11,6 +12,7 @@ from .const import (
     CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
+    DEFAULT_MAP_BACKGROUND,
     DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_MOWING_PATH_STYLE,
     DEFAULT_MAP_ROTATION,
@@ -19,6 +21,7 @@ from .const import (
     DEFAULT_MAP_THEME,
 )
 from .dreame_lawn_mower_client.map_visuals import MapRenderStyle, map_render_style
+from .dreame_lawn_mower_client.real_scene import RealSceneImage
 
 
 def map_rotation(options: Mapping[str, Any], map_index: int | None) -> int:
@@ -36,8 +39,15 @@ def map_style(
     map_index: int | None,
     *,
     marker_image: bytes | None = None,
+    real_scene: RealSceneImage | None = None,
 ) -> MapRenderStyle:
     """Translate HA options once into the renderer's reusable style contract."""
+    if (
+        options.get(CONF_MAP_BACKGROUND, DEFAULT_MAP_BACKGROUND) != "real_scene"
+        or real_scene is None
+        or real_scene.map_index != map_index
+    ):
+        real_scene = None
     return map_render_style(
         options.get(CONF_MAP_THEME, DEFAULT_MAP_THEME),
         rotation=map_rotation(options, map_index),
@@ -50,4 +60,5 @@ def map_style(
         mowing_path_style=options.get(
             CONF_MAP_MOWING_PATH_STYLE, DEFAULT_MAP_MOWING_PATH_STYLE
         ),
+        real_scene=real_scene,
     )

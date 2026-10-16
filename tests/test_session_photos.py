@@ -471,9 +471,11 @@ def test_person_photo_candidates_start_one_second_before_detection() -> None:
         f"IQ000001/-1234/ali_dreame/{DETECTED + offset}_person.jpg"
         for offset in (-1, -2, 0)
     ]
-    assert len(names) == len(set(names)) == 24
+    assert len(names) == len(set(names)) == 64
     assert f"IQ000001/-1234/ali_dreame/{DETECTED + 3}_person.jpg" in names
-    assert f"IQ000001/-1234/ali_dreame/{DETECTED - 20}_person.jpg" in names
+    # Observed on a LiDAX Ultra 1000: photo named 26 s before the notice.
+    assert f"IQ000001/-1234/ali_dreame/{DETECTED - 26}_person.jpg" in names
+    assert f"IQ000001/-1234/ali_dreame/{DETECTED - 60}_person.jpg" in names
     assert person_photo_object_names("summary.json", DETECTED) == []
 
 

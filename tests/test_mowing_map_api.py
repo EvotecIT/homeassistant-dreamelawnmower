@@ -2,17 +2,20 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiohttp import web
 
 from custom_components.dreame_lawn_mower import mowing_map_api as module
+from custom_components.dreame_lawn_mower import real_scene_cache
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_projection
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
     MowingMapScene,
 )
 from tests.runtime_fixtures import runtime_hass
+
+from .test_real_scene_cache import _photo
 
 
 def scene():
@@ -51,6 +54,8 @@ def environment(load):
         coordinators={"entry": coordinator},
         async_create_task=lambda coro, name: asyncio.create_task(coro, name=name),
     )
+    coordinator.hass = hass
+    coordinator.async_update_listeners = Mock()
     return hass, coordinator, module.MowingMapAPI(hass)
 
 
@@ -204,5 +209,151 @@ def test_background_requires_exact_revision_and_current_context(monkeypatch):
         coordinator.app_maps["current_map_index"] = 1
         with pytest.raises(web.HTTPConflict):
             await view.get({}, "entry", "a" * 64)
+
+    asyncio.run(run())
+
+
+def test_real_scene_layer_matches_the_background_canvas(monkeypatch):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.real_scene import (  # noqa: E501
+        real_scene_from_png,
+    )
+
+    async def run():
+        async def load(**kwargs):
+            return scene()
+
+        hass, coordinator, api = environment(load)
+
+        async def executor(func, *args):
+            return func(*args)
+
+        hass.async_add_executor_job = executor
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        photo = BytesIO()
+        Image.new("RGBA", (40, 20), (0, 128, 0, 255)).save(photo, format="PNG")
+        photo_scene = real_scene_from_png(
+            0, "x/IQ1/a_20_10_3cm.png", photo.getvalue()
+        )
+        entry = await api.scene("entry")
+        view = module.MowingMapRealSceneView(api)
+
+        assert module._real_scene_path("entry", entry) is None
+        coordinator.entry.options["map_background"] = "real_scene"
+        monkeypatch.setattr(
+            real_scene_cache, "async_fetch_real_scene",
+            AsyncMock(return_value=photo_scene)
+        )
+        await real_scene_cache.real_scene_owner(coordinator).request()
+        path = module._real_scene_path("entry", entry)
+        digest = coordinator.real_scene.digest
+        assert path.endswith(f"/real-scene/{'a' * 64}/{digest}")
+
+        response = await view.get({}, "entry", "a" * 64, digest)
+        assert response.headers["Cache-Control"] == "private, no-store"
+        with Image.open(BytesIO(response.body)) as layer:
+            projection = entry.scene.projection
+            assert layer.size == (projection.width, projection.height)
+            assert layer.getpixel(projection.point(0, 0))[1] == 128
+        with pytest.raises(web.HTTPNotFound):
+            await view.get({}, "entry", "a" * 64, "0" * 64)
+        coordinator.app_maps["maps"][0]["info"]["hash"] = "replacement-garden"
+        assert module._real_scene_path("entry", entry) is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("change", ["none", "map", "rotation", "disable", "unload"])
+def test_photo_layer_coalesces_requests_and_rejects_changed_context(
+    monkeypatch, change,
+):
+    async def run():
+        async def load(**kwargs):
+            return scene()
+
+        hass, coordinator, api = environment(load)
+        coordinator.entry.options["map_background"] = "real_scene"
+        photo = _photo()
+        monkeypatch.setattr(real_scene_cache, "async_fetch_real_scene",
+                            AsyncMock(return_value=photo))
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        await api.scene("entry")
+        pending_photo = real_scene_cache.real_scene_owner(coordinator).request()
+        if pending_photo is not None:
+            await pending_photo
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = 0
+
+        async def executor(*args):
+            nonlocal calls
+            calls += 1
+            entered.set()
+            await release.wait()
+            return b"layer-png"
+
+        hass.async_add_executor_job = executor
+        view = module.MowingMapRealSceneView(api)
+        first = asyncio.create_task(view.get({}, "entry", "a" * 64, photo.digest))
+        await entered.wait()
+        second = asyncio.create_task(view.get({}, "entry", "a" * 64, photo.digest))
+        await asyncio.sleep(0)
+        assert len(api._photo_inflight) == 1
+        if change == "map":
+            coordinator.app_maps["maps"][0]["info"]["hash"] = "replacement-map"
+        elif change == "rotation":
+            coordinator.entry.options["map_rotation"] = 90
+        elif change == "disable":
+            coordinator.entry.options["map_background"] = "standard"
+        elif change == "unload":
+            del hass.config_entries.async_get_entry("entry").runtime_data
+        else:
+            first.cancel()
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+        assert calls == 1
+        if change == "none":
+            assert isinstance(results[0], asyncio.CancelledError)
+            assert results[1].body == b"layer-png"
+        else:
+            assert all(isinstance(result, web.HTTPException) for result in results)
+            assert not api._photo_layers
+        await api.purge_entry("entry")
+        assert not api._photo_layers
+        assert not api._photo_inflight
+        await real_scene_cache.real_scene_owner(coordinator).async_close()
+
+    asyncio.run(run())
+
+
+def test_scene_only_consumer_starts_photo_read_without_delaying_vector_scene(
+    monkeypatch,
+):
+    async def run():
+        async def load(**kwargs):
+            return scene()
+
+        _, coordinator, api = environment(load)
+        coordinator.entry.options["map_background"] = "real_scene"
+        entered, release = asyncio.Event(), asyncio.Event()
+        photo = _photo()
+
+        async def fetch(*args, **kwargs):
+            entered.set()
+            await release.wait()
+            return photo
+
+        monkeypatch.setattr(real_scene_cache, "async_fetch_real_scene", fetch)
+        entry = await asyncio.wait_for(api.scene("entry"), 1)
+        await entered.wait()
+        assert entry.scene.image_png == b"private-png"
+        assert module._real_scene_path("entry", entry) is None
+        release.set()
+        owner = real_scene_cache.real_scene_owner(coordinator)
+        await owner.request()
+        assert module._real_scene_path("entry", await api.scene("entry")) is not None
+        await owner.async_close()
 
     asyncio.run(run())

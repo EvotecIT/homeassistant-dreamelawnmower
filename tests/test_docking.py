@@ -204,6 +204,17 @@ def test_dock_without_stopping_preserves_session_by_docking_directly() -> None:
     client._async_device_control.assert_awaited_once_with(dock=True)
 
 
+def test_find_mower_sends_locator_control_once() -> None:
+    client = _control_client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+
+    assert asyncio.run(client.async_find_mower()) == {"r": 0}
+
+    client._async_call_mowing_task.assert_awaited_once_with(
+        {"m": "a", "p": 1, "o": 9}, task_name="find mower",
+    )
+
+
 def test_device_stop_dispatches_before_optimistic_idle_update() -> None:
     calls: list[str] = []
     mower = SimpleNamespace(

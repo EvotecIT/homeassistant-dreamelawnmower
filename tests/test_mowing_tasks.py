@@ -5,11 +5,13 @@ from __future__ import annotations
 import pytest
 
 from dreame_lawn_mower_client.mowing_tasks import (
+    FIND_MOWER_OPERATION,
     MOWING_TASK_EDGE_PATROL,
     MOWING_TASK_POINT_PATROL,
     MowingTaskResponseError,
     build_edge_mowing_request,
     build_edge_patrol_request,
+    build_find_mower_request,
     build_maintenance_point_request,
     build_point_patrol_request,
     build_spot_mowing_request,
@@ -117,3 +119,8 @@ def test_mowing_task_response_requires_explicit_vendor_success() -> None:
             {"m": "r", "r": 0, "d": {"r": 9}},
             task_name="zone mowing",
         )
+
+
+def test_find_mower_request_uses_app_control_group() -> None:
+    assert FIND_MOWER_OPERATION == 9
+    assert build_find_mower_request() == {"m": "a", "p": 1, "o": 9}

@@ -364,6 +364,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         ],
         "maintenance_point_ids": [301],
         "patrol_point_ids": [302],
+        "patrol_point_zones": {},
         "point_type_codes": [1, 2],
         "point_record_validation": {
             "total_count": 5,

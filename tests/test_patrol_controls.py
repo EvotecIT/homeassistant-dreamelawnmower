@@ -458,6 +458,31 @@ def test_edge_patrol_service_uses_explicit_contours() -> None:
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
+def test_edge_patrol_service_defaults_to_each_zone_outer_edge() -> None:
+    entity = _entity()
+
+    asyncio.run(entity.async_start_edge_patrol())
+
+    entity.coordinator.client.async_start_edge_patrol.assert_awaited_once_with(
+        [[1, 0], [3, 0]],
+        expected_map_index=0,
+    )
+
+
+def test_edge_patrol_default_skips_inner_contours() -> None:
+    details = _vector_map_details()
+    details["maps"][0]["contour_ids"] = [[1, 1], [1, 0]]
+    details["maps"][0]["contour_count"] = 2
+    entity = _entity(vector_map_details=details)
+
+    asyncio.run(entity.async_start_edge_patrol())
+
+    entity.coordinator.client.async_start_edge_patrol.assert_awaited_once_with(
+        [[1, 0]],
+        expected_map_index=0,
+    )
+
+
 def test_edge_patrol_service_rejects_unknown_active_map_contour() -> None:
     entity = _entity()
 
@@ -545,4 +570,61 @@ def test_patrol_services_are_declared_for_home_assistant() -> None:
     )
 
     assert services["start_point_patrol"]["fields"]["point_ids"]["required"] is False
-    assert services["start_edge_patrol"]["fields"]["contour_ids"]["required"] is True
+    assert services["start_edge_patrol"]["fields"]["contour_ids"]["required"] is False
+
+
+def test_patrol_points_are_assigned_to_the_zone_that_contains_them() -> None:
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_map_metadata import (  # noqa: E501
+        app_map_patrol_point_zones,
+    )
+
+    zones = [
+        {"id": 1, "type": 0, "data": [[0, 0], [100, 0], [100, 100], [0, 100]]},
+        {"id": 2, "type": 0, "data": [[200, 0], [300, 0], [250, 80]]},
+        {"id": 3, "type": 2, "description": {}},
+    ]
+    points = [
+        {"id": 1, "param": {}, "point": [50, 50, 1], "time": 60, "type": 2},
+        {"id": 2, "param": {}, "point": [250, 20], "time": 60, "type": 2},
+        {"id": 3, "param": {}, "point": [500, 500], "time": 60, "type": 2},
+        {"id": 4, "param": {}, "point": [60, 60], "time": 60, "type": 1},
+    ]
+
+    assert app_map_patrol_point_zones(zones, points) == {"1": 1, "2": 2}
+
+
+@pytest.mark.parametrize("zone_id", [1, "1"])
+def test_point_patrol_service_visits_only_points_in_selected_zones(zone_id) -> None:
+    maps = _patrol_app_maps(patrol_point_ids=[1, 2, 3])
+    maps["maps"][0]["summary"]["patrol_point_zones"] = {"1": 1, "2": 3, "3": 1}
+    entity = _entity(app_maps=maps)
+
+    asyncio.run(entity.async_start_point_patrol(zone_ids=[zone_id]))
+
+    entity.coordinator.client.async_start_point_patrol.assert_awaited_once_with(
+        [1, 3], expected_map_index=0,
+    )
+    with pytest.raises(HomeAssistantError, match="Zone #9"):
+        asyncio.run(entity.async_start_point_patrol(zone_ids=[9]))
+
+
+@pytest.mark.parametrize("bad", [
+    {"id": []}, {"id": 1, "type": 2},
+    {"id": 1, "param": {}, "point": ["bad", 20], "time": 60, "type": 2},
+])
+def test_malformed_optional_patrol_point_does_not_break_map_summary(bad):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_map_metadata import (  # noqa: E501
+        app_map_patrol_point_zones,
+    )
+    zones = [{"id": 1, "data": [[0, 0], [100, 0], [100, 100], [0, 100]]}]
+    good = {"id": 1, "param": {}, "point": [50, 50], "time": 60, "type": 2}
+    assert app_map_patrol_point_zones(zones, [bad, good]) == {"1": 1}
+
+
+def test_point_patrol_rejects_mixed_valid_and_unknown_zones_before_dispatch():
+    maps = _patrol_app_maps()
+    maps["maps"][0]["summary"]["patrol_point_zones"] = {"1": 1}
+    entity = _entity(app_maps=maps)
+    with pytest.raises(HomeAssistantError, match="Zone #999"):
+        asyncio.run(entity.async_start_point_patrol(zone_ids=[1, 999]))
+    entity.coordinator.client.async_start_point_patrol.assert_not_called()

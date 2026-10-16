@@ -70,6 +70,7 @@
           "map_restart_preview": "Zachowuj podgląd mapy po restarcie", "map_label_scale": "Skala etykiet mapy",
           "map_rotation": "Obrót mapy",
           "map_theme": "Motyw mapy",
+          "map_background": "Tło mapy",
           "map_stroke_scale": "Grubość linii mapy",
           "map_marker_scale": "Rozmiar znaczników mapy",
           "map_marker_image": "Niestandardowy znacznik kosiarki",
@@ -86,6 +87,7 @@
           "map_restart_preview": "Domyślnie wyłączone. Przechowuje w Home Assistant jeden prywatny obraz JPEG mapy (do 2 MB). Podczas ładowania zgodnej mapy używane są tylko podglądy sprzed mniej niż 24 godzin; nie przedstawiają bieżącego stanu kosiarki. Wyłączenie opcji lub usunięcie integracji usuwa zapisany podgląd.",
           "map_rotation": "Domyślny obrót map, które nie mają własnego ustawienia. Dla konkretnej mapy użyj encji Obrót wyświetlania wybranej mapy.",
           "map_theme": "Wybierz spójny jasny, ciemny, nocny lub kontrastowy zestaw kolorów dla wszystkich map renderowanych lokalnie.",
+          "map_background": "Standardowe rysuje trawniki na jednolitym tle. Zdjęcie rzeczywiste umieszcza pod mapą zdjęcie ogrodu z góry wykonane przez kosiarkę, jeśli je udostępnia.",
           "map_stroke_scale": "Skaluj granice i ścieżki mapy w zakresie od 0,5 do 3.",
           "map_marker_scale": "Skaluj punkty mapy i znacznik bieżącej pozycji kosiarki w zakresie od 0,5 do 3.",
           "map_marker_image": "Opcjonalny plik PNG, JPEG lub WebP w katalogu config/www Home Assistanta, na przykład mower/marker.png albo /local/mower/marker.png. Pliki spoza tego katalogu oraz większe niż 1 MB są ignorowane.",
@@ -126,6 +128,12 @@
         "dark": "Ciemny",
         "midnight": "Nocny",
         "high_contrast": "Wysoki kontrast"
+      }
+    },
+    "map_background": {
+      "options": {
+        "standard": "Standardowe",
+        "real_scene": "Zdjęcie rzeczywiste"
       }
     },
     "map_spot_area_style": {
@@ -301,6 +309,16 @@
     "plan_mowing_preference_update": {
       "name": "Przygotuj zmianę preferencji koszenia",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Odtwórz dźwięk przez kosiarkę",
+      "description": "Odtwarza lokalny plik dźwiękowy przez głośnik kosiarki, korzystając z podglądu na żywo przez chmurę. Odtwarzanie trwa maksymalnie 60 sekund.",
+      "fields": {
+        "file_path": {
+          "name": "Ścieżka pliku",
+          "description": "Bezwzględna ścieżka do dozwolonego lokalnego pliku dźwiękowego, na przykład /media/hello.mp3."
+        }
+      }
     }
   }
 }

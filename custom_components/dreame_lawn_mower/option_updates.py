@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .const import (
+    CONF_MAP_BACKGROUND,
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
@@ -22,6 +23,7 @@ from .const import (
 from .map_preview import CONF_MAP_RESTART_PREVIEW
 
 PRESENTATION_OPTIONS = frozenset({
+    CONF_MAP_BACKGROUND,
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,

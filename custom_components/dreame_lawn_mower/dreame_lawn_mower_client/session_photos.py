@@ -32,10 +32,11 @@ MAX_SESSION_HISTORY = 100
 # Person-detection photos are stored next to the session photos as
 # ``<unix seconds>_person.jpg`` and are listed by no session summary. A LiDAX
 # Ultra 1000 named the photo one second before Home Assistant observed the
-# code 27 notice, so search a small window nearest that second first.
+# code 27 notice, but another detection was only observed 26 seconds after its
+# photo, so search up to a minute back, nearest that second first.
 PERSON_PHOTO_SUFFIX = "_person.jpg"
 PERSON_PHOTO_SEARCH_OFFSETS = tuple(
-    sorted(range(-20, 4), key=lambda offset: (abs(offset + 1), offset > -1))
+    sorted(range(-60, 4), key=lambda offset: (abs(offset + 1), offset > -1))
 )
 _PHOTO_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.(?:jpe?g|png)", re.I)
 

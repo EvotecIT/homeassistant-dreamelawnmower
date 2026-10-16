@@ -1011,6 +1011,14 @@ class DreameLawnMowerClient(
             refresh_state=async_refresh_state,
         )
 
+    async def async_find_mower(self) -> Any:
+        """Play the mower's locator sound without changing its task."""
+        from .mowing_tasks import build_find_mower_request
+
+        return await self._async_call_mowing_task(
+            build_find_mower_request(), task_name="find mower",
+        )
+
     @_serialized_task_control
     async def async_dock_without_stopping(self) -> None:
         """Return to base while preserving a resumable mowing session."""

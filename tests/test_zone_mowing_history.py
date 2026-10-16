@@ -365,6 +365,50 @@ def test_zone_history_task_coalesces_and_is_drained_before_client_shutdown() -> 
     asyncio.run(scenario())
 
 
+def test_shutdown_retires_photo_owner_and_cancels_zone_history() -> None:
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+    from custom_components.dreame_lawn_mower.real_scene_cache import RealSceneCache
+
+    async def scenario():
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        photo_started, photo_stopped = asyncio.Event(), asyncio.Event()
+        history_started, history_stopped = asyncio.Event(), asyncio.Event()
+
+        async def owned_read(started, stopped):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+        photo = RealSceneCache(coordinator)
+        photo._task = asyncio.create_task(owned_read(photo_started, photo_stopped))
+        history = asyncio.create_task(owned_read(history_started, history_stopped))
+        coordinator._real_scene_owner = photo
+        coordinator._zone_history_refresh_task = history
+        coordinator._metadata_refresh_task = None
+        coordinator._metadata_shutdown_close_task = None
+        coordinator._client_update_task = None
+        coordinator.client = SimpleNamespace(set_update_callback=Mock())
+        coordinator._async_shutdown_connectivity_recovery = AsyncMock()
+        await photo_started.wait()
+        await history_started.wait()
+
+        await coordinator._async_stop_owned_tasks()
+        assert await coordinator._async_drain_metadata_for_shutdown()
+
+        assert photo_stopped.is_set()
+        assert history_stopped.is_set()
+        assert photo._closed and photo._task is None
+        assert history.cancelled()
+        assert coordinator._metadata_refresh_publish is False
+        coordinator.client.set_update_callback.assert_called_once_with(None)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("shape", ["outcomes_missing", "mode_missing", "partial_rows"])
 def test_unknown_newer_summary_keeps_old_completions_from_becoming_authoritative(
     shape,

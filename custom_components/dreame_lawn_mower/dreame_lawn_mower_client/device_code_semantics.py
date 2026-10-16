@@ -5,9 +5,10 @@ error enum. Mowers also use the channel for alerts, maintenance reminders,
 lifecycle notifications, and operating conditions, so numeric overlap with a
 vacuum code is not evidence of a mower fault.
 
-The base registry is the mower community's cross-model table. The A2 overrides
-come from the equivalent g2408 and g2568 Dreame app plugin fault catalogs,
-whose FAULT/ALERT/INFO metadata distinguishes hard faults from notifications.
+The base registry is the mower community's cross-model table. Family-specific
+overrides follow the Dreame app's model selection and versioned fault catalogs.
+Catalog versions can assign different meanings to the same code; a presentation
+category or FAULT prefix alone is not sufficient to change its operational tier.
 Unknown codes remain visible but are never promoted to hard faults solely
 because a vacuum enum happens to contain the same number.
 """
@@ -17,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final, cast
+
+from .model_families import dreame_model_family
 
 
 class MowerDeviceCodeTier(StrEnum):
@@ -195,6 +198,10 @@ _A2_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
         MowerDeviceCodeTier.ERROR,
         {
             0: "robot_lifted",
+            # Builds911/920/926/977/978 select map damage;983 selects startup
+            # abnormality. No firmware transition has been established, so keep
+            # both meanings visible and preserve the existing hard-fault tier.
+            25: "startup_or_map_data_error",
             59: "battery_temperature_too_low",
         },
     ),
@@ -212,10 +219,34 @@ _A2_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
         MowerDeviceCodeTier.INFO,
         {
             16: "scheduled_mowing_suspended_low_light",
-            47: "task_cancelled",
             80: "lidar_cooling",
         },
     ),
+}
+
+# A3 and A3 Pro share the modern catalog, except their cutter layout. Keep
+# person detection's existing field-backed state policy: unlike A2, a paused
+# A3 with code27 still reports a hard fault. See docs/dreame-app-catalog.md.
+_A3_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
+    **{
+        code: definition
+        for code, definition in _A2_DEVICE_CODE_OVERRIDES.items()
+        if code != 27
+    },
+    **_definitions(
+        MowerDeviceCodeTier.ERROR,
+        {
+            19: "left_front_drive_wheel_error",
+            45: "right_front_drive_wheel_error",
+        },
+    ),
+}
+_A3_CUTTER_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
+    **_definitions(MowerDeviceCodeTier.ATTENTION, {39: "edge_blades_worn"}),
+    **_definitions(MowerDeviceCodeTier.ERROR, {47: "edge_blade_disc_blocked"}),
+}
+_A3_PRO_CUTTER_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
+    **_definitions(MowerDeviceCodeTier.ERROR, {46: "right_blade_disc_blocked"}),
 }
 
 _A1_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
@@ -266,14 +297,9 @@ _VIAX_500_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     ),
 }
 
-_A2_MODELS: Final[frozenset[str]] = frozenset(
-    {
-        "dreame.mower.g2408",
-        "dreame.mower.g2568d",
-        "g2408",
-        "g2568d",
-    }
-)
+# Existing exact A1 overrides remain separate from family recognition: observed
+# app catalogs conflict with these existing meanings, without a proven firmware
+# boundary. Do not propagate those overrides to every A1 Pro suffix.
 _A1_MODELS: Final[frozenset[str]] = frozenset(
     {
         "dreame.mower.p2255",
@@ -294,9 +320,7 @@ _MOVA_MODELS: Final[frozenset[str]] = frozenset(
         "g2584a",
     }
 )
-_VIAX_500_MODELS: Final[frozenset[str]] = frozenset(
-    {"mova.mower.g2583", "g2583"}
-)
+_VIAX_500_MODELS: Final[frozenset[str]] = frozenset({"mova.mower.g2583", "g2583"})
 
 
 def mower_device_code(value: object) -> int | None:
@@ -321,8 +345,16 @@ def mower_device_code_definition(
         return None
 
     normalized_model = str(model or "").strip().casefold()
-    if normalized_model in _A2_MODELS:
+    family = dreame_model_family(model)
+    if family in {"g2408", "g2568"}:
         definition = _A2_DEVICE_CODE_OVERRIDES.get(code)
+        if definition is not None:
+            return definition
+    elif family in {"q2501", "g2541"}:
+        cutter_overrides = (
+            _A3_CUTTER_OVERRIDES if family == "q2501" else _A3_PRO_CUTTER_OVERRIDES
+        )
+        definition = cutter_overrides.get(code) or _A3_DEVICE_CODE_OVERRIDES.get(code)
         if definition is not None:
             return definition
     elif normalized_model in _A1_MODELS:
@@ -437,6 +469,4 @@ MOWER_INFORMATIONAL_EVENT_CODES: Final[frozenset[int]] = frozenset(
     for code, definition in _BASE_DEVICE_CODES.items()
     if definition.tier is MowerDeviceCodeTier.INFO
 )
-MOWER_NON_FAULT_CODES: Final[frozenset[int]] = frozenset(
-    MOWER_STATUS_NOTICE_CODE_NAMES
-)
+MOWER_NON_FAULT_CODES: Final[frozenset[int]] = frozenset(MOWER_STATUS_NOTICE_CODE_NAMES)

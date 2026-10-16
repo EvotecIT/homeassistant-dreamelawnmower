@@ -106,7 +106,7 @@ async def async_setup_entry(
     @callback
     def async_add_schedule_switches() -> None:
         new_entities: list[DreameLawnMowerSchedulePlanSwitch] = []
-        for item in schedule_plan_entries(coordinator.schedules):
+        for item in schedule_switch_entries(coordinator.schedules):
             key = (item["map_index"], item["plan_id"])
             if key in known_schedule_plans:
                 continue
@@ -507,6 +507,23 @@ def schedule_plan_entries(value: Mapping[str, Any] | None) -> list[dict[str, Any
                 }
             )
     return result
+
+
+def schedule_switch_entries(
+    value: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return the plans that deserve a switch.
+
+    The mower reports a fixed number of plan slots per map, including slots the
+    user never filled. The vendor app hides those, so we do too: a slot only
+    gets a switch once it has a name, a task, or is enabled. Setup re-runs on
+    every coordinator update, so a slot filled later in the app appears then.
+    """
+    return [
+        item
+        for item in schedule_plan_entries(value)
+        if item["enabled"] or item["task_count"] or item["name"]
+    ]
 
 
 def reported_preference_switch_keys(

@@ -124,6 +124,13 @@ start_point_patrol:
         [1, 2, 3]. Omit to visit all patrol points.
       required: false
       example: [1, 2, 3]
+    zone_ids:
+      name: Zone IDs
+      description: >-
+        Optional list of lawn zone ids. Visits only the patrol points located
+        inside these zones. Do not combine with point_ids.
+      required: false
+      example: [1]
 
 start_edge_patrol:
   name: Start edge patrol
@@ -139,8 +146,10 @@ start_edge_patrol:
   fields:
     contour_ids:
       name: Contour IDs
-      description: List of edge contour ids, for example [[1, 0]].
-      required: true
+      description: >-
+        List of edge contour ids, for example [[1, 0]]. Omit to patrol the
+        outer edge of every zone on the active map.
+      required: false
       example: [[1, 0]]
       selector:
         object: {}
@@ -191,6 +200,31 @@ download_person_photo:
       required: false
       selector:
         datetime:
+
+play_audio:
+  name: Play audio through the mower
+  description: >-
+    Play a local audio file through the mower speaker, like the app's talk
+    button. The audio uses the live video connection, which this action opens
+    when needed and releases afterwards. The file is converted with ffmpeg to
+    16 kHz mono AAC and limited to 60 seconds. The path must be in an allowed
+    directory such as /media. Use the cloud video transport. Supported files
+    include MP3, WAV, AAC, FLAC, Ogg, M4A/MP4 and Matroska; playlists and remote
+    URLs are rejected.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: camera
+      supported_features:
+        - camera.CameraEntityFeature.STREAM
+  fields:
+    file_path:
+      name: File path
+      description: Local path of the audio file, for example /media/hello.mp3.
+      required: true
+      example: /media/hello.mp3
+      selector:
+        text:
 
 switch_current_map:
   name: Switch current map

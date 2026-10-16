@@ -11,14 +11,20 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from homeassistant.components.camera import Camera
+import voluptuous as vol
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.const import MATCH_ALL, EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+    async_get_current_platform,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_MAP_BACKGROUND,
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
@@ -27,6 +33,7 @@ from .const import (
     CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
+    DEFAULT_MAP_BACKGROUND,
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_MOWING_PATH_STYLE,
@@ -52,6 +59,7 @@ from .dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
+from .dreame_lawn_mower_client.real_scene import RealSceneImage
 from .feature_capabilities import coordinator_feature_capabilities
 from .ha_tasks import create_background_task
 from .image import (
@@ -77,6 +85,7 @@ from .map_switch_refresh import (
 )
 from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
+from .real_scene_cache import real_scene_owner
 from .runtime_data import DreameLawnMowerConfigEntry
 from .video_camera import DreameLawnMowerVideoCamera
 
@@ -85,6 +94,7 @@ from .video_camera import DreameLawnMowerVideoCamera
 PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
+# The mower refreshes the photo after a task; re-read its name occasionally.
 _MAP_CACHE_TTL = timedelta(seconds=60)
 _MAP_TIMEOUT_SECONDS = 6.0
 _MAP_POLL_INTERVAL_SECONDS = 0.5
@@ -117,6 +127,13 @@ async def async_setup_entry(
     )
     if video_capability.state != CAPABILITY_UNSUPPORTED:
         entities.append(DreameLawnMowerVideoCamera(coordinator, entry))
+        async_get_current_platform().async_register_entity_service(
+            "play_audio",
+            {vol.Required("file_path"): cv.string},
+            "async_play_audio",
+            required_features=[CameraEntityFeature.STREAM],
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     async_add_entities(entities)
 
 
@@ -135,6 +152,7 @@ class DreameLawnMowerMapCamera(
     _prewarm_map_image = True
     _supports_restart_preview = True
     _supports_mowing_scene = True
+    _supports_real_scene = True
     _refresh_cached_view_on_coordinator_update = True
     # Camera attributes describe the current rendered/diagnostic view. Persisting
     # their large map payloads on every refresh creates unbounded recorder churn.
@@ -177,10 +195,10 @@ class DreameLawnMowerMapCamera(
     async def async_will_remove_from_hass(self) -> None:
         """Cancel a private warm-up task when the entity is removed."""
         self._map_refresh_pending = False
-        task = self._map_refresh_task
-        if task is not None and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        for task in (self._map_refresh_task,):
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
         await super().async_will_remove_from_hass()
 
     def _handle_coordinator_update(self) -> None:
@@ -372,6 +390,7 @@ class DreameLawnMowerMapCamera(
 
     def _start_map_refresh(self) -> asyncio.Task[bytes | None]:
         """Start or reuse the entity's in-flight map render."""
+        self._maybe_refresh_real_scene()
         task = self._map_refresh_task
         if task is not None and not task.done():
             return task
@@ -396,6 +415,15 @@ class DreameLawnMowerMapCamera(
                     available=self.available,
                 ):
                     self._start_map_refresh()
+
+    def _maybe_refresh_real_scene(self) -> None:
+        """Request the entry's shared photo without blocking camera rendering."""
+        if self._supports_real_scene:
+            real_scene_owner(self.coordinator).request()
+
+    @property
+    def _real_scene(self) -> RealSceneImage | None:
+        return real_scene_owner(self.coordinator).current
 
     async def _async_refresh_and_render_map_image(self) -> bytes | None:
         """Refresh the source view and atomically replace rendered JPEG bytes."""
@@ -569,6 +597,7 @@ class DreameLawnMowerMapCamera(
             self.coordinator.entry.options,
             self._selected_map_index,
             marker_image=self._map_marker_image,
+            real_scene=self._real_scene,
         )
 
     @property
@@ -611,6 +640,8 @@ class DreameLawnMowerMapCamera(
                 (str(key), value)
                 for key, value in options.get(CONF_MAP_ROTATIONS, {}).items()
             )),
+            options.get(CONF_MAP_BACKGROUND, DEFAULT_MAP_BACKGROUND),
+            self._real_scene.digest if self._real_scene is not None else None,
         )
 
 
@@ -669,6 +700,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
     """Disabled-by-default map diagnostics camera."""
 
     _attr_name = "Map Diagnostics"
+    _supports_real_scene = False
     _supports_restart_preview = False
     _supports_mowing_scene = False
     _attr_icon = "mdi:code-json"
@@ -760,6 +792,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
     """Disabled-by-default contact sheet of all mower app maps."""
 
     _attr_name = "All Maps"
+    _supports_real_scene = False
     _supports_restart_preview = False
     _supports_mowing_scene = False
     _attr_icon = "mdi:map-multiple-outline"

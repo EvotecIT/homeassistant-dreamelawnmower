@@ -245,9 +245,13 @@ mowing:
   `point_ids` to choose points, or omit it to visit every patrol point on the
   active, hash-verified map. An explicit empty list is rejected. Patrol points
   are app-map `point` records with `type: 2`
-  (maintenance points use `type: 1`).
-- `dreame_lawn_mower.start_edge_patrol` drives along explicit edge contours
-  using the same `[edge_id, contour_index]` pairs as `start_edge_mowing`.
+  (maintenance points use `type: 1`). Pass `zone_ids` instead to visit only
+  the patrol points located inside those lawn zones; the integration assigns
+  each point to the zone outline that contains it.
+- `dreame_lawn_mower.start_edge_patrol` drives along edge contours using the
+  same `[edge_id, contour_index]` pairs as `start_edge_mowing`. Omit
+  `contour_ids` to patrol the outer edge (contour index `0`) of every zone on
+  the active map, as tapping the zones in the vendor app does.
 
 ```yaml
 action: dreame_lawn_mower.start_edge_patrol
@@ -333,11 +337,12 @@ actions:
 When the mower detects a person it reports notice code `27` (human detected)
 and stores a photo next to the session photos as `<unix seconds>_person.jpg`.
 No session summary lists these photos. `dreame_lawn_mower.download_person_photo`
-looks for the photo of one detection by trying the names from 20 seconds before
+looks for the photo of one detection by trying the names from 60 seconds before
 to 3 seconds after the notice, nearest the expected second first, and saves the
 first one found to the same media folder as the session photos. On a MOVA LiDAX
-Ultra 1000 (`mova.mower.g2529c`) the photo was named one second before Home
-Assistant observed the notice, so one request is normally enough. A missing
+Ultra 1000 (`mova.mower.g2529c`) the photo was usually named one second before
+Home Assistant observed the notice, so one request is normally enough; one
+detection was observed 26 seconds after its photo, hence the wider window. A missing
 photo returns an empty `photos` list. Without `detected_at`, the latest retained
 human-detection notice is used.
 

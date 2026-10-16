@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 if TYPE_CHECKING:
+    from .dreame_lawn_mower_client.real_scene import RealSceneImage
     from .observation_checkpoint import ObservationCheckpoint
     from .option_updates import EntryUpdateSnapshot
     from .video_lan_cache import DreameLawnMowerVideoLanCache
@@ -526,6 +527,8 @@ class DreameLawnMowerCoordinator(
         self._retained_device_snapshot_ids: set[int] = set()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
+        # Shared by the map cameras and the interactive map API.
+        self.real_scene: RealSceneImage | None = None
         self._last_map_switch_event_at: float | None = None
         self._map_switch_inventory_pending_event: float | None = None
         self._map_switch_pending_event: float | None = None
@@ -3496,6 +3499,9 @@ class DreameLawnMowerCoordinator(
         """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
         self._cancel_metadata_refresh()
+        photo_owner = getattr(self, "_real_scene_owner", None)
+        if photo_owner is not None:
+            await photo_owner.async_close()
         await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
         self.client.set_update_callback(None)

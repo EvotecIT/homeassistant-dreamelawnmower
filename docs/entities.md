@@ -88,6 +88,9 @@ return to the dock. The end-task button uses the same confirmed operation as
 the `cancel_current_task` action; it waits for the mower's inactive state before
 reporting success.
 
+**Find My Mower** makes the mower play its locator sound, like the app's
+Find my mower control. It does not move the mower or change its task.
+
 ## Mowing time
 
 **Current Mowing Time** is reported by the mower. It remains unavailable when
