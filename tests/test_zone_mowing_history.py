@@ -77,15 +77,15 @@ def test_region_status_becomes_one_record_per_zone() -> None:
             "md5": HASH,
         },
         MON,
-    )
+    ).records
 
     assert records == (
         ZoneMowingRecord(2, 2, 10, 20, 100, MON, HASH),
         ZoneMowingRecord(1, 1, 10, 20, 100, MON, HASH),
     )
     assert [record.completed for record in records] == [True, False]
-    assert zone_mowing_records({"point_status": [[1, 2]]}, PATROL) == ()
-    assert zone_mowing_records(None, PATROL) == ()
+    assert zone_mowing_records({"point_status": [[1, 2]]}, PATROL).records == ()
+    assert not zone_mowing_records(None, PATROL).understood
 
 
 def test_history_reads_each_summary_once_and_reuses_known_ones() -> None:
@@ -199,9 +199,7 @@ def test_map_revision_requires_current_unique_verified_slot(invalid) -> None:
     assert selected_map_revision(maps, 0) is None
 
 
-def test_sensor_binds_map_identity_and_suppresses_incomplete_history() -> (
-    None
-):
+def test_sensor_binds_map_identity_and_suppresses_incomplete_history() -> None:
     from .test_native_zone_labels import _vector
 
     sensor = object.__new__(DreameLawnMowerLeastRecentlyMowedZoneSensor)
@@ -245,25 +243,22 @@ def test_invalid_or_reversed_end_does_not_claim_completed_mowing(invalid_end) ->
         },
         MON,
     )
+    records = records.records
     assert not records[0].completed
     overview = zone_mowing_overview(ZONES, {MON: records}, map_hash=HASH)
     assert all(item["last_completed_at"] is None for item in overview)
 
 
-@pytest.mark.parametrize("mode", [101, 103, 107, 108, None])
+@pytest.mark.parametrize("mode", [101, 103, 104, 107, 108])
 def test_edge_spot_and_patrol_do_not_count_as_whole_zone_mowing(mode) -> None:
-    assert (
-        zone_mowing_records(
-            {"mode": mode, "region_status": [[1, 2]], "start": 10, "end": 20},
-            MON,
-        )
-        == ()
+    decoded = zone_mowing_records(
+        {"mode": mode, "region_status": [[1, 2]], "start": 10, "end": 20}, MON,
     )
+    assert decoded.records == ()
+    assert decoded.understood
 
 
-def test_history_hydration_resumes_without_starving_after_failure() -> (
-    None
-):
+def test_history_hydration_resumes_without_starving_after_failure() -> None:
     names = [f"ali_dreame/2026/10/15/IQ000001/-1234_{n}.json" for n in range(8)]
     cloud = _Cloud(
         {name: _summary([[1, 2]], 10, 20) for name in names},
@@ -368,3 +363,41 @@ def test_zone_history_task_coalesces_and_is_drained_before_client_shutdown() -> 
         coordinator.async_update_listeners.assert_not_called()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("shape", ["outcomes_missing", "mode_missing", "partial_rows"])
+def test_unknown_newer_summary_keeps_old_completions_from_becoming_authoritative(
+    shape,
+) -> None:
+    old = {
+        "mode": 100,
+        "md5": HASH,
+        "start": 10,
+        "end": 20,
+        "region_status": [[1, 2], [3, 2]],
+    }
+    newer = {"mode": 100, "md5": HASH, "start": 30, "end": 40}
+    if shape == "mode_missing":
+        newer.pop("mode")
+        newer["region_status"] = [[1, 2]]
+    elif shape == "partial_rows":
+        newer["region_status"] = [[1, 2], ["undecoded", 2]]
+    cloud = _Cloud(
+        {MON: json.dumps(old).encode(), TUE: json.dumps(newer).encode()},
+        [_record(100, TUE, 2000), _record(100, MON, 1000)],
+    )
+    first = asyncio.run(async_get_zone_mowing_records(_client(cloud)))
+    assert MON in first.sessions
+    assert not first.complete
+    assert TUE in first.pending
+    if shape == "partial_rows":
+        assert first.sessions[TUE][0].zone_id == 1
+    # A later complete upload can resolve the unknown outcome without losing
+    # cached summaries or permanently accepting the incomplete upload.
+    cloud.files[TUE] = json.dumps({**old, "start": 30, "end": 40}).encode()
+    second = asyncio.run(async_get_zone_mowing_records(_client(cloud), known=first))
+    assert second.complete
+    assert (
+        latest_zone_mowing(second.sessions, map_hash=HASH)[1]["completed"].ended_at
+        == 40
+    )

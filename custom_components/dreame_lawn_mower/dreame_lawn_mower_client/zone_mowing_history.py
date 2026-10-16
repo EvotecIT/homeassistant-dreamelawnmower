@@ -80,24 +80,34 @@ class ZoneMowingHistory:
         )
 
 
+@dataclass(frozen=True)
+class ZoneMowingSummary:
+    """Keep irrelevant outcomes distinct from unsupported or partial decoding."""
+
+    records: tuple[ZoneMowingRecord, ...] = ()
+    understood: bool = False
+
+
 def zone_mowing_records(
     summary: Any,
     session_object_name: str,
-) -> tuple[ZoneMowingRecord, ...]:
+) -> ZoneMowingSummary:
     """Decode whole-zone runs; edge, spot and patrol outcomes are separate."""
-    if (
-        not isinstance(summary, Mapping)
-        or type(summary.get("mode")) is not int
-        or summary.get("mode") not in (100, 102)
-    ):
-        return ()
+    if not isinstance(summary, Mapping) or type(summary.get("mode")) is not int:
+        return ZoneMowingSummary()
+    if summary["mode"] in (101, 103, 104, 107, 108):
+        return ZoneMowingSummary(understood=True)
+    if summary["mode"] not in (100, 102):
+        return ZoneMowingSummary()
     statuses = summary.get("region_status")
     if not isinstance(statuses, list):
-        return ()
+        return ZoneMowingSummary()
     records = []
     seen: set[int] = set()
+    understood = True
     for item in statuses:
         if not isinstance(item, list | tuple) or len(item) < 2:
+            understood = False
             continue
         zone_id, status = item[:2]
         if (
@@ -106,6 +116,7 @@ def zone_mowing_records(
             or zone_id <= 0
             or zone_id in seen
         ):
+            understood = False
             continue
         seen.add(zone_id)
         records.append(
@@ -119,7 +130,9 @@ def zone_mowing_records(
                 map_revision_hash(summary.get("md5")),
             )
         )
-    return tuple(records)
+        if status == 2 and not records[-1].completed:
+            understood = False
+    return ZoneMowingSummary(tuple(records), understood)
 
 
 async def async_get_zone_mowing_records(
@@ -155,7 +168,8 @@ async def async_get_zone_mowing_records(
         result = {
             name: known.sessions[name] for name in names if name in known.sessions
         }
-        missing = [name for name in names if name not in result]
+        resolved = {name for name in result if name not in known.pending}
+        missing = [name for name in names if name not in resolved]
         # Untried new summaries first; retain a rotated queue across partial passes.
         pending = [name for name in missing if name not in known.pending]
         pending.extend(name for name in known.pending if name in missing)
@@ -175,8 +189,11 @@ async def async_get_zone_mowing_records(
                 # Cancellation is BaseException and must propagate to its owner.
                 break
             if summary is not None:
-                result[name] = zone_mowing_records(summary, name)
-        unfinished = [name for name in pending if name not in result]
+                decoded = zone_mowing_records(summary, name)
+                result[name] = decoded.records
+                if decoded.understood:
+                    resolved.add(name)
+        unfinished = [name for name in pending if name not in resolved]
         # One unavailable old object cannot permanently starve the remaining queue.
         unfinished = [name for name in unfinished if name not in attempted] + [
             name for name in unfinished if name in attempted
