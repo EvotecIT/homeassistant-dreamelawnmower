@@ -4,18 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
-from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.session_photos import (  # noqa: E501
+import pytest
+
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_history import (  # noqa: E501
+    ZoneMowingHistory,
     ZoneMowingRecord,
     async_get_zone_mowing_records,
     latest_zone_mowing,
     zone_mowing_records,
 )
 from custom_components.dreame_lawn_mower.sensor_zone_history import (
+    DreameLawnMowerLeastRecentlyMowedZoneSensor,
+    selected_map_revision,
     zone_mowing_overview,
 )
 
 from .test_session_photos import _client, _Cloud, _record
+
+HASH = "a" * 32
+OTHER_HASH = "b" * 32
 
 MON = "ali_dreame/2026/10/14/IQ000001/-1234_171000000.0529.json"
 TUE = "ali_dreame/2026/10/15/IQ000001/-1234_120000000.0529.json"
@@ -29,7 +39,13 @@ ZONES = [
 
 def _summary(region_status, start: int, end: int, mode: int = 100) -> bytes:
     return json.dumps(
-        {"region_status": region_status, "start": start, "end": end, "mode": mode}
+        {
+            "region_status": region_status,
+            "start": start,
+            "end": end,
+            "mode": mode,
+            "md5": HASH,
+        }
     ).encode()
 
 
@@ -58,13 +74,14 @@ def test_region_status_becomes_one_record_per_zone() -> None:
             "start": 10,
             "end": 20,
             "mode": 100,
+            "md5": HASH,
         },
         MON,
     )
 
     assert records == (
-        ZoneMowingRecord(2, 2, 10, 20, 100, MON),
-        ZoneMowingRecord(1, 1, 10, 20, 100, MON),
+        ZoneMowingRecord(2, 2, 10, 20, 100, MON, HASH),
+        ZoneMowingRecord(1, 1, 10, 20, 100, MON, HASH),
     )
     assert [record.completed for record in records] == [True, False]
     assert zone_mowing_records({"point_status": [[1, 2]]}, PATROL) == ()
@@ -84,8 +101,8 @@ def test_history_reads_each_summary_once_and_reuses_known_ones() -> None:
     client = _client(cloud)
 
     first = asyncio.run(async_get_zone_mowing_records(client))
-    assert set(first) == {MON, TUE, PATROL}
-    assert first[PATROL] == ()
+    assert set(first.sessions) == {MON, TUE, PATROL}
+    assert first.sessions[PATROL] == ()
     assert sorted(downloads) == sorted([MON, TUE, PATROL])
 
     downloads.clear()
@@ -96,9 +113,11 @@ def test_history_reads_each_summary_once_and_reuses_known_ones() -> None:
 
 def test_latest_completion_ignores_newer_interrupted_runs() -> None:
     sessions = asyncio.run(async_get_zone_mowing_records(_client(_cloud())))
-    sessions["later"] = (ZoneMowingRecord(1, 1, 1792100000, 1792101000, 100, "x"),)
+    sessions.sessions["later"] = (
+        ZoneMowingRecord(1, 1, 1792100000, 1792101000, 100, "x", HASH),
+    )
 
-    latest = latest_zone_mowing(sessions)
+    latest = latest_zone_mowing(sessions.sessions, map_hash=HASH)
 
     assert latest[1]["latest"].status == 1
     assert latest[1]["completed"].ended_at == 1792022742
@@ -109,7 +128,7 @@ def test_latest_completion_ignores_newer_interrupted_runs() -> None:
 def test_overview_puts_never_completed_zones_first_then_oldest() -> None:
     sessions = asyncio.run(async_get_zone_mowing_records(_client(_cloud())))
 
-    overview = zone_mowing_overview(ZONES, sessions)
+    overview = zone_mowing_overview(ZONES, sessions.sessions, map_hash=HASH)
 
     assert [item["zone_id"] for item in overview] == [2, 1, 3]
     assert overview[0]["last_completed_at"] is None
@@ -125,3 +144,227 @@ def test_overview_without_history_keeps_zone_order() -> None:
         2,
         3,
     ]
+
+
+def test_unattributed_history_does_not_transfer_completion_between_maps() -> None:
+    sessions = {MON: (ZoneMowingRecord(1, 2, 10, 20, 100, MON),)}
+    # Repeated numeric zone IDs do not establish which stored map was mowed.
+    overview = zone_mowing_overview([{"area_id": 1, "label": "Other garden"}], sessions)
+    assert overview[0]["last_completed_at"] is None
+
+
+def test_late_summary_failure_preserves_successful_downloads_for_next_refresh() -> None:
+    cloud = _cloud()
+    cloud.records = [_record(100, MON, 3000), _record(100, TUE, 2000)]
+    original = cloud.async_get_public_file
+    downloads = []
+
+    async def download(url, **kwargs):
+        downloads.append(url)
+        if TUE in url:
+            raise TimeoutError("late response")
+        return await original(url, **kwargs)
+
+    cloud.async_get_public_file = download
+    first = asyncio.run(async_get_zone_mowing_records(_client(cloud)))
+    assert MON in first.sessions
+    assert not first.complete
+    downloads.clear()
+    second = asyncio.run(async_get_zone_mowing_records(_client(cloud), known=first))
+    assert MON in second.sessions
+    assert all(MON not in url for url in downloads)
+
+
+def _maps():
+    from .test_native_zone_labels import _maps as native_maps
+
+    maps = native_maps()
+    for entry, revision in zip(maps["maps"], (HASH, OTHER_HASH), strict=True):
+        entry.update(md5=revision, info={"hash": revision})
+    return maps
+
+
+@pytest.mark.parametrize("invalid", ["hash", "stale", "duplicate", "unverified"])
+def test_map_revision_requires_current_unique_verified_slot(invalid) -> None:
+    maps = _maps()
+    assert selected_map_revision(maps, 0) == HASH
+    if invalid == "hash":
+        maps["maps"][0]["md5"] = OTHER_HASH
+    elif invalid == "stale":
+        maps["current_map_index"] = 1
+    elif invalid == "duplicate":
+        maps["maps"][1].update(md5=HASH, info={"hash": HASH})
+    else:
+        maps["maps"][0]["hash_match"] = False
+    assert selected_map_revision(maps, 0) is None
+
+
+def test_sensor_binds_map_identity_and_suppresses_incomplete_history() -> (
+    None
+):
+    from .test_native_zone_labels import _vector
+
+    sensor = object.__new__(DreameLawnMowerLeastRecentlyMowedZoneSensor)
+    records = tuple(
+        ZoneMowingRecord(zone, 2, 10, end, 100, MON, HASH)
+        for zone, end in ((1, 30), (3, 20))
+    )
+    sensor.coordinator = SimpleNamespace(
+        data=SimpleNamespace(available=True),
+        selected_map_index=0,
+        app_maps=_maps(),
+        batch_device_data=None,
+        vector_map_details=_vector(),
+        zone_mowing_sessions=ZoneMowingHistory({MON: records}),
+    )
+    assert sensor.available
+    assert sensor.native_value == "Zone #3"
+    assert sensor.extra_state_attributes["zone_id"] == 3
+    # Same numeric zones on another map cannot inherit the old completion dates.
+    sensor.coordinator.selected_map_index = 1
+    sensor.coordinator.app_maps["current_map_index"] = 1
+    assert not sensor.available
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes["unknown_zone_ids"] == [1, 3]
+    sensor.coordinator.selected_map_index = 0
+    sensor.coordinator.app_maps["current_map_index"] = 0
+    sensor.coordinator.zone_mowing_sessions = ZoneMowingHistory({MON: records}, (TUE,))
+    assert not sensor.available
+    assert not sensor.extra_state_attributes["history_complete"]
+
+
+@pytest.mark.parametrize("invalid_end", [None, -1, 1792090000000, 10**30, 5])
+def test_invalid_or_reversed_end_does_not_claim_completed_mowing(invalid_end) -> None:
+    records = zone_mowing_records(
+        {
+            "region_status": [[1, 2]],
+            "start": 10,
+            "end": invalid_end,
+            "mode": 100,
+            "md5": HASH,
+        },
+        MON,
+    )
+    assert not records[0].completed
+    overview = zone_mowing_overview(ZONES, {MON: records}, map_hash=HASH)
+    assert all(item["last_completed_at"] is None for item in overview)
+
+
+@pytest.mark.parametrize("mode", [101, 103, 107, 108, None])
+def test_edge_spot_and_patrol_do_not_count_as_whole_zone_mowing(mode) -> None:
+    assert (
+        zone_mowing_records(
+            {"mode": mode, "region_status": [[1, 2]], "start": 10, "end": 20},
+            MON,
+        )
+        == ()
+    )
+
+
+def test_history_hydration_resumes_without_starving_after_failure() -> (
+    None
+):
+    names = [f"ali_dreame/2026/10/15/IQ000001/-1234_{n}.json" for n in range(8)]
+    cloud = _Cloud(
+        {name: _summary([[1, 2]], 10, 20) for name in names},
+        [_record(100, name, 100 - n) for n, name in enumerate(names)],
+    )
+    calls = []
+    original = cloud.async_get_interim_file_url
+
+    async def sign(did, model, name, **kwargs):
+        calls.append(name)
+        if name == names[0]:
+            raise TimeoutError("unavailable newest summary")
+        return await original(did, model, name, **kwargs)
+
+    cloud.async_get_interim_file_url = sign
+    client = _client(cloud)
+    history = asyncio.run(async_get_zone_mowing_records(client))
+    assert not history.complete
+    assert history.pending[-1] == names[0]
+    calls.clear()
+    history = asyncio.run(async_get_zone_mowing_records(client, known=history))
+    assert len(calls) == 5
+    assert len(history.sessions) == 5
+    assert names[0] not in calls
+    # Removed cloud events also leave the bounded in-memory summary cache.
+    cloud.records = [_record(100, names[1], 100)]
+    history = asyncio.run(async_get_zone_mowing_records(client, known=history))
+    assert history.complete
+    assert list(history.sessions) == [names[1]]
+
+
+def test_cancelled_history_read_propagates_to_native_request_owner() -> None:
+    cloud = _cloud()
+
+    async def cancelled(*args, **kwargs):
+        raise asyncio.CancelledError
+
+    cloud.async_get_public_file = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(async_get_zone_mowing_records(_client(cloud)))
+
+
+def test_failed_history_refresh_marks_retained_cache_incomplete_and_backs_off() -> None:
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    record = ZoneMowingRecord(1, 2, 10, 20, 100, MON, HASH)
+    coordinator.zone_mowing_sessions = ZoneMowingHistory({MON: (record,)})
+    coordinator.zone_mowing_sessions_refreshed_at = None
+    cloud_read = AsyncMock(side_effect=TimeoutError("history endpoint"))
+    coordinator.client = SimpleNamespace(
+        _descriptor=SimpleNamespace(did="did"),
+        _async_cloud_read=cloud_read,
+    )
+
+    async def scenario():
+        retained = await coordinator.async_refresh_zone_mowing_sessions()
+        assert not retained.complete
+        assert retained.sessions[MON] == (record,)
+        assert coordinator.zone_mowing_sessions_refreshed_at is not None
+        await coordinator.async_refresh_zone_mowing_sessions()
+        assert cloud_read.await_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_zone_history_task_coalesces_and_is_drained_before_client_shutdown() -> None:
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+
+    async def scenario():
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def read(**kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        coordinator.hass = SimpleNamespace(
+            async_create_background_task=lambda coro, name: asyncio.create_task(coro),
+        )
+        coordinator._shutting_down = False
+        coordinator._metadata_refresh_task = None
+        coordinator._metadata_shutdown_close_task = None
+        coordinator.async_update_listeners = Mock()
+        coordinator.async_refresh_zone_mowing_sessions = read
+        coordinator._schedule_zone_history_refresh()
+        task = coordinator._zone_history_refresh_task
+        await started.wait()
+        coordinator._schedule_zone_history_refresh()
+        assert coordinator._zone_history_refresh_task is task
+        assert await coordinator._async_drain_metadata_for_shutdown()
+        assert cancelled.is_set()
+        assert task.cancelled()
+        assert coordinator._zone_history_refresh_task is None
+        coordinator.async_update_listeners.assert_not_called()
+
+    asyncio.run(scenario())

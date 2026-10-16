@@ -177,6 +177,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Nejdéle neposečená zóna"
+      },
       "state_name": {
         "name": "Stav",
         "state": {

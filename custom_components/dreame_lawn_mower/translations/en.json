@@ -176,6 +176,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Least recently mowed zone"
+      },
       "state_name": {
         "name": "State",
         "state": {

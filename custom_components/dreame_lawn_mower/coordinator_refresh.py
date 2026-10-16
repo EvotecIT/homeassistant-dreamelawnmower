@@ -24,6 +24,7 @@ from .control_options import active_map_index
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
+from .dreame_lawn_mower_client.zone_mowing_history import ZoneMowingHistory
 from .ha_tasks import create_background_task
 from .map_switch_refresh import (
     async_flush_restart_preview,
@@ -113,7 +114,7 @@ class DreameLawnMowerRefreshMixin:
 
         async def async_refresh_zone_mowing_sessions(
             self, *, force: bool = False
-        ) -> dict[str, Any] | None: ...
+        ) -> ZoneMowingHistory | None: ...
 
         async def async_refresh_app_map_objects(
             self, *, force: bool = False, source: str = "app_map_objects_auto"
@@ -158,6 +159,7 @@ class DreameLawnMowerRefreshMixin:
     runtime_status_blob: DreameLawnMowerStatusBlob | None
     _shutting_down: bool
     _metadata_refresh_task: asyncio.Task[None] | None
+    _zone_history_refresh_task: asyncio.Task[None] | None
     _metadata_shutdown_close_task: asyncio.Task[None] | None
     _metadata_refresh_semaphore: asyncio.Semaphore
     _runtime_active_map_index: int | None
@@ -684,10 +686,6 @@ class DreameLawnMowerRefreshMixin:
                     lambda: self.async_refresh_work_log_totals(force=False),
                 ),
                 (
-                    "zone_mowing_sessions",
-                    lambda: self.async_refresh_zone_mowing_sessions(force=False),
-                ),
-                (
                     "voice",
                     lambda: self.async_refresh_voice_settings(force=False),
                 ),
@@ -844,6 +842,7 @@ class DreameLawnMowerRefreshMixin:
                 and getattr(self, "_metadata_refresh_publish", True)
             ):
                 self.async_update_listeners()
+                self._schedule_zone_history_refresh()
             if (
                 not self._shutting_down
                 and outcome != "cancelled"
@@ -852,6 +851,31 @@ class DreameLawnMowerRefreshMixin:
                 self._schedule_metadata_refresh(
                     refresh_map_and_runtime=True,
                 )
+
+    def _schedule_zone_history_refresh(self) -> None:
+        """Hydrate optional native-HTTP history after the metadata barrier."""
+        if getattr(self, "_shutting_down", False) or not hasattr(self, "hass"):
+            return
+        task = getattr(self, "_zone_history_refresh_task", None)
+        if task is not None and not task.done():
+            return
+        self._zone_history_refresh_task = create_background_task(
+            self.hass, self._async_refresh_zone_history_background(),
+            f"{DOMAIN}-zone-history-refresh",
+        )
+
+    async def _async_refresh_zone_history_background(self) -> None:
+        """Own history work and publish only while this coordinator is active."""
+        current = asyncio.current_task()
+        previous = getattr(self, "zone_mowing_sessions", None)
+        try:
+            result = await self.async_refresh_zone_mowing_sessions(force=False)
+            if (result is not previous and not self._shutting_down
+                    and getattr(self, "_metadata_refresh_publish", True)):
+                self.async_update_listeners()
+        finally:
+            if getattr(self, "_zone_history_refresh_task", None) is current:
+                self._zone_history_refresh_task = None
 
     async def _async_refresh_background_map_runtime(
         self, cycle: DreameLawnMowerPerformanceCycle
@@ -914,7 +938,6 @@ class DreameLawnMowerRefreshMixin:
             "weather": "weather_protection_refreshed_at",
             "maintenance": "maintenance_status_refreshed_at",
             "work_log_totals": "work_log_totals_refreshed_at",
-            "zone_mowing_sessions": "zone_mowing_sessions_refreshed_at",
             "voice": "voice_settings_refreshed_at",
         }
         marker = refreshed_at_by_phase.get(phase)
@@ -936,6 +959,9 @@ class DreameLawnMowerRefreshMixin:
         """Suppress publication while an in-flight vendor call drains safely."""
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = False
+        history = getattr(self, "_zone_history_refresh_task", None)
+        if history is not None and history is not asyncio.current_task():
+            history.cancel()
 
     async def _async_cancel_metadata_shutdown_close(self) -> None:
         """Cancel an unload cleanup that Home Assistant would otherwise track."""
@@ -951,15 +977,21 @@ class DreameLawnMowerRefreshMixin:
         """Cancel queued metadata and bound the wait for an in-flight request."""
         if getattr(self, "_home_assistant_stopping", False):
             return False
-        metadata_task = self._metadata_refresh_task
-        if metadata_task is None or metadata_task is asyncio.current_task():
+        workers = [task for task in (
+            self._metadata_refresh_task,
+            getattr(self, "_zone_history_refresh_task", None),
+        ) if task is not None and task is not asyncio.current_task()
+                   and not task.done()]
+        if not workers:
             return await self._async_drain_batch_schedule_for_shutdown()
 
         close_task = getattr(self, "_metadata_shutdown_close_task", None)
         if close_task is not None and not close_task.done():
             return False
 
-        metadata_task.cancel()
+        for task in workers:
+            task.cancel()
+        metadata_task = asyncio.gather(*workers, return_exceptions=True)
         try:
             async with asyncio.timeout(METADATA_SHUTDOWN_GRACE_SECONDS):
                 await asyncio.shield(metadata_task)
@@ -1036,7 +1068,7 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_close_after_metadata(
         self,
-        metadata_task: asyncio.Task[Any],
+        metadata_task: asyncio.Future[Any],
     ) -> None:
         """Close the shared client once a cancellation-resistant request drains."""
         try:

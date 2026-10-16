@@ -176,6 +176,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Zona tagliata meno di recente"
+      },
       "state_name": {
         "name": "Stato",
         "state": {

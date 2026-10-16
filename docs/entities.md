@@ -136,22 +136,29 @@ limit is separate from Recorder retention and the optional saved map preview.
 
 ## Zone mowing history
 
-**Least Recently Mowed Zone** names the zone of the active map whose last
-completed mowing is the oldest. Each finished task publishes a session summary
-whose `region_status` lists every zone of the task with a status; status `2`
-means the mower mowed that zone to the end (observed on a MOVA LiDAX Ultra 1000,
-`mova.mower.g2529c`). The integration reads the summaries of the 30 latest
-sessions, every 5 minutes, and downloads each summary only once.
+**Least Recently Mowed Zone** identifies the active map's zone with the oldest
+known completed whole-zone mowing. A newer interrupted run does not replace its
+last completion. Edge-only, spot and patrol tasks do not count as whole-zone
+completion.
 
-A zone without a completed mowing in those sessions comes first, then the
-others from the oldest completion to the newest. An interrupted run (rain, a
-fault, a manual stop) does not count as a completion, so that zone keeps its
-place. Point and edge patrols publish no `region_status` and are ignored.
+The integration reads at most 30 recent session summaries. A summary is attributed
+only when its explicit map hash matches the current, uniquely identified,
+hash-verified map revision. Changing or editing a map can therefore make old
+history unknown. Zone numbers alone never establish map identity.
 
-Attributes: `zone_id` and `last_completed_at` of that zone, and `zones`, the
-full ordered list with each zone's `label`, `last_completed_at`,
-`last_status` (status of its latest run) and `last_session_at`. Summaries carry
-no map index, so the zone ids are matched against the active map.
+Hydration reads up to five new summaries per pass, preserving successful reads
+when another download fails. Partial history is eligible for retry after 30
+seconds; complete history refreshes every five minutes. This optional work runs
+separately after schedule and other metadata refreshes, and remains owned by the
+coordinator for shutdown.
+
+The sensor is unavailable while history is incomplete or unattributed, or when
+any active zone has no known completion in the observed window. Absence from this
+window does not mean a zone has never been mowed. The attributes retain the known
+per-zone dates and expose `history_complete`, `history_attributable`,
+`observed_sessions` and `unknown_zone_ids`, alongside `zone_id`,
+`last_completed_at` and the ordered `zones` list. Invalid timestamps cannot claim
+completion or prevent sensor updates.
 
 ## Optional diagnostics
 

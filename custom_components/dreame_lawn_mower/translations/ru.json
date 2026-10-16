@@ -176,6 +176,9 @@
       }
     },
     "sensor": {
+      "least_recently_mowed_zone": {
+        "name": "Давно не скошенная зона"
+      },
       "state_name": {
         "name": "Состояние",
         "state": {
