@@ -99,6 +99,7 @@ def position_at_charger(
     charger: tuple[int, int] | None,
     map_index: int,
     now: float,
+    *, runtime_map_index: int | None = None,
 ) -> MowerPosition | None:
     """A docked mower sits on its reported station, not where it was last seen.
 
@@ -106,7 +107,11 @@ def position_at_charger(
     was observed on its way back. The station reported by task summaries is the
     better evidence while the state says the mower is docked.
     """
-    if charger is None or not snapshot_is_docked(snapshot):
+    if (
+        charger is None
+        or not snapshot_is_docked(snapshot)
+        or runtime_map_index not in (None, map_index)
+    ):
         return position
     # The docked state is the fresh evidence; the station gives its location.
     return MowerPosition(

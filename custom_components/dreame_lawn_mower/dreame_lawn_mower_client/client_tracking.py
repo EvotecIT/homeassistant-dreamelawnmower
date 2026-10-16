@@ -20,6 +20,7 @@ from .position_tracking import (
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
     from .position_tracking import MowerPosition, MowerPositionTracker
+    from .zone_mowing_history import ZoneMowingHistory
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,7 @@ class _PositionFrame:
 class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
 
+    _charger_history: ZoneMowingHistory | None
     _position_tracker: MowerPositionTracker
     _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
     _runtime_map_identity_expires_at: datetime | None
@@ -149,9 +151,30 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 contains=frame.contains, snapshot=self._latest_snapshot,
                 allow_geometry_change=False,
             )
-            snapshot = self._latest_snapshot
+            return self._place_docked_on_station(
+                position, map_index=frame.map_index, geometry=frame.geometry,
+                charger=frame.charger,
+            )
+
+    def _place_docked_on_station(
+        self, position: MowerPosition | None, *, map_index: int, geometry: str,
+        charger: tuple[int, int] | None,
+    ) -> MowerPosition | None:
+        """Use the reported station for a docked mower on the verified frame.
+
+        The one owner of this decision for the camera, the interactive overlay
+        and position readers. Call it under the runtime geometry lock.
+        """
+        deadline = self._runtime_map_identity_expires_at
+        if not (
+            deadline is not None and deadline.timestamp() > time.time()
+            and self._runtime_geometry_map_index in (None, map_index)
+            and self._observed_map_geometry == (map_index, geometry)
+        ):
+            return position
         return position_at_charger(
-            position, snapshot, frame.charger, frame.map_index, time.time()
+            position, self._latest_snapshot, charger, map_index, time.time(),
+            runtime_map_index=self._runtime_live_map_index,
         )
 
     def _bind_runtime_live_geometry(self, map_index: int, geometry: str) -> None:

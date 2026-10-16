@@ -9,10 +9,12 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 
 from .control_options import current_zone_entries
+from .dreame_lawn_mower_client.map_inventory import (
+    selected_map_revision as selected_map_revision,
+)
 from .dreame_lawn_mower_client.zone_mowing_history import (
     ZoneMowingRecord,
     latest_zone_mowing,
-    map_revision_hash,
 )
 from .entity import DreameLawnMowerEntity
 
@@ -21,51 +23,6 @@ def _iso(timestamp: int | None) -> str | None:
     if type(timestamp) is not int or not 0 <= timestamp <= 253402300799:
         return None
     return (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=timestamp)).isoformat()
-
-
-def selected_map_revision(app_maps: Any, map_index: Any) -> str | None:
-    """Require one current verified slot and an unambiguous revision hash."""
-    if (
-        not isinstance(app_maps, Mapping)
-        or app_maps.get("map_list_valid") is not True
-        or type(map_index) is not int
-        or app_maps.get("current_map_index") != map_index
-    ):
-        return None
-    entries = app_maps.get("maps")
-    if not isinstance(entries, list):
-        return None
-    selected = [
-        entry
-        for entry in entries
-        if isinstance(entry, Mapping)
-        and type(entry.get("idx")) is int
-        and entry["idx"] == map_index
-    ]
-    if len(selected) != 1:
-        return None
-    entry = selected[0]
-    if any(
-        entry.get(flag) is not True for flag in ("created", "available", "hash_match")
-    ):
-        return None
-    revision = map_revision_hash(entry.get("md5"))
-    info = entry.get("info")
-    if (
-        revision is None
-        or not isinstance(info, Mapping)
-        or map_revision_hash(info.get("hash")) != revision
-    ):
-        return None
-    matching = [
-        item
-        for item in entries
-        if isinstance(item, Mapping)
-        and item.get("created") is True
-        and isinstance(item.get("info"), Mapping)
-        and map_revision_hash(item["info"].get("hash")) == revision
-    ]
-    return revision if len(matching) == 1 else None
 
 
 def zone_mowing_overview(
@@ -111,7 +68,7 @@ def zone_mowing_overview(
 
 
 class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorEntity):
-    """Name the zone whose last completed mowing is the oldest."""
+    """Prioritize unknown zones, then the oldest confirmed mowing completion."""
 
     _attr_translation_key = "least_recently_mowed_zone"
     _attr_icon = "mdi:calendar-clock-outline"
@@ -147,7 +104,10 @@ class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorE
             and history.complete
             and history.attributable
             and bool(overview)
-            and all(item["last_completed_at"] is not None for item in overview)
+            # Require a confirmed completion on this revision, then prioritize
+            # unknown zones so missing history does not permanently exclude them.
+            # Unknown is a selection policy, not a claim about their actual dates.
+            and any(item["last_completed_at"] is not None for item in overview)
         )
 
     @property

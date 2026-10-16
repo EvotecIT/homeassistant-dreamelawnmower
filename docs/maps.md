@@ -103,13 +103,24 @@ The bounded observation checkpoint can retain them across an integration
 restart, but fresh map geometry must match before they are displayed. Restored
 evidence never becomes a live position or restores an old movement trail.
 
-Charging confirms that the mower is at its station, but does not supply the
-station's coordinates. After a cold start without valid saved position evidence,
-a docked mower that sends only position-free heartbeats therefore shows
-**Docked · map position unavailable**.
-The integration does not use a maintenance point or the last route endpoint
-as an invented dock location. Camera attributes expose `position_status`,
-`position_source`, and `position_observed_at` for the same retained evidence.
+Finished task summaries can also report the charging station through a `dock`
+coordinate. When the summary's revision matches the unique verified current map,
+the camera and interactive background show a small station marker. Camera
+attributes `charger_x` and `charger_y` use the same native units as mower positions.
+A station from another revision is never substituted, even when its coordinates
+fit inside the lawn's bounds.
+
+While the mower is confirmed docked and the current map frame remains valid, its
+marker uses the reported station and `position_source` is
+`reported_charging_station`. This position is assessed from the current docking
+state; it does not become a saved telemetry observation. Station reports are kept
+in the bounded recent-session cache and selected again when maps change.
+
+Charging alone does not supply coordinates. Without a matching station report or
+valid saved dock observation, position-free heartbeats show **Docked · map position
+unavailable**. The integration does not use a maintenance point or the last route
+endpoint as an invented dock location. Camera attributes expose `position_status`,
+`position_source`, and `position_observed_at` for the same evidence.
 
 ## Appearance and rotation
 
@@ -240,3 +251,26 @@ Interactive map editing is still intentionally out of scope for now:
 - virtual-wall editing
 - zone geometry edits
 - other direct map mutations
+
+## Read-only backup inspection
+
+The Python client can inspect a backup map through the app's indexed `MAPBI`
+and `MAPBD` getters. It verifies the payload hash and keeps the existing byte,
+chunk and timeout limits. Backup reads share the active-map transaction lock
+but never replace the active map's cache or selected-map identity.
+
+```python
+backup = await client.async_get_app_backup_map(0)
+```
+
+The result contains verification and geometry counts. Raw geometry is included
+only with `include_payload=True`. With the existing account environment configured,
+the diagnostic example supports the same operation:
+
+```bash
+python examples/app_map_probe.py --backup-index 0 --out backup-map.json
+```
+
+This inspects a backup; it does not restore it. Availability depends on the
+mower's firmware. The transport and integrity paths have regression coverage;
+backup inspection is not claimed as field-validated on every supported mower.

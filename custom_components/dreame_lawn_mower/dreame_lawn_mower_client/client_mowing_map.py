@@ -13,6 +13,7 @@ from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
 from .vector_map import _parse_drawable_batch_vector_map, with_charger
+from .zone_mowing_history import reported_charger_for_map
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
@@ -102,7 +103,9 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         """Observe a fresh frame before rendering its cacheable background."""
         vector_map = with_charger(
             _mowing_scene_geometry(batch, map_index, app_maps),
-            getattr(self, "charger_position", None),
+            reported_charger_for_map(
+                self._charger_history, app_maps, map_index,
+            ),
         )
         vector_map_position(
             self, vector_map, expected_generation=geometry_generation,
@@ -127,6 +130,10 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
             contains=scene.contains,
             snapshot=self._latest_snapshot,
             allow_geometry_change=False,
+        )
+        position = self._place_docked_on_station(
+            position, map_index=scene.map_index,
+            geometry=scene.position_identity, charger=scene.charger,
         )
         blob = self._latest_runtime_status_blob
         # The tracker owns geometry binding, including negative decisions.

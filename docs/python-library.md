@@ -159,12 +159,31 @@ upgrade does not create duplicate entities.
 - guarded mowing-preference planning and optional live PRE writes from current
   app payloads, with explicit confirmation required before execution
 - read-only app-map retrieval, all-map summaries, and simple map rendering
+- hash-verified, read-only backup-map inspection with opt-in geometry
 - on-demand app-map point-cloud generation, bounded download, and PCD validation
 - decoded mower-native charging/rain settings, confirmed setting writes, and
   mowing-preference diagnostics
 - firmware/update evidence gathering without claiming unverified OTA support
 - guarded remote-control support helpers for supervised short movement pulses
 - reusable payload decoders for app realtime/status keys
+
+## Identity and compatibility evidence
+
+`model_identity_summary()` separates an exact retail mapping, a recognized
+family, an app profile and an observed but unnamed identifier. It retains the
+raw suffix without inventing a SKU. `build_compatibility_summary()` includes
+the identity and a `profile_capabilities` report; app flags alone keep their
+operational state `unknown`.
+
+`mower_device_code_context(code, model=..., firmware=...)` adds recovery checks,
+catalog provenance and known ambiguous meanings to the existing fault
+classification. A firmware string records context; it does not select a
+transition that has not been established by evidence. The
+[app catalog](dreame-app-catalog.md) documents the observed families and limits.
+
+Decoded mowing-preference records preserve `edge_cutting_attachment` as its
+numeric wire value. Boolean update arguments remain supported, with the
+model-specific validation described in [mowing controls](mowing-controls.md).
 
 ## Safety Defaults
 

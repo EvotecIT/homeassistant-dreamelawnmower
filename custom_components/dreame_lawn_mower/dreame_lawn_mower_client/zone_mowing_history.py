@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .map_inventory import (
+    map_revision_hash as map_revision_hash,
+)
+from .map_inventory import (
+    selected_map_revision,
+)
 from .session_photos import (
     SESSION_EVENT_KEY,
     _async_read_session_summary,
@@ -21,15 +26,7 @@ if TYPE_CHECKING:
 ZONE_HISTORY_SESSIONS = 30
 ZONE_HISTORY_DOWNLOADS = 5
 ZONE_HISTORY_BUDGET = 15.0
-_MAP_HASH = re.compile(r"[0-9a-fA-F]{32}")
 _MAX_TIMESTAMP = 253402300799
-
-
-def map_revision_hash(value: Any) -> str | None:
-    """Accept an explicit map revision, never a zone number as map identity."""
-    return (
-        value.lower() if isinstance(value, str) and _MAP_HASH.fullmatch(value) else None
-    )
 
 
 def _timestamp(value: Any) -> int | None:
@@ -105,7 +102,7 @@ class ZoneMowingHistory:
     chargers: Mapping[str, ChargerPosition] = field(default_factory=dict)
 
     def latest_charger(self, map_hash: str | None = None) -> ChargerPosition | None:
-        """Newest reported station, preferring the requested map revision."""
+        """Newest station on the requested revision, without a foreign fallback."""
         ordered = sorted(
             self.chargers.values(), key=lambda item: item.observed_at or 0, reverse=True
         )
@@ -113,7 +110,7 @@ class ZoneMowingHistory:
         for item in ordered:
             if revision is not None and item.map_hash == revision:
                 return item
-        return ordered[0] if ordered else None
+        return ordered[0] if revision is None and ordered else None
 
     @property
     def complete(self) -> bool:
@@ -126,6 +123,16 @@ class ZoneMowingHistory:
             for records in self.sessions.values()
             for record in records
         )
+
+
+def reported_charger_for_map(
+    history: ZoneMowingHistory | None, app_maps: Any, map_index: int,
+) -> ChargerPosition | None:
+    """Bind summary coordinates to one current, uniquely verified revision."""
+    revision = selected_map_revision(app_maps, map_index)
+    if history is None or revision is None:
+        return None
+    return history.latest_charger(revision)
 
 
 @dataclass(frozen=True)

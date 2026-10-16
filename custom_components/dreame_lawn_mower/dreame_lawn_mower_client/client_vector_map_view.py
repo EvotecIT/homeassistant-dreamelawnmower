@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -16,7 +15,7 @@ from .client_map_helpers import (
 )
 from .client_position import apply_position_metadata, vector_map_position
 from .models import DreameLawnMowerMapView
-from .position_tracking import map_position_identity, position_at_charger
+from .position_tracking import map_position_identity
 from .vector_map import (
     DreameLawnMowerVectorMap,
     _parse_drawable_batch_vector_map,
@@ -27,6 +26,7 @@ from .vector_map import (
     vector_map_to_summary,
     with_charger,
 )
+from .zone_mowing_history import reported_charger_for_map
 
 if TYPE_CHECKING:
     from .client_maps import _DreameLawnMowerClientMapsMixin
@@ -134,7 +134,9 @@ def geometry_map_view(
     geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Share position validation, metrics and rendering across map transports."""
-    vector_map = with_charger(vector_map, getattr(client, "charger_position", None))
+    vector_map = with_charger(vector_map, reported_charger_for_map(
+        client._charger_history, app_maps, vector_map.map_index,
+    ))
     history_only = not _vector_map_has_drawable_geometry(
         vector_map, include_history=False,
     )
@@ -150,6 +152,11 @@ def geometry_map_view(
             position = vector_map_position(
                 client, vector_map, expected_generation=geometry_generation,
             )
+            position = client._place_docked_on_station(
+                position, map_index=vector_map.map_index,
+                geometry=map_position_identity(vector_map),
+                charger=vector_map.charger,
+            )
         runtime_blob = client._latest_runtime_status_blob
         snapshot = client._latest_snapshot
         session_active = client._runtime_session_active
@@ -161,10 +168,6 @@ def geometry_map_view(
         segments = (
             client._runtime_live_track_segments
             if runtime_context_matches and not history_only else ()
-        )
-    if not history_only:
-        position = position_at_charger(
-            position, snapshot, vector_map.charger, vector_map.map_index, time.time()
         )
     if session_active is False and not history_only:
         vector_map.mow_paths = ()
@@ -195,6 +198,8 @@ def geometry_map_view(
     summary = apply_position_metadata(
         position, snapshot=snapshot, details=details, summary=summary
     )
+    if summary is not None and vector_map.charger is not None:
+        summary = replace(summary, charger_present=True)
     if runtime_pose_x is not None and runtime_pose_y is not None:
         details["runtime_pose_x"] = runtime_pose_x
         details["runtime_pose_y"] = runtime_pose_y

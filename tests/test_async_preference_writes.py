@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -31,6 +32,71 @@ from .test_async_cloud_session import (
     server,
 )
 from .test_mowing_preferences import _FakePreferenceCloud
+
+
+@pytest.mark.parametrize("attachment_mode", [2, 7])
+def test_native_unrelated_write_preserves_attachment_through_exact_readback(
+    monkeypatch, attachment_mode
+):
+    peer = _FakePreferenceCloud()
+    original = [
+        8,
+        0,
+        11,
+        0,
+        40,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        1,
+        15,
+        20,
+        7,
+        1,
+        2,
+        attachment_mode,
+        0,
+        3,
+    ]
+    peer.preference_payloads[(0, 11)] = original.copy()
+    strings = cloud_strings("dreame")
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        action = (await request.json())["data"]["params"]["in"][0]
+        return web.json_response(
+            {"code": 0, "data": {"result": peer.call_app_action(action)}}
+        )
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session)
+            client._descriptor = replace(client.descriptor, model="dreame.mower.q2501c")
+            try:
+                result = await client.async_plan_app_mowing_preference_update(
+                    map_index=0,
+                    area_id=11,
+                    changes={"mowing_height_cm": 5},
+                    execute=True,
+                    confirm_write=True,
+                )
+                assert result["request_verified"] is True
+                assert (
+                    result["readback"]["preference"]["edge_cutting_attachment"]
+                    == attachment_mode
+                )
+                expected = original.copy()
+                expected[4] = 50
+                assert peer.preference_payloads[(0, 11)] == expected
+            finally:
+                await client.async_close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
@@ -178,7 +244,8 @@ def test_preference_cancellation_stops_requests_and_readback_delay(
                 client_preference_writes,
                 "asyncio",
                 SimpleNamespace(
-                    sleep=pause, timeout=asyncio.timeout,
+                    sleep=pause,
+                    timeout=asyncio.timeout,
                     CancelledError=asyncio.CancelledError,
                 ),
             )

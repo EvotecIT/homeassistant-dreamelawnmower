@@ -43,6 +43,7 @@ class _TrackingClient(
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._runtime_map_identity_expires_at = None
         self._runtime_geometry_lock = RLock()
         self._runtime_geometry_revision = 0
         self._runtime_geometry_map_index = None

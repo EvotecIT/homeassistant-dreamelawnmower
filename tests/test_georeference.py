@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -23,11 +23,15 @@ from custom_components.dreame_lawn_mower.device_tracker import (
     LOCATION_ACCURACY_METERS,
     DreameLawnMowerGpsTracker,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_inventory import (  # noqa: E501
+    selected_map_revision,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.position_tracking import (  # noqa: E501
     MowerPosition,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_history import (  # noqa: E501
     ChargerPosition,
+    ZoneMowingHistory,
 )
 from custom_components.dreame_lawn_mower.georeference import (
     SET_GEOREFERENCE_SCHEMA,
@@ -330,7 +334,7 @@ def test_live_position_needs_no_map_read_and_matches_the_camera_judge() -> None:
 
 def test_docked_live_position_uses_the_station_like_the_camera() -> None:
     client = tracked_client()
-    client.charger_position = ChargerPosition(40, 30, 0, 1)
+    client._charger_history = _station_history()
     client._sync_get_vector_map_details()
     client._latest_snapshot = SimpleNamespace(
         available=True, activity="docked", docked=True
@@ -354,20 +358,39 @@ def test_map_switch_retires_the_frame_until_it_is_observed_again() -> None:
     assert client.current_map_position() is None
 
 
-def test_docked_since_startup_without_telemetry_sits_on_the_station() -> None:
-    """Reported at home: docked since restart, no live session, station known."""
+def _station_history() -> ZoneMowingHistory:
+    """A station reported on the revision the native fixture map carries."""
+    revision = selected_map_revision(native_maps(), 0)
+    assert revision is not None
+    return ZoneMowingHistory(
+        chargers={"summary": ChargerPosition(40, 30, 0, 1, revision)}
+    )
+
+
+def _docked_client(*, verified: bool):
+    """Docked since startup: no telemetry, station reported by a summary."""
     client = _client()
     client._sync_get_vector_map_batch_data = lambda: {}
     client._sync_get_current_app_map_index = lambda: 0
     client._sync_get_app_maps = lambda **kwargs: native_maps()
     client._safe_map_diagnostics = lambda **kwargs: None
-    # The host has not verified a live map identity: no session since startup.
-    client.runtime_map_identity_expires_at = None
+    if verified:
+        client.update_runtime_map_identity(
+            0, expires_at=datetime.now(UTC) + timedelta(minutes=5)
+        )
+    else:
+        client.runtime_map_identity_expires_at = None
     client._latest_snapshot = SimpleNamespace(
         available=True, activity="docked", state="charging_completed",
         charging=False, docked=True,
     )
-    client.charger_position = ChargerPosition(40, 30, 0, 1)
+    client._charger_history = _station_history()
+    return client
+
+
+def test_docked_since_startup_without_telemetry_sits_on_the_station() -> None:
+    """Reported at home: docked since restart, no telemetry, station known."""
+    client = _docked_client(verified=True)
     assert client.current_map_position() is None
 
     details = client._sync_get_vector_map_details()
@@ -380,17 +403,21 @@ def test_docked_since_startup_without_telemetry_sits_on_the_station() -> None:
     assert position.details()["position_source"] == details["position_source"]
 
 
-def test_docked_reader_never_places_a_station_from_a_superseded_frame() -> None:
-    client = _client()
-    client._sync_get_vector_map_batch_data = lambda: {}
-    client._sync_get_current_app_map_index = lambda: 0
-    client._sync_get_app_maps = lambda **kwargs: native_maps()
-    client._safe_map_diagnostics = lambda **kwargs: None
-    client.runtime_map_identity_expires_at = None
-    client._latest_snapshot = SimpleNamespace(
-        available=True, activity="docked", state="charging_completed", docked=True,
+def test_unverified_map_identity_places_no_station_for_any_reader() -> None:
+    """Without a verified map identity neither the camera nor the reader docks."""
+    client = _docked_client(verified=False)
+
+    details = client._sync_get_vector_map_details()
+    position = client.current_map_position()
+
+    assert details["position_status"] != "known_dock"
+    assert (position.status if position else "unavailable") == (
+        details["position_status"]
     )
-    client.charger_position = ChargerPosition(40, 30, 0, 1)
+
+
+def test_docked_reader_never_places_a_station_from_a_superseded_frame() -> None:
+    client = _docked_client(verified=True)
     client._sync_get_vector_map_details()
     assert client.current_map_position() is not None
 
