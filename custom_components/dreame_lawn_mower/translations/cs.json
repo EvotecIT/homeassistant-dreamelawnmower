@@ -307,6 +307,16 @@
     "plan_mowing_preference_update": {
       "name": "Připravit změnu nastavení sečení",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Přehrát zvuk přes sekačku",
+      "description": "Přehraje místní zvukový soubor přes reproduktor sekačky pomocí cloudového živého videa. Přehrávání je omezeno na 60 sekund.",
+      "fields": {
+        "file_path": {
+          "name": "Cesta k souboru",
+          "description": "Absolutní cesta k povolenému místnímu zvukovému souboru, například /media/hello.mp3."
+        }
+      }
     }
   }
 }

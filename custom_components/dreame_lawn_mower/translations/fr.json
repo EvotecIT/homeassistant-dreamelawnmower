@@ -306,6 +306,16 @@
     "plan_mowing_preference_update": {
       "name": "Préparer la modification des préférences de tonte",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Lire un fichier audio sur la tondeuse",
+      "description": "Lit un fichier audio local sur le haut-parleur de la tondeuse via la vidéo en direct dans le cloud. La lecture est limitée à 60 secondes.",
+      "fields": {
+        "file_path": {
+          "name": "Chemin du fichier",
+          "description": "Chemin absolu d’un fichier audio local autorisé, par exemple /media/hello.mp3."
+        }
+      }
     }
   }
 }

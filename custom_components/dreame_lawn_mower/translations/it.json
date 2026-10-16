@@ -306,6 +306,16 @@
     "plan_mowing_preference_update": {
       "name": "Preparare la modifica delle preferenze di taglio",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Riproduci audio tramite il tagliaerba",
+      "description": "Riproduce un file audio locale tramite l’altoparlante del tagliaerba usando il video in diretta cloud. La riproduzione è limitata a 60 secondi.",
+      "fields": {
+        "file_path": {
+          "name": "Percorso del file",
+          "description": "Percorso assoluto di un file audio locale consentito, ad esempio /media/hello.mp3."
+        }
+      }
     }
   }
 }

@@ -75,10 +75,34 @@ For `device_permission_denied`, follow
 [shared-account permission troubleshooting](troubleshooting.md#shared-account-is-denied-video-access).
 Mower state does not bypass the vendor's account-level media permission.
 
+## Play an audio file
+
+Use the **Play audio through the mower** action with the mower's Live Video
+camera and an absolute local file path, such as `/media/hello.mp3`:
+
+```yaml
+action: dreame_lawn_mower.play_audio
+target:
+  entity_id: camera.mower_live_video
+data:
+  file_path: /media/hello.mp3
+```
+
+Replace the example entity with your Live Video camera. Home Assistant must allow
+the file's directory, and FFmpeg must be available. The action accepts MP3, WAV,
+AAC, FLAC, Ogg, M4A/MP4 and Matroska audio files. Playlists and remote URLs are
+rejected. FFmpeg converts the file to mono AAC and limits playback to 60 seconds.
+
+Playback needs the cloud video transport and a mower state that permits live
+video. The action opens a temporary video consumer while sending audio and
+releases it afterwards; the camera's retention setting still governs idle video.
+Only one file plays at a time. Cancelling the action or turning off the camera
+stops audio and closes the speaker channel before releasing the session.
+
 ## Limits and technical details
 
-The camera does not expose the vendor's stored photo gallery, patrol movement,
-arbitrary voice playback, or two-way live talk. See
+This action plays a file; it does not provide a live microphone conversation.
+The camera does not expose the vendor's stored photo gallery or patrol movement. See
 [supported mowers](supported-mowers.md) for model-specific evidence.
 
 Maintainers working on provisioning, the runtime, or LAN behavior should use

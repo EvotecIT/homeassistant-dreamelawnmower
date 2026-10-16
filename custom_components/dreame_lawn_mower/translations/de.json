@@ -159,6 +159,16 @@
     "plan_mowing_preference_update": {
       "name": "Änderung der Mäheinstellungen vorbereiten",
       "description": "Build or send a guarded mower preference update from the current app preference payload. By default this is a dry run that only shows the candidate request payload in a notification and the diagnostic sensor. Sending the request requires execute and confirm_preference_write to both be true."
+    },
+    "play_audio": {
+      "name": "Audio über den Mäher abspielen",
+      "description": "Spielt eine lokale Audiodatei über den Lautsprecher des Mähers mit Cloud-Livevideo ab. Die Wiedergabe ist auf 60 Sekunden begrenzt.",
+      "fields": {
+        "file_path": {
+          "name": "Dateipfad",
+          "description": "Absoluter Pfad einer erlaubten lokalen Audiodatei, zum Beispiel /media/hello.mp3."
+        }
+      }
     }
   }
 }

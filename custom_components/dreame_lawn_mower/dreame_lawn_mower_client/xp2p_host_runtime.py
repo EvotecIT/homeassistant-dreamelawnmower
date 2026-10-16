@@ -42,6 +42,9 @@ _REQUEST_MAGIC = b"DXP1"
 _RESPONSE_MAGIC = b"DXR1"
 _REQUEST_FIELDS = 20
 _MAX_RESPONSE_LENGTH = 64 * 1024
+_MAX_CONTROL_COMMAND_LENGTH = 64 * 1024
+_MAX_CONTROL_AUDIO_LENGTH = 256 * 1024
+_CONTROL_TIMEOUT = 5.0
 _DEFAULT_STATUS_ATTEMPTS = 60
 _DEFAULT_RETRY_INTERVAL = 0.5
 _CACHED_COMMAND_TIMEOUT_US = 2_000_000
@@ -502,11 +505,14 @@ class DreameLawnMowerXp2pHostRuntime:
         try:
             if process is not None and process.poll() is None:
                 try:
-                    if process.stdin is not None:
-                        process.stdin.write(b"\0")
-                        process.stdin.flush()
-                    process.wait(timeout=10.0)
-                except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+                    # The worker closes stdout after its graceful stop. Bound
+                    # the write as well as the read; a buffered writer may be
+                    # stuck behind an abandoned request's pipe lock.
+                    self._exchange_runner_control(session, b"\0", timeout=10.0)
+                except (OSError, DreameLawnMowerVideoRuntimeError):
+                    pass
+                finally:
+                    session.runner_process = None
                     _terminate_process(process)
         finally:
             _join_thread(session.runner_stderr_thread)
@@ -538,9 +544,9 @@ class DreameLawnMowerXp2pHostRuntime:
             if remaining <= 0:
                 return session.stream_link_mode
             try:
-                process.stdin.write(b"Q")
-                process.stdin.flush()
-                status, response = _read_response(process.stdout, timeout=remaining)
+                status, response = self._exchange_runner_control(
+                    session, b"Q", timeout=remaining
+                )
             except (BrokenPipeError, OSError, DreameLawnMowerVideoRuntimeError):
                 return session.stream_link_mode
             if status == 0:
@@ -554,6 +560,119 @@ class DreameLawnMowerXp2pHostRuntime:
                     return session.stream_link_mode
                 time.sleep(min(max(float(retry_interval), 0.0), remaining))
         return session.stream_link_mode
+
+    def post_device_command(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        command: str,
+        *,
+        timeout: float = DEFAULT_COMMAND_TIMEOUT_US / 1_000_000 + _CONTROL_TIMEOUT,
+    ) -> bytes:
+        """Send one P2P command on the live session and return the device reply."""
+        encoded = command.encode("utf-8")
+        if not encoded or len(encoded) > _MAX_CONTROL_COMMAND_LENGTH:
+            raise ValueError("XP2P command length is out of range")
+        return self._runner_control(session, b"C", encoded, timeout=timeout)
+
+    def start_talk(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        *,
+        channel: int = 0,
+        timeout: float = _CONTROL_TIMEOUT,
+    ) -> None:
+        """Open the encrypted two-way audio channel on the live session."""
+        self._runner_control(
+            session, b"T", f"channel={int(channel)}".encode("ascii"), timeout=timeout
+        )
+
+    def send_talk_audio(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        chunk: bytes,
+        *,
+        timeout: float = _CONTROL_TIMEOUT,
+    ) -> None:
+        """Send one FLV audio chunk on the open two-way audio channel."""
+        if not chunk or len(chunk) > _MAX_CONTROL_AUDIO_LENGTH:
+            raise ValueError("XP2P audio chunk length is out of range")
+        self._runner_control(session, b"D", bytes(chunk), timeout=timeout)
+
+    def stop_talk(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        *,
+        timeout: float = _CONTROL_TIMEOUT,
+    ) -> None:
+        """Close the two-way audio channel; the video keeps running."""
+        self._runner_control(session, b"S", None, timeout=timeout)
+
+    def _runner_control(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        control: bytes,
+        argument: bytes | None,
+        *,
+        timeout: float,
+    ) -> bytes:
+        message = control
+        if argument is not None:
+            message += struct.pack("!I", len(argument)) + argument
+        status, response = self._exchange_runner_control(
+            session, message, timeout=timeout
+        )
+        if status != 0:
+            detail = response.decode("utf-8", "replace").strip()
+            raise DreameLawnMowerVideoRuntimeError(
+                detail or f"XP2P worker control failed with status {status}."
+            )
+        return response
+
+    def _exchange_runner_control(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        message: bytes,
+        *,
+        timeout: float,
+    ) -> tuple[int, bytes]:
+        """Serialize framed I/O and retire uncertain pipes before releasing them."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Control timeout must be finite and positive")
+        deadline = time.monotonic() + timeout
+        if not session.runner_control_lock.acquire(timeout=timeout):
+            raise DreameLawnMowerVideoRuntimeError("XP2P control lock timed out.")
+        try:
+            process = session.runner_process
+            if (
+                process is None or process.poll() is not None
+                or process.stdin is None or process.stdout is None
+            ):
+                raise DreameLawnMowerVideoRuntimeError(
+                    "The live video worker is not running."
+                )
+
+            def write_request() -> None:
+                process.stdin.write(message)
+                process.stdin.flush()
+
+            try:
+                return _read_response(
+                    process.stdout, timeout=max(deadline - time.monotonic(), 0.001),
+                    write_request=write_request,
+                )
+            except (OSError, DreameLawnMowerVideoRuntimeError) as err:
+                # DXR1 has no correlation ID. An orphan reader, partial frame
+                # or blocked writer makes every later reply ambiguous. Killing
+                # the process releases its pipes without touching buffer locks.
+                session.runner_process = None
+                _terminate_process(process)
+                if isinstance(err, DreameLawnMowerVideoRuntimeError):
+                    raise
+                raise DreameLawnMowerVideoRuntimeError(
+                    "The live video worker stopped."
+                ) from err
+        finally:
+            session.runner_control_lock.release()
 
 
 def _decode_success_payload(value: str) -> tuple[int | None, str]:

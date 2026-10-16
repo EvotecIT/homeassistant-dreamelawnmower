@@ -14,7 +14,13 @@
  *   response: "DXR1", u32 status, u32 payload_length, payload bytes
  *
  * On success the payload is the local HTTP-FLV URL.  The worker then remains
- * alive until stdin closes or receives one byte, and performs XP2P cleanup.
+ * alive and answers single-byte controls on stdin, each with one response:
+ *   'Q'                         current stream link mode
+ *   'C', u32 length, bytes      post one P2P command, payload = device reply
+ *   'T', u32 length, bytes      open the encrypted two-way audio channel
+ *   'D', u32 length, bytes      send one FLV audio chunk on that channel
+ *   'S'                         close the two-way audio channel
+ * Any other byte, or closing stdin, performs XP2P cleanup and exits.
  */
 
 #include <dlfcn.h>
@@ -39,6 +45,9 @@
 #define RESPONSE_AV_RECV_FAILED 15U
 #define RESPONSE_DELEGATE_FAILED 16U
 #define RESPONSE_READY_EVENT_FAILED 17U
+#define RESPONSE_CONTROL_FAILED 18U
+#define MAX_CONTROL_COMMAND_LENGTH (64U * 1024U)
+#define MAX_CONTROL_AUDIO_LENGTH (256U * 1024U)
 #define XP2P_PROTOCOL_AUTO 0
 #define XP2P_STUN_PORT 20002U
 
@@ -98,6 +107,9 @@ typedef int (*get_lan_proxy_port_fn)(const char *);
 typedef int (*get_stream_link_mode_fn)(const char *);
 typedef void (*stop_service_fn)(const char *);
 typedef int (*set_qcloud_cred_fn)(const char *, const char *);
+typedef void *(*run_send_service_fn)(const char *, const char *, bool);
+typedef int (*data_send_fn)(const char *, uint8_t *, size_t);
+typedef int (*stop_send_service_fn)(const char *, void *);
 typedef void (*set_stun_server_fn)(const char *, uint16_t);
 typedef void (*set_cross_stun_turn_fn)(bool);
 typedef void (*av_receive_callback_fn)(const char *, uint8_t *, size_t);
@@ -231,10 +243,10 @@ static int read_u64(uint64_t *result) {
     return 0;
 }
 
-static int send_response(uint32_t status, const char *payload) {
+static int send_response_bytes(uint32_t status, const unsigned char *payload,
+                               size_t length) {
     static const unsigned char magic[] = {'D', 'X', 'R', '1'};
     unsigned char number[4];
-    size_t length = payload == NULL ? 0 : strlen(payload);
     if (length > UINT32_MAX) {
         return -1;
     }
@@ -250,6 +262,29 @@ static int send_response(uint32_t status, const char *payload) {
         return -1;
     }
     return length == 0 || write_exact(payload, length) == 0 ? 0 : -1;
+}
+
+static int send_response(uint32_t status, const char *payload) {
+    return send_response_bytes(status, (const unsigned char *)payload,
+                               payload == NULL ? 0 : strlen(payload));
+}
+
+/* Read one length-prefixed control argument, NUL-terminated for text use. */
+static unsigned char *read_control_argument(uint32_t limit, uint32_t *length) {
+    unsigned char *value;
+    if (read_u32(length) != 0 || *length > limit) {
+        return NULL;
+    }
+    value = (unsigned char *)malloc((size_t)*length + 1U);
+    if (value == NULL) {
+        return NULL;
+    }
+    if (*length > 0 && read_exact(value, *length) != 0) {
+        free(value);
+        return NULL;
+    }
+    value[*length] = 0;
+    return value;
 }
 
 static void secure_zero(char *value) {
@@ -475,6 +510,10 @@ static int run(void) {
     delegate_http_flv_fn delegate_http_flv;
     stop_service_fn stop_service;
     set_qcloud_cred_fn set_qcloud_cred;
+    run_send_service_fn run_send_service;
+    data_send_fn data_send;
+    stop_send_service_fn stop_send_service;
+    bool talk_active = false;
     set_stun_server_fn set_stun_server;
     set_cross_stun_turn_fn set_cross_stun_turn;
     set_user_callback_fn set_user_callback;
@@ -558,6 +597,10 @@ static int run(void) {
     stop_av_recv = (stop_av_recv_fn)dlsym(library, "stopAvRecvService");
     stop_service = (stop_service_fn)dlsym(library, "stopService");
     set_qcloud_cred = (set_qcloud_cred_fn)dlsym(library, "setQcloudApiCred");
+    /* Two-way audio is optional: video keeps working on runtimes without it. */
+    run_send_service = (run_send_service_fn)dlsym(library, "runSendService");
+    data_send = (data_send_fn)dlsym(library, "dataSend");
+    stop_send_service = (stop_send_service_fn)dlsym(library, "stopSendService");
     set_stun_server = (set_stun_server_fn)dlsym(library, "setStunServerToXp2p");
     set_cross_stun_turn =
         (set_cross_stun_turn_fn)dlsym(library, "setCrossStunTurn");
@@ -770,8 +813,71 @@ finish:
                                                 : "0");
                 continue;
             }
+            if (control_byte == 'C' || control_byte == 'T' ||
+                control_byte == 'D') {
+                uint32_t limit = control_byte == 'D'
+                                     ? MAX_CONTROL_AUDIO_LENGTH
+                                     : MAX_CONTROL_COMMAND_LENGTH;
+                uint32_t length = 0;
+                unsigned char *argument = read_control_argument(limit, &length);
+                if (argument == NULL) {
+                    break;
+                }
+                if (control_byte == 'C') {
+                    unsigned char *reply = NULL;
+                    size_t reply_length = 0;
+                    if (lan_transport) {
+                        send_response(RESPONSE_CONTROL_FAILED,
+                                      "P2P commands need the cloud transport.");
+                    } else if (post_command(request.fields[FIELD_DELEGATE_ID],
+                                            argument, length, &reply,
+                                            &reply_length,
+                                            request.command_timeout_us) != 0) {
+                        send_response(RESPONSE_CONTROL_FAILED,
+                                      "XP2P command failed.");
+                    } else {
+                        send_response_bytes(RESPONSE_OK, reply,
+                                            reply == NULL ? 0 : reply_length);
+                    }
+                } else if (control_byte == 'T') {
+                    if (run_send_service == NULL || data_send == NULL ||
+                        stop_send_service == NULL) {
+                        send_response(RESPONSE_SYMBOL_MISSING,
+                                      "The XP2P runtime has no audio sender.");
+                    } else {
+                        if (!talk_active) {
+                            run_send_service(request.fields[FIELD_DELEGATE_ID],
+                                             (const char *)argument, true);
+                            talk_active = true;
+                        }
+                        send_response(RESPONSE_OK, "talk");
+                    }
+                } else if (!talk_active) {
+                    send_response(RESPONSE_CONTROL_FAILED,
+                                  "The audio channel is not open.");
+                } else if (data_send(request.fields[FIELD_DELEGATE_ID],
+                                     argument, length) != 0) {
+                    send_response(RESPONSE_CONTROL_FAILED,
+                                  "XP2P audio send failed.");
+                } else {
+                    send_response(RESPONSE_OK, NULL);
+                }
+                free(argument);
+                continue;
+            }
+            if (control_byte == 'S') {
+                if (talk_active) {
+                    stop_send_service(request.fields[FIELD_DELEGATE_ID], NULL);
+                    talk_active = false;
+                }
+                send_response(RESPONSE_OK, NULL);
+                continue;
+            }
             break;
         }
+    }
+    if (talk_active) {
+        stop_send_service(request.fields[FIELD_DELEGATE_ID], NULL);
     }
     if (av_handle != NULL && stop_av_recv != NULL) {
         stop_av_recv(request.fields[FIELD_DELEGATE_ID], av_handle);
