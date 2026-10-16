@@ -6,6 +6,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Final
 
+from .app_model_profiles import APP_PROFILE_BUILDS, app_model_profile
 from .models import snapshot_advertises_video
 
 FEATURE_LIVE_VIDEO: Final = "live_video"
@@ -19,6 +20,18 @@ CAPABILITY_SOURCE_OBSERVED: Final = "observed"
 CAPABILITY_SOURCE_MODEL: Final = "model"
 CAPABILITY_SOURCE_ADVERTISED: Final = "advertised"
 CAPABILITY_SOURCE_UNKNOWN: Final = "unknown"
+CAPABILITY_SOURCE_APP_PROFILE: Final = "app_profile"
+
+PROFILE_FEATURES: Final = (
+    "camera_hardware",
+    "pin_code_ui",
+    "map_learning",
+    "dual_camera_ui",
+    "cruise_history_ui",
+    "all_wheel_drive",
+    "built_in_cellular",
+    "ai_mapping",
+)
 
 # Keep this catalog sparse. An omitted feature is unknown, not unsupported.
 # Runtime evidence remains available for new models and hardware revisions.
@@ -125,6 +138,17 @@ def resolve_feature_capability(
             CAPABILITY_SOURCE_ADVERTISED,
         )
 
+    profile = app_model_profile(model)
+    if (
+        profile is not None
+        and profile.feature_flags().get(normalized_feature) is not None
+    ):
+        # A UI flag neither proves a device API nor authorizes its operation.
+        return DreameLawnMowerFeatureCapability(
+            CAPABILITY_UNKNOWN,
+            CAPABILITY_SOURCE_APP_PROFILE,
+        )
+
     return DreameLawnMowerFeatureCapability(
         CAPABILITY_UNKNOWN,
         CAPABILITY_SOURCE_UNKNOWN,
@@ -154,3 +178,32 @@ def resolved_feature_capabilities(
         ).as_dict()
         for feature in features
     }
+
+
+def profile_capability_evidence(
+    snapshot: Any = None,
+    *,
+    descriptor: Any = None,
+) -> dict[str, dict[str, Any]]:
+    """Explain app-profile evidence without widening operational control gates."""
+    profile = app_model_profile(_descriptor_model(snapshot, descriptor))
+    flags = profile.feature_flags() if profile is not None else {}
+    result: dict[str, dict[str, Any]] = {}
+    for feature in PROFILE_FEATURES:
+        capability = resolve_feature_capability(
+            feature,
+            snapshot=snapshot,
+            descriptor=descriptor,
+        )
+        flag = flags.get(feature)
+        result[feature] = {
+            **capability.as_dict(),
+            "app_profile_flag": flag,
+            "reason": "device_advertised"
+            if capability.source == CAPABILITY_SOURCE_ADVERTISED
+            else "app_profile_only"
+            if flag is not None
+            else "no_evidence",
+            "app_profile_builds": list(APP_PROFILE_BUILDS) if flag is not None else [],
+        }
+    return result

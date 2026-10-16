@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, TypeGuard
+
+from .app_model_profiles import app_model_profile
+from .model_families import dreame_model_family
 
 CMS_GET_REQUEST: dict[str, str] = {"m": "g", "t": "CMS"}
 MAINTENANCE_WARNING_PERCENT = 20.0
@@ -55,12 +58,45 @@ MAINTENANCE_ITEMS: tuple[MaintenanceItem, ...] = (
     ),
 )
 
-MAINTENANCE_ITEM_BY_KEY = {item.key: item for item in MAINTENANCE_ITEMS}
+EDGE_TRIMMER_ITEM = MaintenanceItem(
+    key="edge_trimmer",
+    name="Edge Trimmer",
+    index=3,
+    total_minutes=6000,
+    icon="mdi:content-cut",
+    aliases=("edge_blade",),
+)
+MAINTENANCE_ITEM_BY_KEY = {
+    item.key: item for item in (*MAINTENANCE_ITEMS, EDGE_TRIMMER_ITEM)
+}
 _MAINTENANCE_ITEM_ALIASES = {
     alias: item
-    for item in MAINTENANCE_ITEMS
+    for item in (*MAINTENANCE_ITEMS, EDGE_TRIMMER_ITEM)
     for alias in (item.key, *item.aliases)
 }
+
+
+def maintenance_items_for_model(
+    model: str | None,
+    *,
+    include_optional: bool = False,
+) -> tuple[MaintenanceItem, ...]:
+    """Use the app maintenance branches without reassigning positional CMS slots."""
+    all_wheel_drive = dreame_model_family(model) in {"q2501", "g2541"}
+    profile = app_model_profile(model)
+    two_eye = profile is not None and profile.two_eye
+    if not all_wheel_drive and not two_eye:
+        return MAINTENANCE_ITEMS
+    items = tuple(
+        replace(item, total_minutes=3000)
+        if all_wheel_drive and item.key == "robot"
+        else item
+        for item in MAINTENANCE_ITEMS
+        if item.key != "brush"
+    )
+    if include_optional and dreame_model_family(model) == "q2501":
+        return (*items, EDGE_TRIMMER_ITEM)
+    return items
 
 
 def normalize_maintenance_item(value: str | MaintenanceItem) -> MaintenanceItem:
@@ -88,12 +124,27 @@ def build_cms_set_request(values: Sequence[Any]) -> dict[str, Any]:
 def reset_cms_counter(
     values: Sequence[Any],
     item: str | MaintenanceItem,
+    *,
+    model: str | None = None,
+    edge_trimmer_mode: int | None = None,
 ) -> list[int]:
     """Return CMS counters with one known maintenance counter reset to zero."""
     normalized = _counter_values(values)
     target = normalize_maintenance_item(item)
+    if target.key not in {
+        entry.key for entry in maintenance_items_for_model(model, include_optional=True)
+    }:
+        raise ValueError(f"The {target.key} counter is not supported by this model.")
+    if target.key == "edge_trimmer" and not (
+        type(edge_trimmer_mode) is int and edge_trimmer_mode in (1, 2)
+    ):
+        raise ValueError(
+            "Edge trimmer installation is not confirmed by a fresh preference read."
+        )
     if target.index >= len(normalized):
         raise ValueError(f"CMS data does not contain the {target.key} counter.")
+    if normalized[target.index] < 0:
+        raise ValueError(f"The {target.key} counter is unavailable.")
     normalized[target.index] = 0
     return normalized
 
@@ -116,6 +167,8 @@ def maintenance_status_from_app_data(
     data: Any,
     *,
     source: str,
+    model: str | None = None,
+    edge_trimmer_mode: int | None = None,
 ) -> dict[str, Any]:
     """Return normalized maintenance state from CMS or CFG app-action data."""
     values = cms_values_from_app_data(data)
@@ -126,29 +179,57 @@ def maintenance_status_from_app_data(
             "items": [],
             "raw_cms": None,
         }
-    return maintenance_status_from_cms(values, source=source)
+    return maintenance_status_from_cms(
+        values,
+        source=source,
+        model=model,
+        edge_trimmer_mode=edge_trimmer_mode,
+    )
 
 
 def maintenance_status_from_cms(
     values: Sequence[Any],
     *,
     source: str = "cms",
+    model: str | None = None,
+    edge_trimmer_mode: int | None = None,
 ) -> dict[str, Any]:
     """Return normalized maintenance item summaries from CMS counters."""
     counters = _counter_values(values)
+    edge_trimmer_mode = edge_trimmer_mode if type(edge_trimmer_mode) is int else None
     items = [
         _maintenance_item_status(counters, item)
-        for item in MAINTENANCE_ITEMS
-        if item.index < len(counters)
+        for item in maintenance_items_for_model(
+            model,
+            include_optional=edge_trimmer_mode in (1, 2),
+        )
+        if item.index < len(counters) and counters[item.index] >= 0
     ]
     due_items = [item["key"] for item in items if item.get("due")]
     warning_items = [item["key"] for item in items if item.get("warning")]
     return {
         "source": source,
+        "model": model,
+        "edge_trimmer_mode": edge_trimmer_mode,
         "available": bool(items),
         "items": items,
         "raw_cms": counters,
         "extra_values": counters[len(MAINTENANCE_ITEMS) :],
+        "candidate_counters": [
+            {
+                "index": 3,
+                "key": "edge_trimmer",
+                "used_minutes": counters[3],
+                "total_minutes": 6000,
+                "installation_confirmed": False,
+                "reason": "requires_edge_cutting_attachment_readback",
+            }
+        ]
+        if edge_trimmer_mode not in (0, 1, 2)
+        and dreame_model_family(model) == "q2501"
+        and len(counters) > 3
+        and counters[3] >= 0
+        else [],
         "due": bool(due_items),
         "due_items": due_items,
         "warning": bool(warning_items),
@@ -182,6 +263,7 @@ def maintenance_status_attributes(status: Mapping[str, Any] | None) -> dict[str,
         "available": status.get("available"),
         "raw_cms": status.get("raw_cms"),
         "extra_values": status.get("extra_values"),
+        "candidate_counters": status.get("candidate_counters"),
         "due": status.get("due"),
         "due_items": status.get("due_items"),
         "warning": status.get("warning"),

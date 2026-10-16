@@ -72,13 +72,17 @@ class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
         def descriptor(self) -> DreameLawnMowerDescriptor: ...
 
         def _sync_get_batch_device_data(
-            self, keys: Sequence[str] | None = None,
-            *, deadline: float | None = None,
+            self,
+            keys: Sequence[str] | None = None,
+            *,
+            deadline: float | None = None,
         ) -> Mapping[str, Any] | None: ...
 
         def _sync_update_device(
-            self, force_request_properties: bool = False,
-            *, deadline: float | None = None,
+            self,
+            force_request_properties: bool = False,
+            *,
+            deadline: float | None = None,
         ) -> DreameMowerDevice: ...
 
     def _sync_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
@@ -88,10 +92,6 @@ class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
             redact_response=True,
         )
         return work_log_totals_from_app_data(response)
-
-
-
-
 
     def _sync_plan_app_mowing_preference_update(
         self, map_index: int, area_id: int | None, changes: Mapping[str, Any],
@@ -107,7 +107,6 @@ class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
             self._sync_call_app_action,
             time.sleep,
         )
-
 
     def _sync_get_current_app_map_index(
         self,
@@ -219,7 +218,10 @@ class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch read-only CMS maintenance counter state."""
-        return run_app_read(read_maintenance(include_raw), self._sync_call_app_action)
+        return run_app_read(
+            read_maintenance(include_raw, model=self._descriptor.model),
+            self._sync_call_app_action,
+        )
 
     def _sync_plan_maintenance_reset(
         self,
@@ -251,8 +253,6 @@ class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
 
     def _sync_set_voice_prompts(self, prompts: Sequence[int]) -> dict[str, Any]:
         return run_voice_write(write_voice_prompts(prompts), self._sync_call_app_action)
-
-
 
     def _app_map_indices(
         self,

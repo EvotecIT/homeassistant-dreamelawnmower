@@ -355,11 +355,11 @@ plan_zone_mowing_preference_update:
         boolean: {}
     efficient_mode:
       name: Efficiency mode
-      description: Integer mode value, typically 0 for standard or 1 for efficient.
+      description: 0 is Standard, 1 is Efficient, and supported A3/A3 Pro variants also accept 3 for Rush. Other values are rejected.
       selector:
         number:
           min: 0
-          max: 5
+          max: 3
           step: 1
           mode: box
     mowing_height_cm:
@@ -717,6 +717,8 @@ plan_maintenance_reset:
               value: brush
             - label: Robot Maintenance
               value: robot
+            - label: Edge Trimmer (confirmed A3 attachment only)
+              value: edge_trimmer
     execute:
       name: Execute
       description: Send the reset request instead of only building a dry-run preview.
@@ -778,11 +780,11 @@ plan_mowing_preference_update:
         boolean: {}
     efficient_mode:
       name: Efficiency mode
-      description: Integer mode value, typically 0 for standard or 1 for efficient.
+      description: 0 is Standard, 1 is Efficient, and supported A3/A3 Pro variants also accept 3 for Rush. Other values are rejected.
       selector:
         number:
           min: 0
-          max: 5
+          max: 3
           step: 1
           mode: box
     mowing_height_cm:
