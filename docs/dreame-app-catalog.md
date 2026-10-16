@@ -139,9 +139,11 @@ records retain the numeric attachment value rather than collapsing it to a bool.
 
 The app's maintenance table keeps blade, brush and robot counters in CMS slots
 0, 1 and 2. A3/A3 Pro profiles omit the brush item and use a 3,000-minute
-(50-hour) robot-maintenance interval; the other existing profiles retain the
-3,600-minute interval. Negative counters represent unavailable data rather than
-fresh consumables.
+(50-hour) robot-maintenance interval. The app's two-eye maintenance branch
+(`g2420`, `g2566`, including observed MOVA variants) also omits the brush, but
+retains the 3,600-minute robot interval and CMS index 2. The other existing
+profiles retain the 3,600-minute interval. Negative counters represent
+unavailable data rather than fresh consumables.
 
 On `q2501`, CMS slot 3 is a 6,000-minute edge-trimmer counter. The client confirms
 the installed attachment using a validated preference read on the active map

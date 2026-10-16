@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, TypeGuard
 
+from .app_model_profiles import app_model_profile
 from .model_families import dreame_model_family
 
 CMS_GET_REQUEST: dict[str, str] = {"m": "g", "t": "CMS"}
@@ -80,11 +81,16 @@ def maintenance_items_for_model(
     *,
     include_optional: bool = False,
 ) -> tuple[MaintenanceItem, ...]:
-    """Use app-confirmed A3 intervals without reassigning positional CMS slots."""
-    if dreame_model_family(model) not in {"q2501", "g2541"}:
+    """Use the app maintenance branches without reassigning positional CMS slots."""
+    all_wheel_drive = dreame_model_family(model) in {"q2501", "g2541"}
+    profile = app_model_profile(model)
+    two_eye = profile is not None and profile.two_eye
+    if not all_wheel_drive and not two_eye:
         return MAINTENANCE_ITEMS
     items = tuple(
-        replace(item, total_minutes=3000) if item.key == "robot" else item
+        replace(item, total_minutes=3000)
+        if all_wheel_drive and item.key == "robot"
+        else item
         for item in MAINTENANCE_ITEMS
         if item.key != "brush"
     )

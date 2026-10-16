@@ -167,7 +167,9 @@ completion or prevent sensor updates.
 
 Maintenance sensors keep the mower's positional CMS counters. Recognized
 A3/A3 Pro variants use a 50-hour robot-maintenance interval and omit the
-cleaning-brush entity. Other existing families retain the 60-hour interval.
+cleaning-brush entity. The two-eye `g2420`/`g2566` profiles also omit that entity
+while retaining the 60-hour interval. Other existing families retain their
+existing maintenance selection and 60-hour interval.
 Negative counters are unavailable.
 
 A3 (`q2501`) variants also have an optional **Edge Trimmer Remaining** sensor

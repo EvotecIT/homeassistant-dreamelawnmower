@@ -155,6 +155,35 @@ def test_unknown_maintenance_slots_and_attachment_installation_remain_unproven()
     assert "edge_trimmer" not in {item["key"] for item in status["items"]}
 
 
+@pytest.mark.parametrize(
+    "model",
+    [
+        "mova.mower.g2420a",
+        "mova.mower.g2420b",
+        "mova.mower.g2566a",
+        "dreame.mower.g2420z",
+        "dreame.mower.g2566b",
+    ],
+)
+def test_two_eye_profiles_omit_brush_without_changing_robot_slot_or_interval(model):
+    items = maintenance_items_for_model(model, include_optional=True)
+    assert [(item.key, item.index, item.total_minutes) for item in items] == [
+        ("blade", 0, 6000),
+        ("robot", 2, 3600),
+    ]
+    status = maintenance_status_from_cms([100, 200, 1800, 77], model=model)
+    assert maintenance_item_status(status, "brush") is None
+    assert maintenance_item_status(status, "robot")["remaining_percent"] == 50
+    with pytest.raises(ValueError, match="not supported"):
+        reset_cms_counter(status["raw_cms"], "brush", model=model)
+    assert reset_cms_counter(status["raw_cms"], "robot", model=model) == [
+        100,
+        200,
+        0,
+        77,
+    ]
+
+
 def test_negative_counter_is_unavailable_and_cannot_be_reset_as_fresh():
     status = maintenance_status_from_cms([0, -1, 0])
     assert maintenance_item_status(status, "brush") is None
