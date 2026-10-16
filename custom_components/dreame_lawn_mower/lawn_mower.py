@@ -48,6 +48,7 @@ from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client import DreameLawnMowerConnectionError
 from .dreame_lawn_mower_client.app_map_metadata import (
     current_app_map_patrol_point_ids,
+    current_app_map_patrol_point_ids_in_zones,
 )
 from .dreame_lawn_mower_client.device_code_semantics import mower_device_code
 from .dreame_lawn_mower_client.feature_capabilities import (
@@ -191,7 +192,10 @@ async def async_setup_entry(
     platform.async_register_entity_service(
         "start_point_patrol",
         {
-            vol.Optional("point_ids"): [
+            vol.Exclusive("point_ids", "patrol_points"): [
+                vol.All(vol.Coerce(int), vol.Range(min=1)),
+            ],
+            vol.Exclusive("zone_ids", "patrol_points"): [
                 vol.All(vol.Coerce(int), vol.Range(min=1)),
             ],
         },
@@ -199,7 +203,7 @@ async def async_setup_entry(
     )
     platform.async_register_entity_service(
         "start_edge_patrol",
-        {vol.Required("contour_ids"): _validate_contour_ids},
+        {vol.Optional("contour_ids"): _validate_contour_ids},
         "async_start_edge_patrol",
     )
     platform.async_register_entity_service(
@@ -743,11 +747,30 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_start_point_patrol(
-        self, point_ids: list[int] | None = None
+        self, point_ids: list[int] | None = None, zone_ids: list[int] | None = None
     ) -> None:
         """Visit configured patrol points on the active map without mowing."""
         map_index = self._task_map_index()
         normalized: list[int] | None = None
+        if zone_ids is not None:
+            if not zone_ids:
+                raise HomeAssistantError("At least one zone id is required.")
+            requested_zone_ids = [int(zone_id) for zone_id in zone_ids]
+            self._ensure_requested_ids_available(
+                requested_zone_ids,
+                available_ids=[int(entry["area_id"]) for entry in current_zone_entries(
+                    self.coordinator.batch_device_data,
+                    self.coordinator.app_maps,
+                    getattr(self.coordinator, "vector_map_details", None),
+                    selected_map_index=self.coordinator.selected_map_index,
+                )],
+                target_name="Zone",
+            )
+            point_ids = current_app_map_patrol_point_ids_in_zones(
+                self.coordinator.app_maps, requested_zone_ids
+            )
+            if not point_ids:
+                raise HomeAssistantError("No patrol point lies in the selected zones.")
         if point_ids is not None:
             if not point_ids:
                 raise HomeAssistantError("At least one patrol point id is required.")
@@ -766,10 +789,16 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         await self.coordinator.async_request_refresh()
 
-    async def async_start_edge_patrol(self, contour_ids: list[list[int]]) -> None:
-        """Patrol one or more explicit current-map edge contours without mowing."""
-        normalized = _normalize_contour_ids(contour_ids)
+    async def async_start_edge_patrol(
+        self, contour_ids: list[list[int]] | None = None
+    ) -> None:
+        """Patrol current-map edge contours; default to each zone's outer edge."""
         map_index = self._task_map_index()
+        if contour_ids is None:
+            contour_ids = self._outer_edge_contour_ids()
+            if not contour_ids:
+                raise HomeAssistantError("No zone edge is available on this map.")
+        normalized = _normalize_contour_ids(contour_ids)
         self._ensure_contour_ids_available(normalized)
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_edge_patrol(
@@ -982,6 +1011,20 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 "Selected map does not match the active mower map. "
                 "Switch the active map in the Dreame app first."
             )
+
+    def _outer_edge_contour_ids(self) -> list[list[int]]:
+        """Return contour index 0 of every zone, as tapping zones in the app."""
+        return sorted(
+            [list(entry["contour_id"]) for entry in current_contour_entries(
+                getattr(self.coordinator, "vector_map_details", None),
+                self.coordinator.app_maps,
+                self.coordinator.batch_device_data,
+                selected_map_index=self.coordinator.selected_map_index,
+            )
+            if isinstance(entry.get("contour_id"), tuple)
+            and len(entry["contour_id"]) == 2
+            and entry["contour_id"][1] == 0]
+        )
 
     def _ensure_contour_ids_available(self, contour_ids: list[list[int]]) -> None:
         """Reject edge contour ids that are absent from current-map metadata."""

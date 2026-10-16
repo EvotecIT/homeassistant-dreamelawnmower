@@ -26,6 +26,7 @@ from .const import (
     CONF_DID,
     CONF_HOST,
     CONF_MAC,
+    CONF_MAP_BACKGROUND,
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
@@ -51,6 +52,7 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     COUNTRY_OPTIONS,
     DEFAULT_COUNTRY,
+    DEFAULT_MAP_BACKGROUND,
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_MOWING_PATH_STYLE,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_VIDEO_RETENTION,
     DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
+    MAP_BACKGROUND_OPTIONS,
     MAP_MOWING_PATH_STYLE_OPTIONS,
     MAP_ROTATION_OPTIONS,
     MAP_SPOT_AREA_STYLE_OPTIONS,
@@ -473,6 +476,19 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                         selector.SelectSelectorConfig(
                             options=list(MAP_THEME_OPTIONS),
                             translation_key=CONF_MAP_THEME,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_MAP_BACKGROUND,
+                        default=self._entry_options.get(
+                            CONF_MAP_BACKGROUND,
+                            DEFAULT_MAP_BACKGROUND,
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(MAP_BACKGROUND_OPTIONS),
+                            translation_key=CONF_MAP_BACKGROUND,
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),

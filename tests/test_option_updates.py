@@ -19,7 +19,7 @@ def _entry(options=None):
 
 
 @pytest.mark.parametrize("options", [
-    {"map_theme": "mint"}, {"map_label_scale": 2.0},
+    {"map_theme": "mint"}, {"map_label_scale": 2.0}, {"map_background": "real_scene"},
     {"map_rotations": {"0": 270}}, {"scan_interval": 30}, {},
 ])
 def test_live_options_preserve_coordinator(options):

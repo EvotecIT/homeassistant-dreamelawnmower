@@ -71,6 +71,7 @@
           "map_label_scale": "Měřítko popisků mapy",
           "map_rotation": "Otočení zobrazení mapy",
           "map_theme": "Motiv mapy",
+          "map_background": "Pozadí mapy",
           "map_stroke_scale": "Tloušťka čar mapy",
           "map_marker_scale": "Velikost značek mapy",
           "map_marker_image": "Vlastní značka sekačky",
@@ -87,6 +88,7 @@
           "map_restart_preview": "Ve výchozím nastavení vypnuto. Uloží jeden soukromý náhled mapy ve formátu JPEG (až 2 MB) v Home Assistantovi. Při načítání odpovídající mapy se používají pouze náhledy mladší než 24 hodin; nejde o živý stav sekačky. Vypnutím této možnosti nebo odstraněním integrace se uložený náhled odstraní.",
           "map_rotation": "Náhradní otočení pro mapy bez vlastního nastavení. Pro jednotlivé mapy použijte entitu Otočení zobrazení vybrané mapy.",
           "map_theme": "Vyberte sladěnou světlou, tmavou, půlnoční nebo vysoce kontrastní paletu pro všechny místně vykreslované mapy.",
+          "map_background": "Standardní kreslí trávníky na jednobarevném pozadí. Fotografie skutečné scény umístí pod mapu snímek zahrady shora, pokud ho sekačka poskytuje.",
           "map_stroke_scale": "Nastavte měřítko hranic mapy a drah od 0,5 do 3.",
           "map_marker_scale": "Nastavte měřítko bodů mapy a živé značky sekačky od 0,5 do 3.",
           "map_marker_image": "Volitelný soubor PNG, JPEG nebo WebP ve složce config/www Home Assistanta, například mower/marker.png nebo /local/mower/marker.png. Soubory mimo tuto složku a soubory větší než 1 MB budou ignorovány.",
@@ -127,6 +129,12 @@
         "dark": "Tmavý",
         "midnight": "Půlnoční",
         "high_contrast": "Vysoký kontrast"
+      }
+    },
+    "map_background": {
+      "options": {
+        "standard": "Standardní",
+        "real_scene": "Fotografie skutečné scény"
       }
     },
     "map_spot_area_style": {

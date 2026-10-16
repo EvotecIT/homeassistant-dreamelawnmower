@@ -8,7 +8,11 @@ from io import BytesIO
 from typing import Any, cast
 
 from .map_drawing import draw_lawn_polygon, draw_navigation_path
-from .map_geometry import polygon_label_point, rotate_canvas_point
+from .map_geometry import (
+    polygon_label_point,
+    rotate_canvas_point,
+    rotate_canvas_point_exact,
+)
 from .map_visuals import (
     MapRenderStyle,
     line_width,
@@ -98,6 +102,26 @@ def _render_app_map_payload_png(
     from PIL import Image, ImageDraw
 
     image = Image.new("RGBA", (width, height), style.background)
+    if style.real_scene is not None:
+        from .app_map_geometry import _APP_MAP_COORDINATE_SCALE
+        from .real_scene import paint_real_scene
+
+        def project_millimetres(x: float, y: float) -> tuple[float, float]:
+            return rotate_canvas_point_exact(
+                project_dreame_app_point(
+                    x / _APP_MAP_COORDINATE_SCALE,
+                    y / _APP_MAP_COORDINATE_SCALE,
+                    max_x=max_x,
+                    min_y=min_y,
+                    scale=scale,
+                    padding=padding,
+                ),
+                native_width,
+                native_height,
+                style.rotation,
+            )
+
+        paint_real_scene(image, style.real_scene, project_millimetres)
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 

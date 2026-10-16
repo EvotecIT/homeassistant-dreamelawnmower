@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from .app_map_metadata import app_map_zone_metadata
+from .app_map_metadata import app_map_patrol_point_zones, app_map_zone_metadata
 from .app_map_rendering import (
     _app_map_area_label as _app_map_area_label,
 )
@@ -618,6 +618,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "point_entry_shapes": _app_map_point_entry_shapes(point_entries),
         "maintenance_point_ids": app_map_maintenance_point_ids(point_entries),
         "patrol_point_ids": app_map_patrol_point_ids(point_entries),
+        "patrol_point_zones": app_map_patrol_point_zones(zone_maps, point_entries),
         "point_type_codes": app_map_point_type_codes(point_entries),
         "point_record_validation": app_map_point_record_diagnostics(point_entries),
         "semantic_count": len(semantic),

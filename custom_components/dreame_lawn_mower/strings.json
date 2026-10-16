@@ -70,6 +70,7 @@
           "map_restart_preview": "Keep a map preview across restarts", "map_label_scale": "Map label scale",
           "map_rotation": "Map display rotation",
           "map_theme": "Map theme",
+          "map_background": "Map background",
           "map_stroke_scale": "Map line thickness",
           "map_marker_scale": "Map marker size",
           "map_marker_image": "Custom mower marker",
@@ -86,6 +87,7 @@
           "map_restart_preview": "Off by default. Stores one private map JPEG (up to 2 MB) in Home Assistant. Only previews less than 24 hours old are used while the matching map loads; they are not live mower state. Disabling this option or deleting the integration removes the stored preview.",
           "map_rotation": "Fallback rotation for maps without a per-map selection. Use the Selected Map Display Rotation entity for individual maps.",
           "map_theme": "Choose a coordinated light, dark, midnight, or high-contrast palette for all locally rendered maps.",
+          "map_background": "Standard draws the lawns on a plain background. Real-scene photo places the mower's top-down garden photo under the map, when the mower provides one.",
           "map_stroke_scale": "Scale map boundaries and paths from 0.5 to 3.",
           "map_marker_scale": "Scale map points and the live mower marker from 0.5 to 3.",
           "map_marker_image": "Optional PNG, JPEG, or WebP inside Home Assistant's config/www folder, for example mower/marker.png or /local/mower/marker.png. Files outside that folder and files larger than 1 MB are ignored.",
@@ -126,6 +128,12 @@
         "dark": "Dark",
         "midnight": "Midnight",
         "high_contrast": "High contrast"
+      }
+    },
+    "map_background": {
+      "options": {
+        "standard": "Standard",
+        "real_scene": "Real-scene photo"
       }
     },
     "map_spot_area_style": {

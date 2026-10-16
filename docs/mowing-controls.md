@@ -245,9 +245,13 @@ mowing:
   `point_ids` to choose points, or omit it to visit every patrol point on the
   active, hash-verified map. An explicit empty list is rejected. Patrol points
   are app-map `point` records with `type: 2`
-  (maintenance points use `type: 1`).
-- `dreame_lawn_mower.start_edge_patrol` drives along explicit edge contours
-  using the same `[edge_id, contour_index]` pairs as `start_edge_mowing`.
+  (maintenance points use `type: 1`). Pass `zone_ids` instead to visit only
+  the patrol points located inside those lawn zones; the integration assigns
+  each point to the zone outline that contains it.
+- `dreame_lawn_mower.start_edge_patrol` drives along edge contours using the
+  same `[edge_id, contour_index]` pairs as `start_edge_mowing`. Omit
+  `contour_ids` to patrol the outer edge (contour index `0`) of every zone on
+  the active map, as tapping the zones in the vendor app does.
 
 ```yaml
 action: dreame_lawn_mower.start_edge_patrol
