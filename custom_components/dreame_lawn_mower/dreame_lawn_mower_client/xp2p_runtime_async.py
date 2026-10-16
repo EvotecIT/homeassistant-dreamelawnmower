@@ -16,12 +16,9 @@ from .client_refresh import _run_state_worker
 from .public_download import async_download_public_response
 from .video_runtime import DreameLawnMowerVideoRuntimeError
 from .xp2p_host_runtime import DreameLawnMowerXp2pHostAssets
-from .xp2p_runtime_bootstrap import (
-    LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE,
-    ensure_xp2p_host_runtime,
-)
+from .xp2p_runtime_bootstrap import ensure_xp2p_host_runtime
 
-# Individual SDK/runtime assets and selected ZIP members, never the whole build ZIP.
+# Individually pinned SDK/runtime assets, never a complete Android system image.
 _MAX_ASSET_BYTES = 256 * 1024 * 1024
 _ASSET_DOWNLOAD_BUDGET = 15 * 60.0
 
@@ -85,17 +82,8 @@ class _RuntimeHttp:
         assert task is not None
         self.tasks.add(task)
         try:
-            byte_range = None
-            response_headers: dict[str, str] = {}
-            if headers is not None:
-                value = headers["Range"]
-                if not value.startswith("bytes="):
-                    raise ValueError("Unsupported runtime byte range")
-                start, end = (int(part) for part in value[6:].split("-"))
-                byte_range = (start, end, LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE)
-                response_headers["Content-Range"] = (
-                    f"bytes {start}-{end}/{LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE}"
-                )
+            if headers:
+                raise ValueError("Runtime assets do not accept custom request headers")
             result = await async_download_public_response(
                 self.session,
                 url,
@@ -103,12 +91,11 @@ class _RuntimeHttp:
                 timeout=timeout,
                 total_timeout=max(timeout, _ASSET_DOWNLOAD_BUDGET),
                 max_bytes=_MAX_ASSET_BYTES,
-                byte_range=byte_range,
             )
             return _Response(
-                206 if byte_range else 200,
+                200,
                 result.content,
-                response_headers,
+                {},
                 result.url,
             )
         finally:
