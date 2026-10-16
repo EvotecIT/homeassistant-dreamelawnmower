@@ -157,10 +157,12 @@ coordinator for shutdown.
 
 The sensor is unavailable while history is incomplete or unattributed, or when
 no active zone has a known completion on the current map revision. A zone without
-a known completion on that revision waited longer than every zone that has one,
-so it comes first and is listed in `unknown_zone_ids`; absence from this window
-does not mean the zone has never been mowed. Waiting for every zone instead would
-hide the sensor after each map edit until one run happens to cover all zones. The attributes retain the known
+a known completion on that revision is prioritized before zones with known
+dates and is listed in `unknown_zone_ids`. This keeps missing history from
+permanently excluding that zone from a rotation; it does not establish its
+actual last mowing date or mean it has never been mowed. Requiring a date for
+every active zone can keep the sensor unavailable after a map revision changes.
+The attributes retain the known
 per-zone dates and expose `history_complete`, `history_attributable`,
 `observed_sessions` and `unknown_zone_ids`, alongside `zone_id`,
 `last_completed_at` and the ordered `zones` list. Invalid timestamps cannot claim

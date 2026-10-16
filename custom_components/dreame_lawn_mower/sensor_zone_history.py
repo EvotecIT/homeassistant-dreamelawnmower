@@ -111,7 +111,7 @@ def zone_mowing_overview(
 
 
 class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorEntity):
-    """Name the zone whose last completed mowing is the oldest."""
+    """Prioritize unknown zones, then the oldest confirmed mowing completion."""
 
     _attr_translation_key = "least_recently_mowed_zone"
     _attr_icon = "mdi:calendar-clock-outline"
@@ -147,10 +147,9 @@ class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorE
             and history.complete
             and history.attributable
             and bool(overview)
-            # One completion on this revision proves the history covers this
-            # map; a zone without one waited longer than any of them. Each
-            # edit changes the revision, so requiring every zone would hide
-            # the sensor until a run happens to cover all zones at once.
+            # Require a confirmed completion on this revision, then prioritize
+            # unknown zones so missing history does not permanently exclude them.
+            # Unknown is a selection policy, not a claim about their actual dates.
             and any(item["last_completed_at"] is not None for item in overview)
         )
 
