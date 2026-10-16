@@ -734,7 +734,7 @@ def test_encode_mowing_preference_payload_preserves_newer_vendor_fields() -> Non
 
     assert changed_fields == ["mowing_height_cm"]
     assert updated["obstacle_avoidance_sensitivity"] == 3
-    assert updated["edge_cutting_attachment"] is True
+    assert updated["edge_cutting_attachment"] == 1
     assert updated["steering_mode"] == 2
     assert updated["cutter_position_height"] == 35
     assert encode_mowing_preference_payload(updated) == [

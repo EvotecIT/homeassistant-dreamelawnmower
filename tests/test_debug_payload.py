@@ -224,7 +224,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
             "reason": "object_payload",
             "value_type": "object",
             "value_preview": {"blob": 123},
-        }
+        },
     ]
     assert payload["device"]["realtime_summary"]["entries"][0]["status_blob"] == {
         "length": 3,
@@ -274,6 +274,21 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["triage"] == {
         "schema_version": 11,
         "known_model": True,
+        "device_code_context": {"error": None, "notice": None},
+        "model_identity": {
+            "raw_model": "dreame.mower.g2408",
+            "brand": "dreame",
+            "family": "g2408",
+            "variant": "",
+            "family_name": "A2",
+            "recognized": True,
+            "exact_retail_name_known": True,
+            "observed_identifier": True,
+            "app_profile_known": True,
+            "name_source": "exact_model",
+            "display_model": "A2",
+            "validation": "not_established_by_identity",
+        },
         "model": "dreame.mower.g2408",
         "display_model": "A2",
         "activity": "paused",
@@ -409,6 +424,7 @@ def test_sanitize_diagnostic_text_redacts_sensitive_http_headers() -> None:
         "Cookie: **REDACTED**\n"
         "Content-Type: application/json"
     )
+
 
 def test_sanitize_diagnostic_text_redacts_local_paths_but_keeps_urls() -> None:
     message = sanitize_diagnostic_text(

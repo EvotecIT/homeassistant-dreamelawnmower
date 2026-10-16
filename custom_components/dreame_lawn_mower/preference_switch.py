@@ -9,6 +9,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.model_families import dreame_model_family
 from .dreame_lawn_mower_client.mowing_preferences import OBSTACLE_AI_CLASSES
 from .entity import DreameLawnMowerEntity
 from .mowing_preference_control import (
@@ -102,6 +103,17 @@ class DreameLawnMowerPreferenceSwitch(DreameLawnMowerEntity, SwitchEntity):
         value = selected_active_preference_attributes(self.coordinator).get(
             self._preference_description.key
         )
+        if self._preference_description.key == "edge_cutting_attachment":
+            model = self.coordinator.client.descriptor.model
+            if dreame_model_family(model) == "q2501":
+                return value == 2 if type(value) is int and value in (1, 2) else None
+            return (
+                bool(value)
+                if type(value) is int and value in (0, 1)
+                else value
+                if isinstance(value, bool)
+                else None
+            )
         return value if isinstance(value, bool) else None
 
     @property

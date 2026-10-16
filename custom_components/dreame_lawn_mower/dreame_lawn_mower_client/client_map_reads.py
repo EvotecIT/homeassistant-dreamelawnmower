@@ -12,6 +12,7 @@ from .map_inventory import _app_map_inventory_identity
 from .map_read_plan import (
     APP_MAP_LOCK_TIMEOUT_SECONDS,
     APP_MAP_READ_TIMEOUT_SECONDS,
+    read_backup_map,
     read_maps,
 )
 
@@ -27,6 +28,7 @@ async def async_read_maps(
     include_payload: bool,
     include_objects: bool,
     include_object_urls: bool,
+    backup_index: int | None = None,
 ) -> dict[str, Any]:
     """Hold map selection through chunks, cache commits and object inventory."""
 
@@ -44,10 +46,23 @@ async def async_read_maps(
                 raise DreameLawnMowerConnectionError(
                     "Map read timed out waiting for another operation"
                 ) from err
+            if backup_index is not None:
+                return await async_run_app_read(
+                    client,
+                    read_backup_map(
+                        backup_index,
+                        chunk_size=chunk_size,
+                        include_payload=include_payload,
+                        deadline=deadline,
+                    ),
+                    deadline=deadline,
+                )
             result = await async_run_app_read(
                 client,
                 read_maps(
-                    client._app_map_payload_cache, chunk_size, include_payload,
+                    client._app_map_payload_cache,
+                    chunk_size,
+                    include_payload,
                     deadline=deadline,
                 ),
                 deadline=deadline,

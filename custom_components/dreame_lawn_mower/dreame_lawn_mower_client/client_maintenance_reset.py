@@ -35,7 +35,9 @@ async def async_reset_maintenance(
                 try:
                     if isinstance(request, ReadMaintenance):
                         response = await async_run_app_read(
-                            client, read_maintenance(), deadline=deadline
+                            client,
+                            read_maintenance(model=client.descriptor.model),
+                            deadline=deadline,
                         )
                     else:
                         response = await async_command_app_action(

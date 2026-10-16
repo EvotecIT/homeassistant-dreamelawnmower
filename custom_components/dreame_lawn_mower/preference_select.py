@@ -9,6 +9,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.mowing_preferences import mowing_efficiency_modes
 from .entity import DreameLawnMowerEntity
 from .mowing_preference_control import (
     async_update_selected_active_preference,
@@ -86,7 +87,16 @@ class DreameLawnMowerPreferenceSelect(DreameLawnMowerEntity, SelectEntity):
     @property
     def options(self) -> list[str]:
         """Return device-supported values shown in the app."""
-        return [label for label, _ in self._preference_description.options]
+        return [label for label, _ in self._options()]
+
+    def _options(self) -> tuple[tuple[str, int], ...]:
+        if self._preference_description.key == "efficient_mode":
+            labels = {0: "Standard", 1: "Efficient", 3: "Rush"}
+            return tuple(
+                (labels[value], value)
+                for value in mowing_efficiency_modes(self._descriptor.model)
+            )
+        return self._preference_description.options
 
     @property
     def current_option(self) -> str | None:
@@ -94,7 +104,7 @@ class DreameLawnMowerPreferenceSelect(DreameLawnMowerEntity, SelectEntity):
         value = selected_active_preference_attributes(self.coordinator).get(
             self._preference_description.key
         )
-        for label, encoded in self._preference_description.options:
+        for label, encoded in self._options():
             if value == encoded:
                 return label
         return None
@@ -117,7 +127,7 @@ class DreameLawnMowerPreferenceSelect(DreameLawnMowerEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Persist one discrete preference through the guarded write path."""
-        values = dict(self._preference_description.options)
+        values = dict(self._options())
         if option not in values:
             raise ValueError(f"Unknown {self._attr_name} option: {option}")
         await async_update_selected_active_preference(

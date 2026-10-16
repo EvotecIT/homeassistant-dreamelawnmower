@@ -54,9 +54,11 @@ from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
+from .device_code_guidance import mower_device_code_context
 from .exceptions import DreameLawnMowerCommandRejectedError
 from .feature_capabilities import (
     CAPABILITY_SOURCE_ADVERTISED,
+    CAPABILITY_SOURCE_APP_PROFILE,
     CAPABILITY_SOURCE_MODEL,
     CAPABILITY_SOURCE_OBSERVED,
     CAPABILITY_SOURCE_UNKNOWN,
@@ -67,6 +69,7 @@ from .feature_capabilities import (
     FEATURE_POINT_CLOUD,
     MODEL_FEATURE_CAPABILITIES,
     DreameLawnMowerFeatureCapability,
+    profile_capability_evidence,
     resolve_feature_capability,
     resolved_feature_capabilities,
 )
@@ -104,6 +107,7 @@ from .map_probe import (
     build_cloud_property_summary,
     build_map_probe_payload,
 )
+from .model_identity import model_identity_summary
 from .models import (
     DISPLAY_NAME_ALIASES,
     MODEL_NAME_MAP,
@@ -293,6 +297,7 @@ __all__ = [
     "WORK_LOG_TOTALS_REQUEST",
     "SUPPORTED_ACCOUNT_TYPES",
     "CAPABILITY_SOURCE_ADVERTISED",
+    "CAPABILITY_SOURCE_APP_PROFILE",
     "CAPABILITY_SOURCE_MODEL",
     "CAPABILITY_SOURCE_OBSERVED",
     "CAPABILITY_SOURCE_UNKNOWN",
@@ -374,6 +379,9 @@ __all__ = [
     "reset_cms_counter",
     "resolve_feature_capability",
     "resolved_feature_capabilities",
+    "profile_capability_evidence",
+    "model_identity_summary",
+    "mower_device_code_context",
     "run_jadx_decompile",
     "schedule_task_summary",
     "summarize_mowing_preference_info",

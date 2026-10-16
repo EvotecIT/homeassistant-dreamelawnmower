@@ -242,20 +242,16 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     assert result["maps"][0]["preferences"][0]["efficient_mode_name"] == "efficient"
     assert result["maps"][0]["preferences"][0]["mowing_height_cm"] == 4.0
     assert (
-        result["maps"][0]["preferences"][0]["mowing_direction_mode_name"]
-        == "rotation"
+        result["maps"][0]["preferences"][0]["mowing_direction_mode_name"] == "rotation"
     )
     assert (
         result["maps"][0]["preferences"][0]["mowing_direction_method_name"]
         == "mow_at_angle"
     )
     assert result["maps"][0]["preferences"][0]["mowing_direction_degrees"] == 40
-    assert (
-        result["maps"][0]["preferences"][0]["edge_mowing_walk_mode_name"]
-        == "side"
-    )
+    assert result["maps"][0]["preferences"][0]["edge_mowing_walk_mode_name"] == "side"
     assert result["maps"][0]["preferences"][0]["turning_method_name"] == "efficient"
-    assert result["maps"][0]["preferences"][0]["edge_cutting_attachment"] is False
+    assert result["maps"][0]["preferences"][0]["edge_cutting_attachment"] == 0
     assert result["maps"][0]["preferences"][0]["obstacle_avoidance_ai_classes"] == [
         "people",
         "animals",
@@ -265,9 +261,10 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     assert result["payload_shape"]["alignment"] == "payload_order"
     assert result["payload_shape"]["map_entry_count"] == 2
     assert result["payload_shape"]["map_entries"][0]["settings_entry_count"] == 2
-    assert "mowingHeight" in result["payload_shape"]["map_entries"][0][
-        "preference_field_keys"
-    ]
+    assert (
+        "mowingHeight"
+        in result["payload_shape"]["map_entries"][0]["preference_field_keys"]
+    )
     assert "raw_setting" not in result["payload_shape"]["map_entries"][0]
 
 

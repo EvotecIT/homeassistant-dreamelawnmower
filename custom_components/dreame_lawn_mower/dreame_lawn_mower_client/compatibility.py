@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .feature_capabilities import profile_capability_evidence
+from .model_identity import descriptor_identity_summary
+
 
 def build_compatibility_summary(
     descriptor: Any,
@@ -43,8 +46,12 @@ def build_compatibility_summary(
         "region": descriptor.country,
         "model": descriptor.model,
         "display_model": descriptor.display_model,
+        "model_identity": descriptor_identity_summary(descriptor),
         "firmware": getattr(snapshot, "firmware_version", None),
         "features": dict(features),
+        "profile_capabilities": profile_capability_evidence(
+            snapshot, descriptor=descriptor
+        ),
         "schedule_protocol": (
             next(iter(protocols))
             if len(protocols) == 1

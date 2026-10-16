@@ -87,6 +87,91 @@ comparing the numeric suffix after `_`. They do not establish catalog-change
 boundaries and are not used as device-code gates. Plugin build numbers, Android
 app versions and mower firmware versions are separate version domains.
 
+## Capability evidence and variant diagnostics
+
+The compatibility report distinguishes a recognized family from an exact retail
+name and from hardware validation. A new suffix can be recognized without claiming
+that it is a tested SKU. An explicit cloud name or a known retail mapping remains
+more specific than the family fallback. `g3255` is an observed identifier without
+a confirmed family name or usable EU app-plugin entry.
+
+The report also includes the app profile's camera, PIN, map-learning, dual-camera,
+cruise-history, AWD, built-in cellular, and AI-mapping flags. Their source is
+`app_profile`, their operational support remains `unknown`, and absent flags
+remain distinct from explicit false values. A camera flag does not establish
+live-video provisioning, and an app flag does not authorize a device command.
+Runtime and device-advertised evidence retain their stronger precedence.
+
+For a previously unnamed variant, a useful sanitized report includes the full
+raw model ID, vendor product name, account region, firmware and hardware
+versions, advertised capabilities and the affected read-only response. Exclude
+account IDs, device IDs, tokens, signed URLs and garden geometry. A marketing
+name or matching suffix alone does not establish the device's API contract.
+
+The app's `isOnboardRemote` flag is used by the cellular/Link-module status and
+subscription screens. It is reported as built-in cellular evidence, not as
+permission for manual driving. `needMapLearn` controls an additional workflow
+for unlearned areas on `g2420` and `g2566`. The existence of that workflow and
+the newer AI-mapping flag does not establish a safe automatic mapping command
+for an unvalidated mower.
+
+Fresh authenticated EU queries on 16 October 2026 returned usable entries for
+`g2541g` and `g2568e`, sharing researched builds 977 and 978. Queries for `g3255`,
+bare `g2538`/`g2566`, and their inspected `a` variants returned version `-1`.
+Unauthenticated plugin queries in EU, US and SG returned HTTP 401. Those results
+do not establish regional absence or a worldwide product inventory; regional
+account and device captures remain the source of field validation.
+
+## Preferences and maintenance contracts
+
+The A3/A3 Pro app settings offer Standard (`0`), Efficient (`1`), and Rush (`3`).
+Index `2` is not offered by that selector. The integration exposes Rush on the
+recognized `q2501` and `g2541` variants and rejects unsupported write values.
+Suffix-specific mowing-efficiency arrays describe the app's displayed estimates;
+they do not identify a retail SKU or guarantee a daily mowing area.
+
+The A3 edge-trimmer preference uses numeric modes: `0` means unavailable, `1`
+closes/disables trimming, and `2` selects edge trimming. The client preserves
+the numeric field when another preference changes. The EdgeMaster switch maps
+off/on to `1`/`2` on `q2501`, and is unavailable when installation is unproven.
+Existing boolean service arguments remain supported; direct decoded preference
+records retain the numeric attachment value rather than collapsing it to a bool.
+
+The app's maintenance table keeps blade, brush and robot counters in CMS slots
+0, 1 and 2. A3/A3 Pro profiles omit the brush item and use a 3,000-minute
+(50-hour) robot-maintenance interval; the other existing profiles retain the
+3,600-minute interval. Negative counters represent unavailable data rather than
+fresh consumables.
+
+On `q2501`, CMS slot 3 is a 6,000-minute edge-trimmer counter. The client confirms
+the installed attachment using a validated preference read on the active map
+before exposing or resetting that counter. This optional context read has a
+five-second budget. If it fails, ordinary CMS counters remain available and
+the extra slot stays diagnostic. Resetting a counter preserves every other
+slot, including unknown extensions. No maintenance reset is performed by
+discovery or by a read-only probe.
+
+## Error explanations and unresolved firmware differences
+
+Current diagnostic code context includes the selected name and tier, firmware,
+catalog source, possible alternative meanings, and original recovery guidance.
+Active condition sensors expose the same guidance while the current snapshot
+still confirms that exact condition. Cleared history is not relabeled using a
+later firmware's catalog.
+
+The A1/A1 Pro catalog conflicts and code 25's startup/map conflict remain
+explicit. The client preserves its existing operational classification rather
+than guessing a firmware transition from an app build or minimum-version field.
+App popup, persistent-message and suppression categories do not clear a hard
+fault or trigger automatic recovery. Unknown codes remain visible and request
+diagnostic evidence instead of inheriting an unrelated device's fault meaning.
+
+Resolving an ambiguous meaning requires an observation tying the raw code and
+actual condition to a full model and mower firmware. An app update or plugin
+build number does not provide that transition. Extra map-learning and AI-map
+controls likewise require validated wire data and command/readback evidence
+before they can become operational features.
+
 ## Source identity and limits
 
 Research on 16 October 2026 used Dreamehome `com.dreame.smartlife` version
@@ -110,7 +195,13 @@ effective catalogs contain 78 codes and A2/A3 catalogs contain 79 in build 983.
 Those counts describe that build, not a universal firmware inventory.
 
 REA 6.5.0 parsed the selected model/fault modules as inert JavaScript. The extended
-pass parsed six sources and 20,175 AST nodes without parse failures. Dynamic Metro
+catalog pass parsed six sources and 20,175 AST nodes without parse failures. A
+later contract pass against the unchanged build-983 bundle parsed five named
+sources and 13,721 AST nodes, also without parse failures. It traced the
+`comm/api/control.ts` backup getters, `components/mowing/setting/content/defs.tsx`
+choices, `data/const/setting/defs` maintenance intervals,
+`components/header/connection/status/cellular/status` and
+`screens/settings/maintain/consume/maintain` consumers. Dynamic Metro
 dependency calls are not fully resolved by its generic graph; family selection
 and fallback order were also traced directly through named modules and their
 dependency arrays. Full proprietary bundles, credentials and account identifiers

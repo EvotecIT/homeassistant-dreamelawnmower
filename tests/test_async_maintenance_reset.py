@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 from aiohttp import ClientSession, web
@@ -18,6 +19,57 @@ from .test_async_cloud_session import (
     login_response,
     server,
 )
+from .test_family_preferences_and_maintenance import _raw_preference
+
+
+@pytest.mark.parametrize("execute", [False, True])
+def test_native_edge_reset_requires_fresh_context_and_preserves_sibling_counters(
+    monkeypatch, execute
+):
+    strings = cloud_strings("dreame")
+    values = [100, -1, 300, 600, 77]
+    actions = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        action = (await request.json())["data"]["params"]["in"][0]
+        actions.append(action)
+        if action["m"] == "s":
+            assert action["t"] == "CMS"
+            assert action["d"]["value"] == [100, -1, 300, 0, 77]
+            values[:] = action["d"]["value"]
+            data = {"value": values.copy()}
+        else:
+            data = {
+                "CMS": {"value": values.copy()},
+                "MAPL": [[0, 1, 1, 1, 0]],
+                "PREI": {"type": 0, "ver": [[0, 8]]},
+                "PRE": _raw_preference(2),
+            }[action["t"]]
+        return web.json_response(
+            {"code": 0, "data": {"result": {"out": [{"r": 0, "d": data}]}}}
+        )
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session)
+            client._descriptor = replace(client.descriptor, model="dreame.mower.q2501c")
+            try:
+                result = await client.async_plan_maintenance_reset(
+                    item="edge_trimmer", execute=execute, confirm_write=execute
+                )
+                assert result["executed"] is execute
+                assert result["updated_cms"] == [100, -1, 300, 0, 77]
+                assert result["updated_item"]["remaining_percent"] == 100
+                assert len([a for a in actions if a["m"] == "s"]) == int(execute)
+                if execute:
+                    assert result["refreshed_item"]["used_minutes"] == 0
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
