@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .map_inventory import (
+    map_revision_hash as map_revision_hash,
+)
+from .map_inventory import (
+    selected_map_revision,
+)
 from .session_photos import (
     SESSION_EVENT_KEY,
     _async_read_session_summary,
@@ -21,15 +26,7 @@ if TYPE_CHECKING:
 ZONE_HISTORY_SESSIONS = 30
 ZONE_HISTORY_DOWNLOADS = 5
 ZONE_HISTORY_BUDGET = 15.0
-_MAP_HASH = re.compile(r"[0-9a-fA-F]{32}")
 _MAX_TIMESTAMP = 253402300799
-
-
-def map_revision_hash(value: Any) -> str | None:
-    """Accept an explicit map revision, never a zone number as map identity."""
-    return (
-        value.lower() if isinstance(value, str) and _MAP_HASH.fullmatch(value) else None
-    )
 
 
 def _timestamp(value: Any) -> int | None:
@@ -59,6 +56,42 @@ class ZoneMowingRecord:
         )
 
 
+# Summary coordinates use the coarse MAPD units of the summary's own ``map``
+# polygons (centimetres); drawable geometry uses units ten times finer.
+_SUMMARY_COORDINATE_SCALE = 10
+
+
+@dataclass(frozen=True)
+class ChargerPosition:
+    """Where a finished task reported the charging station, in map units."""
+
+    x: int
+    y: int
+    heading: int | None
+    observed_at: int | None
+    map_hash: str | None = None
+
+
+def charger_position(summary: Any) -> ChargerPosition | None:
+    """Decode ``dock: [x, y, heading, ...]`` from one session summary."""
+    if not isinstance(summary, Mapping):
+        return None
+    dock = summary.get("dock")
+    if not isinstance(dock, list) or len(dock) < 2:
+        return None
+    x, y = dock[:2]
+    if any(type(v) is not int or abs(v) > 1_000_000 for v in (x, y)):
+        return None
+    heading = dock[2] if len(dock) > 2 and type(dock[2]) is int else None
+    return ChargerPosition(
+        x * _SUMMARY_COORDINATE_SCALE,
+        y * _SUMMARY_COORDINATE_SCALE,
+        heading,
+        _timestamp(summary.get("end")) or _timestamp(summary.get("start")),
+        map_revision_hash(summary.get("md5")),
+    )
+
+
 @dataclass(frozen=True)
 class ZoneMowingHistory:
     """Successful summaries plus the unfinished hydration queue."""
@@ -66,6 +99,18 @@ class ZoneMowingHistory:
     sessions: Mapping[str, tuple[ZoneMowingRecord, ...]] = field(default_factory=dict)
     pending: tuple[str, ...] = ()
     history_available: bool = True
+    chargers: Mapping[str, ChargerPosition] = field(default_factory=dict)
+
+    def latest_charger(self, map_hash: str | None = None) -> ChargerPosition | None:
+        """Newest station on the requested revision, without a foreign fallback."""
+        ordered = sorted(
+            self.chargers.values(), key=lambda item: item.observed_at or 0, reverse=True
+        )
+        revision = map_revision_hash(map_hash)
+        for item in ordered:
+            if revision is not None and item.map_hash == revision:
+                return item
+        return ordered[0] if revision is None and ordered else None
 
     @property
     def complete(self) -> bool:
@@ -78,6 +123,16 @@ class ZoneMowingHistory:
             for records in self.sessions.values()
             for record in records
         )
+
+
+def reported_charger_for_map(
+    history: ZoneMowingHistory | None, app_maps: Any, map_index: int,
+) -> ChargerPosition | None:
+    """Bind summary coordinates to one current, uniquely verified revision."""
+    revision = selected_map_revision(app_maps, map_index)
+    if history is None or revision is None:
+        return None
+    return history.latest_charger(revision)
 
 
 @dataclass(frozen=True)
@@ -168,6 +223,9 @@ async def async_get_zone_mowing_records(
         result = {
             name: known.sessions[name] for name in names if name in known.sessions
         }
+        chargers = {
+            name: known.chargers[name] for name in names if name in known.chargers
+        }
         resolved = {name for name in result if name not in known.pending}
         missing = [name for name in names if name not in resolved]
         # Untried new summaries first; retain a rotated queue across partial passes.
@@ -189,6 +247,9 @@ async def async_get_zone_mowing_records(
                 # Cancellation is BaseException and must propagate to its owner.
                 break
             if summary is not None:
+                charger = charger_position(summary)
+                if charger is not None:
+                    chargers[name] = charger
                 decoded = zone_mowing_records(summary, name)
                 result[name] = decoded.records
                 if decoded.understood:
@@ -198,7 +259,7 @@ async def async_get_zone_mowing_records(
         unfinished = [name for name in unfinished if name not in attempted] + [
             name for name in unfinished if name in attempted
         ]
-        return ZoneMowingHistory(result, tuple(unfinished))
+        return ZoneMowingHistory(result, tuple(unfinished), chargers=chargers)
 
     return await client._async_cloud_read(read)
 

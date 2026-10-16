@@ -60,6 +60,7 @@ from .dreame_lawn_mower_client.map_visuals import (
 )
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 from .dreame_lawn_mower_client.real_scene import RealSceneImage
+from .dreame_lawn_mower_client.zone_mowing_history import reported_charger_for_map
 from .feature_capabilities import coordinator_feature_capabilities
 from .ha_tasks import create_background_task
 from .image import (
@@ -625,6 +626,11 @@ class DreameLawnMowerMapCamera(
     def _map_refresh_context(self) -> tuple[Any, ...]:
         blob = self.coordinator.runtime_status_blob
         options = self.coordinator.entry.options
+        index = self._selected_map_index
+        charger = reported_charger_for_map(
+            getattr(self.coordinator.client, "_charger_history", None),
+            self.coordinator.app_maps, index,
+        ) if index is not None else None
         return (
             self._selected_map_index,
             getattr(blob, "hex", None),
@@ -642,6 +648,7 @@ class DreameLawnMowerMapCamera(
             )),
             options.get(CONF_MAP_BACKGROUND, DEFAULT_MAP_BACKGROUND),
             self._real_scene.digest if self._real_scene is not None else None,
+            (charger.x, charger.y, charger.map_hash) if charger is not None else None,
         )
 
 
@@ -673,6 +680,7 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
                 lambda: self.coordinator.client.async_refresh_vector_map_view(
                     label_scale=self._map_label_scale,
                     current_map_index=self._selected_map_index,
+                    app_maps=self.coordinator.app_maps,
                     style=self._map_style,
                 )
             )

@@ -15,6 +15,7 @@ from .position_tracking import POSITION_MAX_AGE_SECONDS, position_timestamp
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
     from .position_tracking import MowerPosition, MowerPositionTracker
+    from .zone_mowing_history import ZoneMowingHistory
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +32,7 @@ class _RuntimeTrailCheckpoint:
 class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
 
+    _charger_history: ZoneMowingHistory | None
     _position_tracker: MowerPositionTracker
     _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
     _runtime_map_identity_expires_at: datetime | None

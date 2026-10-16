@@ -2972,7 +2972,9 @@ class DreameLawnMowerCoordinator(
             return self.vector_map_details
 
         try:
-            vector_map_details = await self.client.async_get_vector_map_details()
+            vector_map_details = await self.client.async_get_vector_map_details(
+                app_maps=self.app_maps,
+            )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh vector map details: %s", err)
             if switch_event == getattr(self, "_last_map_switch_event_at", None):
@@ -3367,6 +3369,7 @@ class DreameLawnMowerCoordinator(
             < (ZONE_MOWING_HISTORY_REFRESH_INTERVAL
                if self.zone_mowing_sessions.complete else timedelta(seconds=30))
         ):
+            self.client._charger_history = self.zone_mowing_sessions
             return self.zone_mowing_sessions
 
         try:
@@ -3379,12 +3382,18 @@ class DreameLawnMowerCoordinator(
                 self.zone_mowing_sessions.sessions if self.zone_mowing_sessions else {},
                 self.zone_mowing_sessions.pending if self.zone_mowing_sessions else (),
                 history_available=False,
+                chargers=(
+                    self.zone_mowing_sessions.chargers
+                    if self.zone_mowing_sessions else {}
+                ),
             )
             self.zone_mowing_sessions_refreshed_at = now
+            self.client._charger_history = self.zone_mowing_sessions
             return self.zone_mowing_sessions
 
         self.zone_mowing_sessions = sessions
         self.zone_mowing_sessions_refreshed_at = now
+        self.client._charger_history = sessions
         return sessions
 
     async def async_refresh_voice_settings(

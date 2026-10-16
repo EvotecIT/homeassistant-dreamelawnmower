@@ -26,6 +26,7 @@ from .control_options import active_map_index
 from .dreame_lawn_mower_client.map_inventory import _app_map_inventory_identity
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
+from .dreame_lawn_mower_client.zone_mowing_history import reported_charger_for_map
 from .map_presentation import map_style
 from .real_scene_cache import real_scene_owner
 from .runtime_data import get_coordinator
@@ -96,6 +97,10 @@ class MowingMapAPI:
             map_style(options, index),
             float(options.get(CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE)),
             switch_event,
+            # The station is drawn into the background once a summary reports it.
+            reported_charger_for_map(
+                getattr(coordinator.client, "_charger_history", None), app_maps, index,
+            ),
         )
 
     def authorize(self, request: web.Request, entry_id: str) -> Any:
@@ -171,6 +176,7 @@ class MowingMapAPI:
                 map_index=context[0],
                 style=context[2],
                 label_scale=context[3],
+                app_maps=coordinator.app_maps,
             )
         except Exception as err:
             self._failures[entry_id] = (coordinator, context, time.monotonic())

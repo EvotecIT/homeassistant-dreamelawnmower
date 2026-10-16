@@ -103,13 +103,24 @@ The bounded observation checkpoint can retain them across an integration
 restart, but fresh map geometry must match before they are displayed. Restored
 evidence never becomes a live position or restores an old movement trail.
 
-Charging confirms that the mower is at its station, but does not supply the
-station's coordinates. After a cold start without valid saved position evidence,
-a docked mower that sends only position-free heartbeats therefore shows
-**Docked · map position unavailable**.
-The integration does not use a maintenance point or the last route endpoint
-as an invented dock location. Camera attributes expose `position_status`,
-`position_source`, and `position_observed_at` for the same retained evidence.
+Finished task summaries can also report the charging station through a `dock`
+coordinate. When the summary's revision matches the unique verified current map,
+the camera and interactive background show a small station marker. Camera
+attributes `charger_x` and `charger_y` use the same native units as mower positions.
+A station from another revision is never substituted, even when its coordinates
+fit inside the lawn's bounds.
+
+While the mower is confirmed docked and the current map frame remains valid, its
+marker uses the reported station and `position_source` is
+`reported_charging_station`. This position is assessed from the current docking
+state; it does not become a saved telemetry observation. Station reports are kept
+in the bounded recent-session cache and selected again when maps change.
+
+Charging alone does not supply coordinates. Without a matching station report or
+valid saved dock observation, position-free heartbeats show **Docked · map position
+unavailable**. The integration does not use a maintenance point or the last route
+endpoint as an invented dock location. Camera attributes expose `position_status`,
+`position_source`, and `position_observed_at` for the same evidence.
 
 ## Appearance and rotation
 

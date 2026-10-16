@@ -41,6 +41,7 @@ class MowingMapScene:
     projection: MapProjection
     bounds: tuple[int, int, int, int]
     position_identity: str = ""
+    charger: tuple[int, int] | None = None
 
     def contains(self, x: Any, y: Any) -> bool:
         """Accept finite native coordinates inside this map's bounding box."""
@@ -104,6 +105,7 @@ def build_mowing_map_scene(
         projection,
         (boundary.x1, boundary.y1, boundary.x2, boundary.y2),
         map_position_identity(vector_map),
+        vector_map.charger,
     )
 
 

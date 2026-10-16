@@ -93,6 +93,14 @@ def preferred_map_view(
     ):
         return vector_view
 
+    if (
+        vector_view.available and vector_view.image_png is not None
+        and isinstance(vector_view.details, Mapping)
+        and type(vector_view.details.get("charger_x")) is int
+        and type(vector_view.details.get("charger_y")) is int
+    ):
+        return vector_view
+
     if app_view.available and app_view.image_png is not None:
         return client._with_runtime_position_details(app_view, vector_view)
 

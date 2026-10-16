@@ -164,7 +164,7 @@ def test_same_index_switch_discards_idle_cached_camera_image(monkeypatch):
 def test_same_index_switch_rejects_inflight_contact_sheet():
     entity = _camera()
     entity.coordinator = SimpleNamespace(
-        client=SimpleNamespace(), _last_map_switch_event_at=None,
+        client=SimpleNamespace(), app_maps=None, _last_map_switch_event_at=None,
     )
 
     async def convert(_):
@@ -186,7 +186,7 @@ def test_same_index_switch_rejects_inflight_contact_sheet():
 def test_same_index_switch_rejects_failed_contact_sheet(during_placeholder):
     entity = _camera()
     entity.coordinator = SimpleNamespace(
-        client=SimpleNamespace(), _last_map_switch_event_at=None,
+        client=SimpleNamespace(), app_maps=None, _last_map_switch_event_at=None,
     )
 
     async def download(**kwargs):
@@ -214,7 +214,7 @@ def test_same_index_switch_rejects_failed_contact_sheet(during_placeholder):
 def test_pre_switch_camera_failure_cannot_publish_error_attributes(camera_type):
     entity = _camera()
     entity.coordinator = SimpleNamespace(
-        client=SimpleNamespace(), _last_map_switch_event_at=None,
+        client=SimpleNamespace(), app_maps=None, _last_map_switch_event_at=None,
     )
 
     async def download(**kwargs):

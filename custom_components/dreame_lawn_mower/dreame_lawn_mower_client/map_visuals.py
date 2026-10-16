@@ -235,6 +235,32 @@ def map_font(
             return ImageFont.load_default()
 
 
+def draw_charger_marker(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    style: MapRenderStyle,
+) -> None:
+    """Draw the charging station as a small house, distinct from the mower dot."""
+    px, py = position
+    half = marker_radius(style, 7)
+    outline = line_width(style, 2)
+    draw.rectangle(
+        (px - half, py - half // 3, px + half, py + half),
+        fill=style.boundary,
+        outline=style.label_halo,
+        width=outline,
+    )
+    draw.polygon(
+        [
+            (px - half - outline, py - half // 3),
+            (px, py - half - half // 2),
+            (px + half + outline, py - half // 3),
+        ],
+        fill=style.boundary,
+        outline=style.label_halo,
+    )
+
+
 def draw_position_marker(
     image: Image.Image,
     draw: ImageDraw.ImageDraw,

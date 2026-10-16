@@ -18,6 +18,7 @@ from .map_geometry import polygon_label_point
 from .map_projection import vector_map_projection
 from .map_visuals import (
     MapRenderStyle,
+    draw_charger_marker,
     draw_position_marker,
     line_width,
     map_font,
@@ -134,6 +135,36 @@ class DreameLawnMowerVectorMap:
     maps: Mapping[int, DreameLawnMowerVectorMap] = field(
         default_factory=dict,
         repr=False,
+    )
+    # Charging station (x, y) in map units, when a task summary reported it.
+    charger: tuple[int, int] | None = None
+
+
+def with_charger(
+    vector_map: DreameLawnMowerVectorMap, position: Any
+) -> DreameLawnMowerVectorMap:
+    """Attach a reported station that lies within the map's drawn frame.
+
+    The bounds are left unchanged: they also identify the geometry that
+    retained mower positions are bound to.
+    """
+    x, y = getattr(position, "x", None), getattr(position, "y", None)
+    boundary = vector_map.boundary
+    if type(x) is not int or type(y) is not int or boundary is None:
+        return vector_map
+    # The station sits at the lawn's edge; tolerate half a metre past the frame.
+    margin = 500
+    if not (
+        boundary.x1 - margin <= x <= boundary.x2 + margin
+        and boundary.y1 - margin <= y <= boundary.y2 + margin
+    ):
+        return vector_map
+    return replace(
+        vector_map,
+        charger=(
+            min(max(x, boundary.x1), boundary.x2),
+            min(max(y, boundary.y1), boundary.y2),
+        ),
     )
 
 
@@ -378,6 +409,9 @@ def render_vector_map_png(
             fill=style.point,
         )
 
+    if vector_map.charger is not None:
+        draw_charger_marker(draw, to_pixel(*vector_map.charger), style)
+
     if runtime_position is not None:
         px, py = to_pixel(runtime_position[0], runtime_position[1])
         marker_style = (
@@ -593,6 +627,9 @@ def vector_map_to_details(
         "pathway_count": len(vector_map.paths),
         "contour_count": len(vector_map.contours),
         "contour_ids": contour_ids,
+        # Same map units as the mower position, so both can share one transform.
+        "charger_x": None if vector_map.charger is None else vector_map.charger[0],
+        "charger_y": None if vector_map.charger is None else vector_map.charger[1],
         "clean_point_count": len(vector_map.clean_points),
         "clean_point_ids": list(vector_map.clean_point_ids),
         "clean_points": [
