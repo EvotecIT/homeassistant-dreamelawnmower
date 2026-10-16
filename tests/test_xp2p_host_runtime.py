@@ -12,6 +12,7 @@ import platform
 import struct
 import subprocess
 import sys
+import tarfile
 import threading
 import zipfile
 from dataclasses import replace
@@ -328,7 +329,7 @@ def test_runtime_bootstrap_uses_native_large_page_aarch64_layout() -> None:
     [
         ("x86_64", 4096, "runtime-v1-x86_64", False),
         ("aarch64", 4096, "runtime-v1-aarch64", False),
-        ("aarch64", 16384, "runtime-v4-aarch64", True),
+        ("aarch64", 16384, "runtime-v5-aarch64", True),
     ],
 )
 def test_runtime_bootstrap_preserves_existing_layouts_until_large_pages_need_it(
@@ -432,6 +433,59 @@ def test_large_page_runtime_installs_the_16k_tencent_sdk(
         manifest["tencent_xp2p_version"]
         == xp2p_runtime_bootstrap.LARGE_PAGE_TENCENT_XP2P_VERSION
     )
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "bundle_hash", "file_hash", "missing", "symlink"],
+)
+def test_large_page_bundle_verifies_archive_and_explicit_regular_members(
+    monkeypatch, tmp_path, fault,
+) -> None:
+    """Only pinned regular files reach the installer staging directory."""
+    content = b"verified-runtime-file"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+        member = tarfile.TarInfo("bin/linker64" if fault != "missing" else "other")
+        member.size = len(content)
+        if fault == "symlink":
+            member.type = tarfile.SYMTYPE
+            member.linkname = "../outside"
+            member.size = 0
+        archive.addfile(member, io.BytesIO(content))
+        # Archive paths are never extracted, even when additional members exist.
+        extra = tarfile.TarInfo("../outside")
+        extra.size = len(content)
+        archive.addfile(extra, io.BytesIO(content))
+    bundle = stream.getvalue()
+    monkeypatch.setattr(
+        xp2p_runtime_bootstrap, "LARGE_PAGE_AOSP_BUNDLE_SHA256",
+        hashlib.sha256(b"wrong" if fault == "bundle_hash" else bundle).hexdigest(),
+    )
+    monkeypatch.setattr(
+        xp2p_runtime_bootstrap, "LARGE_PAGE_AOSP_RUNTIME_FILES",
+        {"bin/linker64": (
+            "bin/linker64",
+            hashlib.sha256(b"wrong" if fault == "file_hash" else content).hexdigest(),
+            0o755,
+        )},
+    )
+    client = SimpleNamespace(get=lambda *_args, **_kwargs: SimpleNamespace(
+        status_code=200, content=bundle,
+    ))
+    target = tmp_path / "staging"
+    if fault:
+        with pytest.raises(DreameLawnMowerVideoRuntimeError):
+            xp2p_runtime_bootstrap._install_large_page_aosp_runtime(
+                target, http_client=client, timeout=3,
+            )
+        assert not (target / "bin/linker64").exists()
+    else:
+        xp2p_runtime_bootstrap._install_large_page_aosp_runtime(
+            target, http_client=client, timeout=3,
+        )
+        assert (target / "bin/linker64").read_bytes() == content
+        assert os.access(target / "bin/linker64", os.X_OK)
+    assert not (tmp_path / "outside").exists()
 
 
 def test_host_probe_reports_signal_without_exposing_paths(
