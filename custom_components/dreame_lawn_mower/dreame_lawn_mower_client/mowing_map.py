@@ -13,7 +13,6 @@ from .map_projection import MapProjection, vector_map_projection
 from .map_visuals import MapRenderStyle
 from .models import DreameLawnMowerStatusBlob
 from .position_tracking import (
-    CHARGER_SOURCE,
     POSITION_MAX_AGE_SECONDS,
     MowerPosition,
     map_position_identity,
@@ -137,17 +136,6 @@ def mowing_map_overlay(
         "docked": docked,
         "position_observed_at": None,
     }
-    if docked and scene.charger is not None:
-        # Charging yields no fresh pose; the reported station is the evidence.
-        retained_position = MowerPosition(
-            scene.charger[0],
-            scene.charger[1],
-            None,
-            (now or datetime.now(UTC)).timestamp(),
-            scene.map_index,
-            "known_dock",
-            CHARGER_SOURCE,
-        )
     if retained_position is not None and (
         retained_position.map_index != scene.map_index
         or not scene.contains(retained_position.x, retained_position.y)

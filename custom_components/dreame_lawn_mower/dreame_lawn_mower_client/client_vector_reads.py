@@ -36,6 +36,7 @@ async def async_mowing_scene(
     map_index: int,
     style: MapRenderStyle,
     label_scale: float,
+    prefetched_app_maps: dict[str, Any] | None = None,
 ) -> MowingMapScene:
     """Own native geometry retrieval and drain any started rendering worker."""
     async def read(cloud: DreameCloudSession) -> MowingMapScene:
@@ -46,7 +47,7 @@ async def async_mowing_scene(
         except DreameLawnMowerConnectionError as err:
             data = None
             batch_error = err
-        app_maps = None
+        app_maps = current_prefetched_app_maps(client, prefetched_app_maps)
         if await _needs_app_geometry(data, map_index, background=True):
             try:
                 app_maps = await client.async_get_app_maps(
@@ -191,7 +192,7 @@ async def async_vector_view(
             if current_map_index is not None
             else await _map_hint(client)
         )
-        app_maps = None
+        app_maps = current_prefetched_app_maps(client, prefetched_app_maps)
         app_error = None
         needs_app_geometry = await _needs_app_geometry(data, hint)
         if needs_app_geometry:

@@ -286,7 +286,7 @@ class _DreameLawnMowerClientMapsMixin(
 
         hint = (current_map_index if current_map_index is not None
                 else self._sync_get_current_app_map_index())
-        app_maps = None
+        app_maps = current_prefetched_app_maps(self, prefetched_app_maps)
         app_error = None
         if _parse_drawable_batch_vector_map(batch_data, current_map_index=hint) is None:
             try:

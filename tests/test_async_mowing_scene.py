@@ -136,3 +136,68 @@ def test_scene_cancellation_owns_network_and_started_render(
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account", ["dreame", "mova"])
+def test_native_scene_uses_verified_station_metadata_without_extra_cloud_reads(
+    monkeypatch, account,
+):
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_inventory import (  # noqa: E501
+        _app_map_inventory_identity,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_history import (  # noqa: E501
+        ChargerPosition,
+        ZoneMowingHistory,
+    )
+
+    from .test_zone_mowing_history import HASH, _maps
+
+    strings = cloud_strings(account)
+    calls = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        calls.append(request.path)
+        assert request.path == "/" + "/".join(strings[i] for i in (23, 26, 44))
+        return web.json_response({"code": 0, "data": _batch_payload()})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = make_client(session, account)
+            maps = _maps()
+            for entry in maps["maps"]:
+                entry["info"]["size"] = 100
+            client._latest_app_map_inventory_identity = _app_map_inventory_identity(
+                maps["maps"]
+            )
+            client._charger_history = ZoneMowingHistory(
+                chargers={"summary": ChargerPosition(20, 40, 0, 1, HASH)}
+            )
+            client._latest_snapshot = SimpleNamespace(
+                available=True, docked=True, activity="docked",
+            )
+            client.update_runtime_map_identity(
+                0, expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            )
+            try:
+                scene = await client.async_get_mowing_map_scene(
+                    map_index=0, style=map_render_style(), app_maps=maps,
+                )
+                assert scene.charger == (20, 40)
+                overlay = client.mowing_map_runtime_overlay(scene)
+                assert overlay["position_status"] == "known_dock"
+                assert overlay["position"]["x"] == scene.projection.point(20, 40)[0]
+                client._latest_app_map_inventory_identity = "replacement-inventory"
+                stale = await client.async_get_mowing_map_scene(
+                    map_index=0, style=map_render_style(), app_maps=maps,
+                )
+                assert stale.charger is None
+                assert len(calls) == 2
+            finally:
+                await client.async_close()
+
+    asyncio.run(scenario())

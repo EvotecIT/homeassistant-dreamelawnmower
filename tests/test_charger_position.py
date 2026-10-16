@@ -78,7 +78,7 @@ def test_latest_station_prefers_the_current_map_revision() -> None:
 
     assert history.latest_charger(HASH) == older
     assert history.latest_charger(None) == newer
-    assert history.latest_charger("c" * 32) == newer
+    assert history.latest_charger("c" * 32) is None
     assert ZoneMowingHistory().latest_charger(HASH) is None
 
 
@@ -140,8 +140,19 @@ def test_interactive_overlay_places_a_docked_mower_on_the_station() -> None:
     scene = build_mowing_map_scene(vector_map, style=map_render_style())
     assert scene.charger == (119, 50)
 
+    from types import SimpleNamespace
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.position_tracking import (  # noqa: E501
+        position_at_charger,
+    )
+
+    position = position_at_charger(
+        None, SimpleNamespace(available=True, docked=True), scene.charger,
+        scene.map_index, 500.0,
+    )
     overlay = mowing_map_overlay(
-        scene, None, map_index=scene.map_index, active=False, docked=True
+        scene, None, map_index=scene.map_index, active=False, docked=True,
+        retained_position=position,
     )
     px, py = scene.projection.point(119, 50)
     assert overlay["position"]["x"] == px

@@ -3367,6 +3367,7 @@ class DreameLawnMowerCoordinator(
             < (ZONE_MOWING_HISTORY_REFRESH_INTERVAL
                if self.zone_mowing_sessions.complete else timedelta(seconds=30))
         ):
+            self.client._charger_history = self.zone_mowing_sessions
             return self.zone_mowing_sessions
 
         try:
@@ -3385,16 +3386,12 @@ class DreameLawnMowerCoordinator(
                 ),
             )
             self.zone_mowing_sessions_refreshed_at = now
+            self.client._charger_history = self.zone_mowing_sessions
             return self.zone_mowing_sessions
 
         self.zone_mowing_sessions = sessions
         self.zone_mowing_sessions_refreshed_at = now
-        # The sensor owns map-revision binding; reuse it rather than re-derive.
-        from .sensor_zone_history import selected_map_revision
-
-        self.client.charger_position = sessions.latest_charger(
-            selected_map_revision(self.app_maps, self.selected_map_index)
-        )
+        self.client._charger_history = sessions
         return sessions
 
     async def async_refresh_voice_settings(
