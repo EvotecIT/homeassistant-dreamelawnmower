@@ -17,6 +17,7 @@ from .device_code_semantics import (
     mower_status_notice_code,
 )
 from .map_switch_events import map_switch_event_at
+from .model_families import DREAME_MODEL_FAMILY_NAMES, dreame_model_family
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 from .notice_events import MowerNoticeEvent
 from .video_provisioning_status import classify_xp2p_provisioning_issue
@@ -96,7 +97,13 @@ def display_name_for_model(
     """Return a friendly model name when one is known."""
     if model is None:
         return _canonical_display_name(fallback_name)
-    return MODEL_NAME_MAP.get(model) or _canonical_display_name(fallback_name) or model
+    family = dreame_model_family(model)
+    return (
+        MODEL_NAME_MAP.get(model)
+        or _canonical_display_name(fallback_name)
+        or DREAME_MODEL_FAMILY_NAMES.get(family or "")
+        or model
+    )
 
 
 def _as_optional_str(value: Any) -> str | None:
