@@ -873,6 +873,10 @@ class DreameLawnMowerRefreshMixin:
             if (result is not previous and not self._shutting_down
                     and getattr(self, "_metadata_refresh_publish", True)):
                 self.async_update_listeners()
+        except Exception as err:  # noqa: BLE001 - optional background history
+            _LOGGER.debug(
+                "Zone history refresh failed: %s", sanitize_diagnostic_text(err),
+            )
         finally:
             if getattr(self, "_zone_history_refresh_task", None) is current:
                 self._zone_history_refresh_task = None

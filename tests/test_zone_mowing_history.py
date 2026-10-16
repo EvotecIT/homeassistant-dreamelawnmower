@@ -252,7 +252,8 @@ def test_invalid_or_reversed_end_does_not_claim_completed_mowing(invalid_end) ->
 @pytest.mark.parametrize("mode", [101, 103, 104, 107, 108])
 def test_edge_spot_and_patrol_do_not_count_as_whole_zone_mowing(mode) -> None:
     decoded = zone_mowing_records(
-        {"mode": mode, "region_status": [[1, 2]], "start": 10, "end": 20}, MON,
+        {"mode": mode, "region_status": [[1, 2]], "start": 10, "end": 20},
+        MON,
     )
     assert decoded.records == ()
     assert decoded.understood
@@ -405,6 +406,33 @@ def test_shutdown_retires_photo_owner_and_cancels_zone_history() -> None:
         assert history.cancelled()
         assert coordinator._metadata_refresh_publish is False
         coordinator.client.set_update_callback.assert_called_once_with(None)
+
+    asyncio.run(scenario())
+
+
+def test_history_background_worker_contains_listener_failure() -> None:
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+
+    async def scenario():
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator._shutting_down = False
+        coordinator.zone_mowing_sessions = None
+        coordinator.hass = SimpleNamespace(
+            async_create_background_task=lambda coro, name: asyncio.create_task(coro),
+        )
+        coordinator.async_refresh_zone_mowing_sessions = AsyncMock(
+            return_value=ZoneMowingHistory(),
+        )
+        coordinator.async_update_listeners = Mock(
+            side_effect=ValueError("listener failed")
+        )
+        coordinator._schedule_zone_history_refresh()
+        task = coordinator._zone_history_refresh_task
+        assert await task is None
+        assert coordinator._zone_history_refresh_task is None
+        coordinator.async_update_listeners.assert_called_once_with()
 
     asyncio.run(scenario())
 
