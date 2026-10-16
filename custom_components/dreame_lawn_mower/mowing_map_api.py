@@ -308,6 +308,7 @@ class MowingMapView(HomeAssistantView):
                 "overlay": entry.coordinator.client.mowing_map_runtime_overlay(scene),
                 "real_scene_path": _real_scene_path(entry_id, entry),
                 "projection": projection_payload(scene.projection),
+                "zones": [label.as_dict() for label in scene.zone_labels],
                 "georeference": _georeference_payload(entry.coordinator),
             },
             headers=_HEADERS,
@@ -353,8 +354,22 @@ class MowingMapBackgroundView(HomeAssistantView):
         ):
             raise web.HTTPConflict(text="Refresh the map scene before its background.")
         return web.Response(
-            body=entry.scene.image_png, content_type="image/png", headers=_HEADERS
+            body=background_image(entry.scene, request),
+            content_type="image/png",
+            headers=_HEADERS,
         )
+
+
+def background_image(scene: MowingMapScene, request: Any) -> bytes:
+    """Return the background, without zone names when ``labels=0`` is asked.
+
+    Both variants are rendered with the scene and share its revision, so the
+    scene cache already holds the choice and no request renders anything.
+    """
+    query = getattr(request, "query", None) or {}
+    if query.get("labels") == "0" and scene.image_png_unlabeled:
+        return scene.image_png_unlabeled
+    return scene.image_png
 
 
 def _real_scene_for(entry: _SceneEntry) -> RealSceneImage | None:

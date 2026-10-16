@@ -23,11 +23,31 @@ from .vector_map import (
     DreameLawnMowerVectorPath,
     DreameLawnMowerVectorZone,
     render_vector_map_png,
+    zone_label_points,
 )
 
 MAX_SCENE_POINTS = 50_000
 MAX_BACKGROUND_BYTES = 4 * 1024 * 1024
 MAX_TRAIL_POINTS = 4096
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneLabel:
+    """Where the background draws a zone's name, in native map units."""
+
+    zone_id: int
+    name: str
+    label_x: int
+    label_y: int
+
+    def as_dict(self) -> dict[str, Any]:
+        """Serialize the published zone label shape."""
+        return {
+            "zone_id": self.zone_id,
+            "name": self.name,
+            "label_x": self.label_x,
+            "label_y": self.label_y,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +63,9 @@ class MowingMapScene:
     bounds: tuple[int, int, int, int]
     position_identity: str = ""
     charger: tuple[int, int] | None = None
+    # The same background without zone names, for cards that draw their own.
+    image_png_unlabeled: bytes = b""
+    zone_labels: tuple[ZoneLabel, ...] = ()
 
     def contains(self, x: Any, y: Any) -> bool:
         """Accept finite native coordinates inside this map's bounding box."""
@@ -90,11 +113,27 @@ def build_mowing_map_scene(
     image_png = render_vector_map_png(
         background, style=interactive_style, label_scale=label_scale
     )
-    if not image_png or len(image_png) > MAX_BACKGROUND_BYTES:
+    image_png_unlabeled = render_vector_map_png(
+        background, style=interactive_style, label_scale=label_scale,
+        zone_labels=False,
+    )
+    if (
+        not image_png
+        or len(image_png) > MAX_BACKGROUND_BYTES
+        or not image_png_unlabeled
+        or len(image_png_unlabeled) > MAX_BACKGROUND_BYTES
+    ):
         raise ValueError("The current map background is unavailable or too large.")
     projection = vector_map_projection(
         boundary.x1, boundary.y1, boundary.x2, boundary.y2, rotation=style.rotation
     )
+    zone_labels = []
+    for zone, pixel in zone_label_points(background, projection.point):
+        # The renderer's own label point, mapped back to native units.
+        native_x, native_y = projection.native_point(*pixel)
+        zone_labels.append(
+            ZoneLabel(zone.zone_id, zone.name, round(native_x), round(native_y))
+        )
     identity = f"{vector_map.map_index}:{vector_map.map_id}:{style.rotation}:".encode()
     revision = hashlib.sha256(identity + image_png).hexdigest()
     return MowingMapScene(
@@ -107,6 +146,8 @@ def build_mowing_map_scene(
         (boundary.x1, boundary.y1, boundary.x2, boundary.y2),
         map_position_identity(vector_map),
         vector_map.charger,
+        image_png_unlabeled,
+        tuple(zone_labels),
     )
 
 

@@ -6,7 +6,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Any
@@ -14,7 +14,7 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from .map_drawing import draw_lawn_polygon, draw_navigation_path
-from .map_geometry import polygon_label_point
+from .map_geometry import Point, polygon_label_point
 from .map_projection import vector_map_projection
 from .map_visuals import (
     MapRenderStyle,
@@ -291,6 +291,17 @@ def _select_primary_vector_map(
     )
 
 
+def zone_label_points(
+    vector_map: DreameLawnMowerVectorMap, to_pixel: Callable[[int, int], Point]
+) -> list[tuple[DreameLawnMowerVectorZone, Point]]:
+    """Return each named zone with the canvas point where its name is drawn."""
+    return [
+        (zone, polygon_label_point([to_pixel(x, y) for x, y in zone.points]))
+        for zone in vector_map.zones
+        if len(zone.points) >= 3 and zone.name
+    ]
+
+
 def render_vector_map_png(
     vector_map: DreameLawnMowerVectorMap | None,
     *,
@@ -299,6 +310,7 @@ def render_vector_map_png(
     runtime_position: tuple[int, int] | None = None,
     position_status: str = "current",
     style: MapRenderStyle | None = None,
+    zone_labels: bool = True,
 ) -> bytes | None:
     """Render a mower vector map to PNG bytes."""
     if vector_map is None or vector_map.boundary is None:
@@ -436,10 +448,9 @@ def render_vector_map_png(
                 stroke_fill=style.label_halo,
             )
 
-    for zone in vector_map.zones:
-        if len(zone.points) < 3 or not zone.name:
-            continue
-        label_x, label_y = polygon_label_point([to_pixel(x, y) for x, y in zone.points])
+    for zone, (label_x, label_y) in (
+        zone_label_points(vector_map, to_pixel) if zone_labels else ()
+    ):
         draw.text(
             (label_x, label_y), zone.name, fill=style.label, font=font, anchor="mm",
             stroke_width=label_halo_width, stroke_fill=style.label_halo,

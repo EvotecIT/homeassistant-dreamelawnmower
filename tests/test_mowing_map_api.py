@@ -393,3 +393,57 @@ def test_scene_json_publishes_projection_and_calibration(monkeypatch) -> None:
         payload
     )
     assert asyncio.run(run({}))["georeference"] is None
+
+
+def test_scene_json_lists_zone_labels_and_background_drops_names(monkeypatch):
+    from dataclasses import replace
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (  # noqa: E501
+        ZoneLabel,
+    )
+
+    labelled = replace(
+        scene(), image_png_unlabeled=b"no-names",
+        zone_labels=(ZoneLabel(1, "Front", 300, 250), ZoneLabel(2, "Back", 800, 200)),
+    )
+
+    async def run():
+        async def load(**kwargs):
+            return labelled
+
+        _, coordinator, api = environment(load)
+        coordinator.client.mowing_map_runtime_overlay = Mock(return_value={})
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        payload = json.loads(
+            (await module.MowingMapView(api).get({}, "entry")).body
+        )
+        background = module.MowingMapBackgroundView(api)
+        default = await background.get(SimpleNamespace(query={}), "entry", "a" * 64)
+        stripped = await background.get(
+            SimpleNamespace(query={"labels": "0"}), "entry", "a" * 64
+        )
+        other = await background.get(
+            SimpleNamespace(query={"labels": "1"}), "entry", "a" * 64
+        )
+        return payload, default.body, stripped.body, other.body
+
+    payload, default, stripped, other = asyncio.run(run())
+    assert payload["zones"] == [
+        {"zone_id": 1, "name": "Front", "label_x": 300, "label_y": 250},
+        {"zone_id": 2, "name": "Back", "label_x": 800, "label_y": 200},
+    ]
+    assert payload["revision"] == labelled.revision
+    assert (default, stripped, other) == (b"private-png", b"no-names", b"private-png")
+
+
+def test_scene_json_without_zones_publishes_an_empty_list(monkeypatch):
+    async def run():
+        async def load(**kwargs):
+            return scene()
+
+        _, coordinator, api = environment(load)
+        coordinator.client.mowing_map_runtime_overlay = Mock(return_value={})
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        return json.loads((await module.MowingMapView(api).get({}, "entry")).body)
+
+    assert asyncio.run(run())["zones"] == []
