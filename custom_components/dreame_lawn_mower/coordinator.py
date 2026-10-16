@@ -70,6 +70,10 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
+from .dreame_lawn_mower_client.session_photos import (
+    ZoneMowingRecord,
+    async_get_zone_mowing_records,
+)
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview
 from .map_switch_refresh import (
     async_flush_restart_preview,
@@ -133,6 +137,7 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 WORK_LOG_TOTALS_REFRESH_INTERVAL = timedelta(minutes=15)
+ZONE_MOWING_HISTORY_REFRESH_INTERVAL = timedelta(minutes=5)
 DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
 PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS = 1
 BATCH_SCHEDULE_RESULT_COALESCE_SECONDS = 1.0
@@ -476,6 +481,10 @@ class DreameLawnMowerCoordinator(
         self.voice_settings_refreshed_at: datetime | None = None
         self.work_log_totals: DreameLawnMowerWorkLogTotals | None = None
         self.work_log_totals_refreshed_at: datetime | None = None
+        self.zone_mowing_sessions: (
+            dict[str, tuple[ZoneMowingRecord, ...]] | None
+        ) = None
+        self.zone_mowing_sessions_refreshed_at: datetime | None = None
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_action_read_backoff = ScheduleActionReadBackoff()
@@ -3340,6 +3349,35 @@ class DreameLawnMowerCoordinator(
         self.work_log_totals = totals
         self.work_log_totals_refreshed_at = now
         return totals
+
+    async def async_refresh_zone_mowing_sessions(
+        self,
+        *,
+        force: bool = False,
+    ) -> dict[str, tuple[ZoneMowingRecord, ...]] | None:
+        """Refresh per-zone outcomes of recent sessions, reusing read summaries."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.zone_mowing_sessions is not None
+            and self.zone_mowing_sessions_refreshed_at is not None
+            and now - self.zone_mowing_sessions_refreshed_at
+            < ZONE_MOWING_HISTORY_REFRESH_INTERVAL
+        ):
+            return self.zone_mowing_sessions
+
+        try:
+            sessions = await async_get_zone_mowing_records(
+                self.client, known=self.zone_mowing_sessions
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh zone mowing history: %s", err)
+            self.zone_mowing_sessions_refreshed_at = None
+            return self.zone_mowing_sessions
+
+        self.zone_mowing_sessions = sessions
+        self.zone_mowing_sessions_refreshed_at = now
+        return sessions
 
     async def async_refresh_voice_settings(
         self,

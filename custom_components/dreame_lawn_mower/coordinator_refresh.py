@@ -111,6 +111,10 @@ class DreameLawnMowerRefreshMixin:
             self, *, force: bool = False
         ) -> DreameLawnMowerWorkLogTotals | None: ...
 
+        async def async_refresh_zone_mowing_sessions(
+            self, *, force: bool = False
+        ) -> dict[str, Any] | None: ...
+
         async def async_refresh_app_map_objects(
             self, *, force: bool = False, source: str = "app_map_objects_auto"
         ) -> dict[str, Any] | None: ...
@@ -680,6 +684,10 @@ class DreameLawnMowerRefreshMixin:
                     lambda: self.async_refresh_work_log_totals(force=False),
                 ),
                 (
+                    "zone_mowing_sessions",
+                    lambda: self.async_refresh_zone_mowing_sessions(force=False),
+                ),
+                (
                     "voice",
                     lambda: self.async_refresh_voice_settings(force=False),
                 ),
@@ -906,6 +914,7 @@ class DreameLawnMowerRefreshMixin:
             "weather": "weather_protection_refreshed_at",
             "maintenance": "maintenance_status_refreshed_at",
             "work_log_totals": "work_log_totals_refreshed_at",
+            "zone_mowing_sessions": "zone_mowing_sessions_refreshed_at",
             "voice": "voice_settings_refreshed_at",
         }
         marker = refreshed_at_by_phase.get(phase)

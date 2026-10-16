@@ -29,6 +29,9 @@ SESSION_SUMMARY_PIID = 9
 MAX_SESSION_PHOTO_BYTES = 8 * 1024 * 1024
 MAX_SESSION_PHOTOS = 100
 MAX_SESSION_HISTORY = 100
+# How many recent sessions feed the per-zone mowing history.
+ZONE_HISTORY_SESSIONS = 30
+ZONE_STATUS_COMPLETED = 2
 # Person-detection photos are stored next to the session photos as
 # ``<unix seconds>_person.jpg`` and are listed by no session summary. A LiDAX
 # Ultra 1000 named the photo one second before Home Assistant observed the
@@ -160,33 +163,10 @@ async def async_get_session_photos(
             if session.object_name in seen_sessions:
                 continue
             seen_sessions.add(session.object_name)
-            url = await cloud.async_get_interim_file_url(
-                descriptor.did,
-                descriptor.model,
-                session.object_name,
-                deadline=deadline,
-                require_response=True,
+            summary = await _async_read_session_summary(
+                cloud, client, session.object_name, deadline=deadline
             )
-            if not url:
-                continue
-            try:
-                content = await _read_optional_object(
-                    cloud,
-                    url,
-                    deadline=deadline,
-                    max_bytes=MAX_PUBLIC_JSON_BYTES,
-                )
-            except HttpResponseError as err:
-                if err.reason == "byte_limit":
-                    continue
-                raise
-            if content is None:
-                continue
-            try:
-                summary = json.loads(content)
-            except ValueError:
-                continue
-            if not isinstance(summary, Mapping):
+            if summary is None:
                 continue
             usable_sessions += 1
             for name in session_photo_names(summary):
@@ -232,6 +212,161 @@ async def async_download_session_photo(
         )
 
     return await client._async_cloud_read(read)
+
+
+async def _async_read_session_summary(
+    cloud: DreameCloudSession,
+    client: DreameLawnMowerClient,
+    object_name: str,
+    *,
+    deadline: float,
+) -> Mapping[str, Any] | None:
+    """Download and decode one session summary; ``None`` when unusable."""
+    descriptor = client._descriptor
+    url = await cloud.async_get_interim_file_url(
+        descriptor.did,
+        descriptor.model,
+        object_name,
+        deadline=deadline,
+        require_response=True,
+    )
+    if not url:
+        return None
+    try:
+        content = await _read_optional_object(
+            cloud,
+            url,
+            deadline=deadline,
+            max_bytes=MAX_PUBLIC_JSON_BYTES,
+        )
+    except HttpResponseError as err:
+        if err.reason == "byte_limit":
+            return None
+        raise
+    if content is None:
+        return None
+    try:
+        summary = json.loads(content)
+    except ValueError:
+        return None
+    return summary if isinstance(summary, Mapping) else None
+
+
+@dataclass(frozen=True)
+class ZoneMowingRecord:
+    """How one finished task session left one zone.
+
+    ``region_status`` pairs a zone id with a status; status ``2`` marked every
+    zone a LiDAX Ultra 1000 mowed to the end. Summaries carry no map index, so
+    zone ids are those of the map that was active for the task.
+    """
+
+    zone_id: int
+    status: int
+    started_at: int | None
+    ended_at: int | None
+    mode: int | None
+    session: str
+
+    @property
+    def completed(self) -> bool:
+        return self.status == ZONE_STATUS_COMPLETED
+
+
+def zone_mowing_records(
+    summary: Any, session_object_name: str
+) -> tuple[ZoneMowingRecord, ...]:
+    """Return the per-zone outcome of one session summary."""
+    if not isinstance(summary, Mapping):
+        return ()
+    statuses = summary.get("region_status")
+    if not isinstance(statuses, list):
+        return ()
+
+    def _int(value: Any) -> int | None:
+        return value if type(value) is int else None
+
+    records: list[ZoneMowingRecord] = []
+    seen: set[int] = set()
+    for item in statuses:
+        if not isinstance(item, list | tuple) or len(item) < 2:
+            continue
+        zone_id, status = _int(item[0]), _int(item[1])
+        if zone_id is None or status is None or zone_id <= 0 or zone_id in seen:
+            continue
+        seen.add(zone_id)
+        records.append(
+            ZoneMowingRecord(
+                zone_id=zone_id,
+                status=status,
+                started_at=_int(summary.get("start")),
+                ended_at=_int(summary.get("end")),
+                mode=_int(summary.get("mode")),
+                session=session_object_name,
+            )
+        )
+    return tuple(records)
+
+
+async def async_get_zone_mowing_records(
+    client: DreameLawnMowerClient,
+    *,
+    known: Mapping[str, tuple[ZoneMowingRecord, ...]] | None = None,
+    deadline: float | None = None,
+) -> dict[str, tuple[ZoneMowingRecord, ...]]:
+    """Return per-zone outcomes of the recent sessions, keyed by summary.
+
+    Summaries never change once published, so those in ``known`` are reused
+    and only new sessions are downloaded.
+    """
+    known = known or {}
+    deadline = min(deadline or float("inf"), time.monotonic() + 60)
+    descriptor = client._descriptor
+
+    async def read(
+        cloud: DreameCloudSession,
+    ) -> dict[str, tuple[ZoneMowingRecord, ...]]:
+        records = await cloud.async_get_property_history(
+            descriptor.did,
+            SESSION_EVENT_KEY,
+            kind="event",
+            require_response=True,
+            limit=ZONE_HISTORY_SESSIONS,
+            deadline=deadline,
+        )
+        result: dict[str, tuple[ZoneMowingRecord, ...]] = {}
+        for session in task_sessions_from_history(records)[:ZONE_HISTORY_SESSIONS]:
+            name = session.object_name
+            if name in result:
+                continue
+            if name in known:
+                result[name] = known[name]
+                continue
+            summary = await _async_read_session_summary(
+                cloud, client, name, deadline=deadline
+            )
+            if summary is not None:
+                result[name] = zone_mowing_records(summary, name)
+        return result
+
+    return await client._async_cloud_read(read)
+
+
+def latest_zone_mowing(
+    sessions: Mapping[str, tuple[ZoneMowingRecord, ...]],
+) -> dict[int, dict[str, ZoneMowingRecord | None]]:
+    """Return, per zone, its latest record and its latest completed record."""
+    result: dict[int, dict[str, ZoneMowingRecord | None]] = {}
+    ordered = sorted(
+        (record for records in sessions.values() for record in records),
+        key=lambda record: record.ended_at or record.started_at or 0,
+        reverse=True,
+    )
+    for record in ordered:
+        entry = result.setdefault(record.zone_id, {"latest": record, "completed": None})
+        if entry["completed"] is None and record.completed:
+            entry["completed"] = record
+    return result
 
 
 async def _read_optional_object(

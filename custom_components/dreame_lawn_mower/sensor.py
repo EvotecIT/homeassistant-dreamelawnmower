@@ -215,6 +215,7 @@ from .sensor_work_log import (
     DreameLawnMowerTotalMowingSessionsSensor,
     DreameLawnMowerTotalMowingTimeSensor,
 )
+from .sensor_zone_history import DreameLawnMowerLeastRecentlyMowedZoneSensor
 from .task_status_probe import (  # noqa: F401
     task_status_probe_result_attributes,
     task_status_probe_state,
@@ -479,6 +480,7 @@ async def async_setup_entry(
         + [DreameLawnMowerMowingProgressSensor(coordinator)]
         + [DreameLawnMowerTotalMowedAreaSensor(coordinator)]
         + [DreameLawnMowerTotalMowingTimeSensor(coordinator)]
+        + [DreameLawnMowerLeastRecentlyMowedZoneSensor(coordinator)]
         + [
             DreameLawnMowerObservedMowingTimeSensor(coordinator),
             DreameLawnMowerLastObservedRunSensor(coordinator),

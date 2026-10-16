@@ -134,6 +134,25 @@ The changing observation timestamp is excluded from Recorder history, while
 the numeric duration remains available for normal HA history. This checkpoint
 limit is separate from Recorder retention and the optional saved map preview.
 
+## Zone mowing history
+
+**Least Recently Mowed Zone** names the zone of the active map whose last
+completed mowing is the oldest. Each finished task publishes a session summary
+whose `region_status` lists every zone of the task with a status; status `2`
+means the mower mowed that zone to the end (observed on a MOVA LiDAX Ultra 1000,
+`mova.mower.g2529c`). The integration reads the summaries of the 30 latest
+sessions, every 5 minutes, and downloads each summary only once.
+
+A zone without a completed mowing in those sessions comes first, then the
+others from the oldest completion to the newest. An interrupted run (rain, a
+fault, a manual stop) does not count as a completion, so that zone keeps its
+place. Point and edge patrols publish no `region_status` and are ignored.
+
+Attributes: `zone_id` and `last_completed_at` of that zone, and `zones`, the
+full ordered list with each zone's `label`, `last_completed_at`,
+`last_status` (status of its latest run) and `last_session_at`. Summaries carry
+no map index, so the zone ids are matched against the active map.
+
 ## Optional diagnostics
 
 Many reverse-engineering and validation helpers are disabled by default. Enable
