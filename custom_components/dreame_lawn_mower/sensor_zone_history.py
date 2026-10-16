@@ -147,7 +147,11 @@ class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorE
             and history.complete
             and history.attributable
             and bool(overview)
-            and all(item["last_completed_at"] is not None for item in overview)
+            # One completion on this revision proves the history covers this
+            # map; a zone without one waited longer than any of them. Each
+            # edit changes the revision, so requiring every zone would hide
+            # the sensor until a run happens to cover all zones at once.
+            and any(item["last_completed_at"] is not None for item in overview)
         )
 
     @property

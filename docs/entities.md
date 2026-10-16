@@ -156,8 +156,11 @@ separately after schedule and other metadata refreshes, and remains owned by the
 coordinator for shutdown.
 
 The sensor is unavailable while history is incomplete or unattributed, or when
-any active zone has no known completion in the observed window. Absence from this
-window does not mean a zone has never been mowed. The attributes retain the known
+no active zone has a known completion on the current map revision. A zone without
+a known completion on that revision waited longer than every zone that has one,
+so it comes first and is listed in `unknown_zone_ids`; absence from this window
+does not mean the zone has never been mowed. Waiting for every zone instead would
+hide the sensor after each map edit until one run happens to cover all zones. The attributes retain the known
 per-zone dates and expose `history_complete`, `history_attributable`,
 `observed_sessions` and `unknown_zone_ids`, alongside `zone_id`,
 `last_completed_at` and the ordered `zones` list. Invalid timestamps cannot claim

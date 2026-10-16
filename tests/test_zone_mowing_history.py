@@ -226,6 +226,12 @@ def test_sensor_binds_map_identity_and_suppresses_incomplete_history() -> None:
     assert sensor.extra_state_attributes["unknown_zone_ids"] == [1, 3]
     sensor.coordinator.selected_map_index = 0
     sensor.coordinator.app_maps["current_map_index"] = 0
+    # A zone never completed on this revision waited longest and comes first.
+    only_zone_3 = (ZoneMowingRecord(3, 2, 10, 20, 100, MON, HASH),)
+    sensor.coordinator.zone_mowing_sessions = ZoneMowingHistory({MON: only_zone_3})
+    assert sensor.available
+    assert sensor.extra_state_attributes["zone_id"] == 1
+    assert sensor.extra_state_attributes["unknown_zone_ids"] == [1]
     sensor.coordinator.zone_mowing_sessions = ZoneMowingHistory({MON: records}, (TUE,))
     assert not sensor.available
     assert not sensor.extra_state_attributes["history_complete"]
