@@ -3379,12 +3379,22 @@ class DreameLawnMowerCoordinator(
                 self.zone_mowing_sessions.sessions if self.zone_mowing_sessions else {},
                 self.zone_mowing_sessions.pending if self.zone_mowing_sessions else (),
                 history_available=False,
+                chargers=(
+                    self.zone_mowing_sessions.chargers
+                    if self.zone_mowing_sessions else {}
+                ),
             )
             self.zone_mowing_sessions_refreshed_at = now
             return self.zone_mowing_sessions
 
         self.zone_mowing_sessions = sessions
         self.zone_mowing_sessions_refreshed_at = now
+        # The sensor owns map-revision binding; reuse it rather than re-derive.
+        from .sensor_zone_history import selected_map_revision
+
+        self.client.charger_position = sessions.latest_charger(
+            selected_map_revision(self.app_maps, self.selected_map_index)
+        )
         return sessions
 
     async def async_refresh_voice_settings(

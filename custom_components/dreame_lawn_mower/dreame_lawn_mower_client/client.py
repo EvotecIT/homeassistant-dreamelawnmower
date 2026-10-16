@@ -572,6 +572,8 @@ class DreameLawnMowerClient(
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self._position_tracker = _MowerPositionTracker()
         self._runtime_geometry_lock = _threading.RLock()
+        # Charging station reported by finished task summaries, in map units.
+        self.charger_position: Any = None
         self._runtime_geometry_revision = 0
         self._runtime_geometry_map_index: int | None = None
         self._observed_map_geometry: tuple[int, str] | None = None

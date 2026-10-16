@@ -96,6 +96,8 @@ class MowingMapAPI:
             map_style(options, index),
             float(options.get(CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE)),
             switch_event,
+            # The station is drawn into the background once a summary reports it.
+            getattr(coordinator.client, "charger_position", None),
         )
 
     def authorize(self, request: web.Request, entry_id: str) -> Any:

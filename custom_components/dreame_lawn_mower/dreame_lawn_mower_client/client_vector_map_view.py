@@ -24,6 +24,7 @@ from .vector_map import (
     render_vector_map_png,
     vector_map_to_details,
     vector_map_to_summary,
+    with_charger,
 )
 
 if TYPE_CHECKING:
@@ -132,6 +133,7 @@ def geometry_map_view(
     geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Share position validation, metrics and rendering across map transports."""
+    vector_map = with_charger(vector_map, getattr(client, "charger_position", None))
     history_only = not _vector_map_has_drawable_geometry(
         vector_map, include_history=False,
     )

@@ -12,7 +12,7 @@ from .exceptions import DreameLawnMowerConnectionError
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
-from .vector_map import _parse_drawable_batch_vector_map
+from .vector_map import _parse_drawable_batch_vector_map, with_charger
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
@@ -100,7 +100,10 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         app_maps: Mapping[str, Any] | None = None,
     ) -> MowingMapScene:
         """Observe a fresh frame before rendering its cacheable background."""
-        vector_map = _mowing_scene_geometry(batch, map_index, app_maps)
+        vector_map = with_charger(
+            _mowing_scene_geometry(batch, map_index, app_maps),
+            getattr(self, "charger_position", None),
+        )
         vector_map_position(
             self, vector_map, expected_generation=geometry_generation,
         )

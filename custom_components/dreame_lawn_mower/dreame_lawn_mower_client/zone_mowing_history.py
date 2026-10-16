@@ -59,6 +59,42 @@ class ZoneMowingRecord:
         )
 
 
+# Summary coordinates use the coarse MAPD units of the summary's own ``map``
+# polygons (centimetres); drawable geometry uses units ten times finer.
+_SUMMARY_COORDINATE_SCALE = 10
+
+
+@dataclass(frozen=True)
+class ChargerPosition:
+    """Where a finished task reported the charging station, in map units."""
+
+    x: int
+    y: int
+    heading: int | None
+    observed_at: int | None
+    map_hash: str | None = None
+
+
+def charger_position(summary: Any) -> ChargerPosition | None:
+    """Decode ``dock: [x, y, heading, ...]`` from one session summary."""
+    if not isinstance(summary, Mapping):
+        return None
+    dock = summary.get("dock")
+    if not isinstance(dock, list) or len(dock) < 2:
+        return None
+    x, y = dock[:2]
+    if any(type(v) is not int or abs(v) > 1_000_000 for v in (x, y)):
+        return None
+    heading = dock[2] if len(dock) > 2 and type(dock[2]) is int else None
+    return ChargerPosition(
+        x * _SUMMARY_COORDINATE_SCALE,
+        y * _SUMMARY_COORDINATE_SCALE,
+        heading,
+        _timestamp(summary.get("end")) or _timestamp(summary.get("start")),
+        map_revision_hash(summary.get("md5")),
+    )
+
+
 @dataclass(frozen=True)
 class ZoneMowingHistory:
     """Successful summaries plus the unfinished hydration queue."""
@@ -66,6 +102,18 @@ class ZoneMowingHistory:
     sessions: Mapping[str, tuple[ZoneMowingRecord, ...]] = field(default_factory=dict)
     pending: tuple[str, ...] = ()
     history_available: bool = True
+    chargers: Mapping[str, ChargerPosition] = field(default_factory=dict)
+
+    def latest_charger(self, map_hash: str | None = None) -> ChargerPosition | None:
+        """Newest reported station, preferring the requested map revision."""
+        ordered = sorted(
+            self.chargers.values(), key=lambda item: item.observed_at or 0, reverse=True
+        )
+        revision = map_revision_hash(map_hash)
+        for item in ordered:
+            if revision is not None and item.map_hash == revision:
+                return item
+        return ordered[0] if ordered else None
 
     @property
     def complete(self) -> bool:
@@ -168,6 +216,9 @@ async def async_get_zone_mowing_records(
         result = {
             name: known.sessions[name] for name in names if name in known.sessions
         }
+        chargers = {
+            name: known.chargers[name] for name in names if name in known.chargers
+        }
         resolved = {name for name in result if name not in known.pending}
         missing = [name for name in names if name not in resolved]
         # Untried new summaries first; retain a rotated queue across partial passes.
@@ -189,6 +240,9 @@ async def async_get_zone_mowing_records(
                 # Cancellation is BaseException and must propagate to its owner.
                 break
             if summary is not None:
+                charger = charger_position(summary)
+                if charger is not None:
+                    chargers[name] = charger
                 decoded = zone_mowing_records(summary, name)
                 result[name] = decoded.records
                 if decoded.understood:
@@ -198,7 +252,7 @@ async def async_get_zone_mowing_records(
         unfinished = [name for name in unfinished if name not in attempted] + [
             name for name in unfinished if name in attempted
         ]
-        return ZoneMowingHistory(result, tuple(unfinished))
+        return ZoneMowingHistory(result, tuple(unfinished), chargers=chargers)
 
     return await client._async_cloud_read(read)
 
