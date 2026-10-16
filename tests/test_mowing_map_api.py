@@ -1,6 +1,7 @@
 """Read-only API authorization, coalescing, lifecycle and image identity contracts."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -9,12 +10,15 @@ from aiohttp import web
 
 from custom_components.dreame_lawn_mower import mowing_map_api as module
 from custom_components.dreame_lawn_mower import real_scene_cache
+from custom_components.dreame_lawn_mower.const import CONF_GEOREFERENCE
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_projection
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
     MowingMapScene,
 )
+from custom_components.dreame_lawn_mower.georeference import Georeference
 from tests.runtime_fixtures import runtime_hass
 
+from .test_georeference import REFERENCE
 from .test_real_scene_cache import _photo
 
 
@@ -357,3 +361,35 @@ def test_scene_only_consumer_starts_photo_read_without_delaying_vector_scene(
         await owner.async_close()
 
     asyncio.run(run())
+
+
+def test_scene_json_publishes_projection_and_calibration(monkeypatch) -> None:
+    async def run(options):
+        async def load(**kwargs):
+            return scene()
+
+        _, coordinator, api = environment(load)
+        coordinator.entry.options = options
+        coordinator.client.mowing_map_runtime_overlay = Mock(return_value={})
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        response = await module.MowingMapView(api).get({}, "entry")
+        return json.loads(response.body)
+
+    payload = asyncio.run(run({CONF_GEOREFERENCE: REFERENCE}))
+    projection = scene().projection
+    assert payload["schema_version"] == 1
+    assert payload["projection"] == {
+        "max_x": projection.max_x,
+        "min_y": projection.min_y,
+        "scale": projection.scale,
+        "padding": projection.padding,
+        "native_width": projection.native_width,
+        "native_height": projection.native_height,
+        "rotation": projection.rotation,
+    }
+    assert payload["georeference"] == Georeference.parse(REFERENCE).as_dict()
+    # Existing fields are kept.
+    assert {"revision", "width", "height", "overlay", "background_path"} <= set(
+        payload
+    )
+    assert asyncio.run(run({}))["georeference"] is None

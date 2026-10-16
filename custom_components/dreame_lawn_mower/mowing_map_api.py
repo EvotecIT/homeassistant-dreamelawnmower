@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from io import BytesIO
 from typing import Any
 
@@ -24,8 +24,10 @@ from .const import (
 )
 from .control_options import active_map_index
 from .dreame_lawn_mower_client.map_inventory import _app_map_inventory_identity
+from .dreame_lawn_mower_client.map_projection import MapProjection
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
+from .georeference import entry_georeference
 from .map_presentation import map_style
 from .real_scene_cache import real_scene_owner
 from .runtime_data import get_coordinator
@@ -305,9 +307,27 @@ class MowingMapView(HomeAssistantView):
                 ),
                 "overlay": entry.coordinator.client.mowing_map_runtime_overlay(scene),
                 "real_scene_path": _real_scene_path(entry_id, entry),
+                "projection": projection_payload(scene.projection),
+                "georeference": _georeference_payload(entry.coordinator),
             },
             headers=_HEADERS,
         )
+
+
+def projection_payload(projection: MapProjection) -> dict[str, Any]:
+    """Publish the exact native-to-pixel transform of the background image.
+
+    Pixel = rotate(((max_x - x) * scale + padding, (y - min_y) * scale +
+    padding)) inside a native_width x native_height canvas, rotated clockwise
+    by ``rotation`` degrees. Native X is mirrored by the renderer.
+    """
+    return asdict(projection)
+
+
+def _georeference_payload(coordinator: Any) -> dict[str, float] | None:
+    """Share the entry's calibration so the card and the tracker agree."""
+    georeference = entry_georeference(coordinator.entry)
+    return georeference.as_dict() if georeference is not None else None
 
 
 class MowingMapBackgroundView(HomeAssistantView):
