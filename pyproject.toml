@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "homeassistant-dreame-lawn-mower"
-version = "0.2.164"
+version = "0.2.165"
 description = "HACS-ready Dreame and MOVA lawn mower integration for Home Assistant"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -57,6 +57,13 @@ addopts = "-q"
 
 [tool.mypy]
 strict = true
+
+[[tool.mypy.overrides]]
+# HA documents these package-level tracker exports, but supported releases do
+# not mark every re-export explicitly. Keep the public API instead of importing
+# the config_entry aliases deprecated in HA 2026.9.
+module = ["homeassistant.components.device_tracker"]
+implicit_reexport = true
 
 [[tool.mypy.overrides]]
 # Minimum HA uses Requests 2.32 and Paho MQTT 1.6 without type markers.

@@ -261,6 +261,92 @@ cancel_current_task:
       integration: dreame_lawn_mower
       domain: lawn_mower
 
+set_georeference:
+  name: Set map georeference
+  description: >-
+    Store the calibration that converts native map coordinates (millimetres)
+    to GPS. One map point, usually the charging station, is tied to its
+    latitude and longitude; the heading is the compass direction of the map's
+    native +Y axis. The calibration belongs to the verified current map and
+    revision. Saving it does not reload the integration or reconnect the mower.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    anchor_x:
+      name: Anchor X
+      description: Native X coordinate of the anchor point, as in the map camera's charger_x.
+      required: true
+      example: 1160
+      selector:
+        number:
+          step: any
+          mode: box
+    anchor_y:
+      name: Anchor Y
+      description: Native Y coordinate of the anchor point, as in the map camera's charger_y.
+      required: true
+      example: -20
+      selector:
+        number:
+          step: any
+          mode: box
+    latitude:
+      name: Latitude
+      description: Latitude of the anchor point, in degrees.
+      required: true
+      example: 45.317421
+      selector:
+        number:
+          min: -90
+          max: 90
+          step: any
+          mode: box
+    longitude:
+      name: Longitude
+      description: Longitude of the anchor point, in degrees.
+      required: true
+      example: -73.837131
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: any
+          mode: box
+    heading:
+      name: Heading
+      description: >-
+        Compass heading of the native +Y map axis, in degrees clockwise from
+        north. Values outside 0-360 are normalized.
+      required: true
+      example: 227.33
+      selector:
+        number:
+          step: any
+          mode: box
+          unit_of_measurement: "°"
+    scale:
+      name: Scale
+      description: Metres per native map unit. Native units are millimetres.
+      default: 0.001
+      selector:
+        number:
+          min: 0
+          step: any
+          mode: box
+
+clear_georeference:
+  name: Clear map georeference
+  description: >-
+    Remove the current map's stored map-to-GPS calibration, preserving other
+    maps. The derived GPS position becomes unknown until a new calibration is
+    set. Does not reload the integration.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+
 plan_map_preference_mode_update:
   name: Plan map preference mode update
   description: >-

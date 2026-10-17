@@ -58,6 +58,12 @@ from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
 )
 from .entity import DreameLawnMowerEntity
+from .georeference import (
+    Georeference,
+    current_georeference_map_index,
+    register_georeference_services,
+    store_georeference,
+)
 from .mowing_command import (
     async_run_mowing_command as _async_run_targeted_mowing_command,
 )
@@ -251,6 +257,7 @@ async def async_setup_entry(
         },
         "async_plan_zone_mowing_preference_update",
     )
+    register_georeference_services(platform)
     async_add_entities([DreameLawnMower(coordinator)])
 
 
@@ -844,6 +851,32 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await _async_run_targeted_mowing_command(
             self.coordinator.async_switch_current_map(normalized_map_index)
         )
+
+    async def async_set_georeference(self, **fields: Any) -> None:
+        """Store the map-to-GPS calibration without reloading the mower."""
+        try:
+            store_georeference(
+                self.hass, self.coordinator.entry, Georeference.parse(fields),
+                app_maps=self.coordinator.app_maps,
+                map_index=current_georeference_map_index(self.coordinator),
+                expected_map_index=fields.get("map_index"),
+                expected_map_revision=fields.get("map_revision"),
+            )
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+
+    async def async_clear_georeference(self, **fields: Any) -> None:
+        """Remove the map-to-GPS calibration without reloading the mower."""
+        try:
+            store_georeference(
+                self.hass, self.coordinator.entry, None,
+                app_maps=self.coordinator.app_maps,
+                map_index=current_georeference_map_index(self.coordinator),
+                expected_map_index=fields.get("map_index"),
+                expected_map_revision=fields.get("map_revision"),
+            )
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
 
     async def async_cancel_current_task(self) -> None:
         """End the current mower task without returning to the dock."""

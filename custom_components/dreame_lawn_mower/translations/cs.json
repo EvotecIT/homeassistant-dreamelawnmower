@@ -179,6 +179,11 @@
     }
   },
   "entity": {
+    "device_tracker": {
+      "gps_position": {
+        "name": "Poloha GPS"
+      }
+    },
     "event": {
       "person_detection": {
         "name": "Detekce osoby"
@@ -235,6 +240,14 @@
     }
   },
   "services": {
+    "set_georeference": {
+      "name": "Georeferencovat mapu",
+      "description": "Uloží kalibraci, která převádí nativní souřadnice mapy na GPS: bod mapy s jeho zeměpisnou šířkou a délkou a kompasový kurz osy +Y mapy. Nenačítá integraci znovu."
+    },
+    "clear_georeference": {
+      "name": "Smazat georeferenci",
+      "description": "Odstraní uloženou kalibraci mapy na GPS. Poloha GPS zůstane neznámá, dokud není nastavena nová kalibrace."
+    },
     "start_scheduled_mowing": {
       "name": "Spustit plánované sečení s kontrolou podmínek",
       "description": "Zkontroluje podmínky a spustí úlohu, nebo ji přeskočí s důvodem. Vyžaduje online sekačku v dokovací stanici, neaktivní úlohu, známý stav deště, dostatek baterie a vypnuté vlastní plány na všech mapách. Úlohy neřadí do fronty ani neobnovuje."

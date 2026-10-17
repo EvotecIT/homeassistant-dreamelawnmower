@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -16,7 +15,7 @@ from .client_map_helpers import (
 )
 from .client_position import apply_position_metadata, vector_map_position
 from .models import DreameLawnMowerMapView
-from .position_tracking import map_position_identity, position_at_charger
+from .position_tracking import map_position_identity
 from .vector_map import (
     DreameLawnMowerVectorMap,
     _parse_drawable_batch_vector_map,
@@ -152,15 +151,13 @@ def geometry_map_view(
         else:
             position = vector_map_position(
                 client, vector_map, expected_generation=geometry_generation,
+                app_maps=app_maps,
             )
-        runtime_index = client._runtime_live_map_index
-        frame_accepted = (
-            client._runtime_map_identity_expires_at is not None
-            and client._runtime_map_identity_expires_at.timestamp() > time.time()
-            and client._runtime_geometry_map_index in (None, vector_map.map_index)
-            and client._observed_map_geometry
-            == (vector_map.map_index, map_position_identity(vector_map))
-        )
+            position = client._place_docked_on_station(
+                position, map_index=vector_map.map_index,
+                geometry=map_position_identity(vector_map),
+                charger=vector_map.charger,
+            )
         runtime_blob = client._latest_runtime_status_blob
         snapshot = client._latest_snapshot
         session_active = client._runtime_session_active
@@ -172,11 +169,6 @@ def geometry_map_view(
         segments = (
             client._runtime_live_track_segments
             if runtime_context_matches and not history_only else ()
-        )
-    if not history_only and frame_accepted:
-        position = position_at_charger(
-            position, snapshot, vector_map.charger, vector_map.map_index, time.time(),
-            runtime_map_index=runtime_index,
         )
     if session_active is False and not history_only:
         vector_map.mow_paths = ()
