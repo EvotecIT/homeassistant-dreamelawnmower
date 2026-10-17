@@ -856,12 +856,14 @@ def _mova_600_standby_blob():
 
 
 @pytest.mark.parametrize("age_seconds", [131.0, 300.0, 365.0])
+@pytest.mark.parametrize("model", ["mova.mower.g2405a", "g2405a"])
 def test_mova_600_idle_heartbeat_covers_observed_cadence_and_boundary(
     age_seconds: float,
+    model: str,
 ) -> None:
     """MOVA 600 20-byte standby evidence stays current between heartbeats."""
     reconciled = snapshot_with_heartbeat_task_state(
-        _snapshot(model="mova.mower.g2405a", display_model="MOVA 600"),
+        _snapshot(model=model, display_model="MOVA 600"),
         _mova_600_standby_blob(),
         observed_at=20.0 + age_seconds,
         active_state_observed_at=19.0,
@@ -872,6 +874,32 @@ def test_mova_600_idle_heartbeat_covers_observed_cadence_and_boundary(
     assert reconciled.mowing_session_active is False
     assert reconciled.task_status == "idle"
     assert reconciled.task_resumable is False
+
+
+@pytest.mark.parametrize(
+    "newer_evidence",
+    ["state_event_at", "task_status_event_at", "active_state_observed_at"],
+)
+def test_mova_standby_cadence_cannot_clear_newer_active_evidence(
+    newer_evidence: str,
+) -> None:
+    snapshot = _snapshot(model="mova.mower.g2405a", display_model="MOVA 600")
+    observed = 19.0
+    if newer_evidence == "active_state_observed_at":
+        observed = 21.0
+    else:
+        snapshot = replace(snapshot, **{newer_evidence: 21.0})
+
+    reconciled = snapshot_with_heartbeat_task_state(
+        snapshot,
+        _mova_600_standby_blob(),
+        observed_at=320.0,
+        active_state_observed_at=observed,
+    )
+
+    assert reconciled is snapshot
+    assert reconciled.activity == "paused"
+    assert reconciled.mowing_session_active is None
 
 
 def test_mova_600_idle_heartbeat_expires_immediately_above_boundary() -> None:
