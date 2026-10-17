@@ -178,6 +178,11 @@
     }
   },
   "entity": {
+    "device_tracker": {
+      "gps_position": {
+        "name": "Posizione GPS"
+      }
+    },
     "event": {
       "person_detection": {
         "name": "Rilevamento di persone"
@@ -234,6 +239,14 @@
     }
   },
   "services": {
+    "set_georeference": {
+      "name": "Georeferenziare la mappa",
+      "description": "Salva la calibrazione che converte le coordinate native della mappa in GPS: un punto della mappa con latitudine e longitudine, e la direzione bussola dell’asse +Y della mappa. Non ricarica l’integrazione."
+    },
+    "clear_georeference": {
+      "name": "Cancellare la georeferenziazione",
+      "description": "Rimuove la calibrazione mappa-GPS salvata. La posizione GPS resta sconosciuta finché non si imposta una nuova calibrazione."
+    },
     "start_scheduled_mowing": {
       "name": "Avviare il taglio programmato con verifica delle condizioni",
       "description": "Verifica le condizioni e avvia l’attività oppure la salta indicando il motivo. Richiede rasaerba online alla base, attività inattiva, stato della pioggia noto, batteria sufficiente e programmi nativi disattivati su tutte le mappe. Non accoda né riprende attività."

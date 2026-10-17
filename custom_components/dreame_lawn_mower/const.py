@@ -12,6 +12,7 @@ CONF_ACCOUNT_TYPE = "account_type"
 CONF_COUNTRY = "country"
 CONF_DID = "did"
 CONF_HOST = "host"
+CONF_GEOREFERENCE = "georeference"
 CONF_MAC = "mac"
 CONF_MODEL = "model"
 CONF_NAME = "name"
@@ -124,6 +125,7 @@ VIDEO_RETENTION_OPTIONS = {
 PLATFORMS: list[Platform] = [
     Platform.CAMERA,
     Platform.CALENDAR,
+    Platform.DEVICE_TRACKER,
     Platform.EVENT,
     Platform.BINARY_SENSOR,
     Platform.BUTTON,

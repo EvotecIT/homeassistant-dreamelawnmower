@@ -304,3 +304,73 @@ def test_current_marker_expiry_remains_bound_to_measurement_time():
     )
     assert overlay["position_status"] == "current"
     assert overlay["updated_at"] == overlay["position_observed_at"]
+
+
+def _named_garden():
+    return replace(garden(), zones=(
+        DreameLawnMowerVectorZone(
+            zone_id=1, name="Front",
+            points=((0, 0), (600, 0), (600, 500), (0, 500)),
+        ),
+        DreameLawnMowerVectorZone(
+            zone_id=2, name="Back",
+            points=((600, 0), (1000, 0), (1000, 300), (800, 500), (600, 500)),
+        ),
+        # Unnamed zones draw no label and publish none.
+        DreameLawnMowerVectorZone(
+            zone_id=3, points=((0, 0), (10, 0), (10, 10)),
+        ),
+    ))
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_zone_labels_publish_the_renderers_label_point(rotation):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (  # noqa: E501
+        zone_label_points,
+    )
+
+    vector_map = _named_garden()
+    scene = build_mowing_map_scene(
+        vector_map, style=map_render_style(rotation=rotation)
+    )
+    drawn = {
+        zone.zone_id: pixel
+        for zone, pixel in zone_label_points(vector_map, scene.projection.point)
+    }
+
+    assert [(label.zone_id, label.name) for label in scene.zone_labels] == [
+        (1, "Front"), (2, "Back"),
+    ]
+    for label in scene.zone_labels:
+        assert label.as_dict() == {
+            "zone_id": label.zone_id, "name": label.name,
+            "label_x": label.label_x, "label_y": label.label_y,
+        }
+        # Projecting the native point lands on the drawn label (within a pixel).
+        px, py = scene.projection.point_exact(label.label_x, label.label_y)
+        assert abs(px - drawn[label.zone_id][0]) <= 1
+        assert abs(py - drawn[label.zone_id][1]) <= 1
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_projection_native_point_inverts_the_pixel_projection(rotation):
+    projection = build_mowing_map_scene(
+        garden(), style=map_render_style(rotation=rotation)
+    ).projection
+
+    for point in ((0, 0), (1000, 500), (123, 456)):
+        x, y = projection.native_point(*projection.point_exact(*point))
+        assert x == pytest.approx(point[0]) and y == pytest.approx(point[1])
+
+
+def test_unlabeled_background_is_the_same_canvas_without_zone_names():
+    named = build_mowing_map_scene(_named_garden(), style=map_render_style())
+    with Image.open(BytesIO(named.image_png)) as labeled, Image.open(
+        BytesIO(named.image_png_unlabeled)
+    ) as unlabeled:
+        assert labeled.size == unlabeled.size
+        assert labeled.tobytes() != unlabeled.tobytes()
+    plain = build_mowing_map_scene(garden(), style=map_render_style())
+    # Without names both variants are identical and no zone is listed.
+    assert plain.image_png == plain.image_png_unlabeled
+    assert plain.zone_labels == ()

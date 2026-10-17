@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from io import BytesIO
 from typing import Any
 
@@ -23,10 +23,15 @@ from .const import (
     DOMAIN,
 )
 from .control_options import active_map_index
-from .dreame_lawn_mower_client.map_inventory import _app_map_inventory_identity
+from .dreame_lawn_mower_client.map_inventory import (
+    _app_map_inventory_identity,
+    selected_map_revision,
+)
+from .dreame_lawn_mower_client.map_projection import MapProjection
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
 from .dreame_lawn_mower_client.zone_mowing_history import reported_charger_for_map
+from .georeference import entry_georeference
 from .map_presentation import map_style
 from .real_scene_cache import real_scene_owner
 from .runtime_data import get_coordinator
@@ -300,6 +305,9 @@ class MowingMapView(HomeAssistantView):
                 "schema_version": 1,
                 "revision": scene.revision,
                 "map_index": scene.map_index,
+                "map_revision": selected_map_revision(
+                    entry.coordinator.app_maps, scene.map_index
+                ),
                 "map_id": scene.map_id,
                 "name": scene.name,
                 "width": scene.projection.width,
@@ -309,9 +317,34 @@ class MowingMapView(HomeAssistantView):
                 ),
                 "overlay": entry.coordinator.client.mowing_map_runtime_overlay(scene),
                 "real_scene_path": _real_scene_path(entry_id, entry),
+                "projection": projection_payload(scene.projection),
+                "zones": [label.as_dict() for label in scene.zone_labels],
+                "georeference": _georeference_payload(
+                    entry.coordinator, scene.map_index
+                ),
             },
             headers=_HEADERS,
         )
+
+
+def projection_payload(projection: MapProjection) -> dict[str, Any]:
+    """Publish the exact native-to-pixel transform of the background image.
+
+    Pixel = rotate(((max_x - x) * scale + padding, (y - min_y) * scale +
+    padding)) inside a native_width x native_height canvas, rotated clockwise
+    by ``rotation`` degrees. Native X is mirrored by the renderer.
+    """
+    return asdict(projection)
+
+
+def _georeference_payload(
+    coordinator: Any, map_index: int
+) -> dict[str, float] | None:
+    """Share the entry's calibration so the card and the tracker agree."""
+    georeference = entry_georeference(
+        coordinator.entry, coordinator.app_maps, map_index
+    )
+    return georeference.as_dict() if georeference is not None else None
 
 
 class MowingMapBackgroundView(HomeAssistantView):
@@ -337,8 +370,22 @@ class MowingMapBackgroundView(HomeAssistantView):
         ):
             raise web.HTTPConflict(text="Refresh the map scene before its background.")
         return web.Response(
-            body=entry.scene.image_png, content_type="image/png", headers=_HEADERS
+            body=background_image(entry.scene, request),
+            content_type="image/png",
+            headers=_HEADERS,
         )
+
+
+def background_image(scene: MowingMapScene, request: Any) -> bytes:
+    """Return the background, without zone names when ``labels=0`` is asked.
+
+    Both variants are rendered with the scene and share its revision, so the
+    scene cache already holds the choice and no request renders anything.
+    """
+    query = getattr(request, "query", None) or {}
+    if query.get("labels") == "0" and scene.image_png_unlabeled:
+        return scene.image_png_unlabeled
+    return scene.image_png
 
 
 def _real_scene_for(entry: _SceneEntry) -> RealSceneImage | None:

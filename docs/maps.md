@@ -57,6 +57,33 @@ they do not silently substitute another saved map. Identical source images reuse
 the existing JPEG conversion, and requested image sizes use a bounded cache of
 resized JPEGs.
 
+## Geographic alignment and derived location
+
+Lawn Mower Card can align the mower map with a street or satellite background.
+The integration stores each calibration against the verified current map slot
+and revision. Switching maps uses that map's own calibration; replacing a map
+requires a new alignment. Saving or clearing a calibration keeps the mower
+connection running.
+
+The `dreame_lawn_mower.set_georeference` action accepts native `anchor_x` and
+`anchor_y`, the anchor's `latitude` and `longitude`, `heading` (the compass
+direction of the native +Y axis), and `scale` in metres per native unit (default
+0.001). `dreame_lawn_mower.clear_georeference` removes the current map's
+calibration. Editors can supply `map_index` and `map_revision` to either action
+to reject a save or clear after the map changes.
+
+The **GPS position** device tracker projects a validated current mower position
+or a confirmed docked station through this calibration. Its coordinates are
+derived from the map and manual alignment; they are not a separate onboard GPS
+measurement, and no measured accuracy bound is available. Last-known history,
+unverified maps and calibration from another revision do not publish a current
+geographic position. The tracker exposes the position's evidence status and
+when that evidence was first observed.
+
+A mower confirmed docked after a Home Assistant restart can use its verified
+current-map station even without a live telemetry session. This does not admit
+unverified live poses or restore a stale mowing trail.
+
 ## Saved previews
 
 Map images stay in memory by default. To keep a preview through a Home Assistant

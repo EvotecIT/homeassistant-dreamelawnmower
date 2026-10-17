@@ -178,6 +178,11 @@
     }
   },
   "entity": {
+    "device_tracker": {
+      "gps_position": {
+        "name": "Pozycja GPS"
+      }
+    },
     "event": {
       "person_detection": {
         "name": "Wykrycie osoby"
@@ -234,6 +239,14 @@
     }
   },
   "services": {
+    "set_georeference": {
+      "name": "Georeferencja mapy",
+      "description": "Zapisuje kalibrację przeliczającą natywne współrzędne mapy na GPS: punkt mapy z jego szerokością i długością geograficzną oraz kurs kompasowy osi +Y mapy. Nie przeładowuje integracji."
+    },
+    "clear_georeference": {
+      "name": "Usuń georeferencję",
+      "description": "Usuwa zapisaną kalibrację mapy do GPS. Pozycja GPS pozostaje nieznana do ustawienia nowej kalibracji."
+    },
     "start_scheduled_mowing": {
       "name": "Rozpocznij zaplanowane koszenie po sprawdzeniu warunków",
       "description": "Sprawdza warunki i rozpoczyna zadanie albo je pomija, podając powód. Wymaga kosiarki online w stacji, nieaktywnego zadania, znanego stanu opóźnienia deszczowego, wystarczającej baterii i wyłączonych harmonogramów urządzenia na wszystkich mapach. Nie kolejkuje ani nie wznawia zadań."

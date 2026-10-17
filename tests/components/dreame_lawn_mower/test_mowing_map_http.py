@@ -83,6 +83,8 @@ async def test_signed_scene_and_background_are_private_and_path_scoped(
     assert response.headers["Cache-Control"] == "private, no-store"
     payload = await response.json()
     assert payload["revision"] == scene.revision
+    assert payload["projection"]["native_width"] == scene.projection.native_width
+    assert payload["georeference"] is None
     background_path = payload["background_path"]
     assert (await http.get(background_path)).status == 401
     assert (

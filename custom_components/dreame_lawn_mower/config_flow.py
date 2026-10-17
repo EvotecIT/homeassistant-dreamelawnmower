@@ -24,6 +24,7 @@ from .const import (
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
     CONF_DID,
+    CONF_GEOREFERENCE,
     CONF_HOST,
     CONF_MAC,
     CONF_MAP_BACKGROUND,
@@ -394,6 +395,13 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 await async_remove_restart_preview(
                     self.hass, self._source_entry
                 )
+            # Actions may change alignment while this form is open or while
+            # preview cleanup awaits storage. Read after the final suspension
+            # so saving options preserves the latest value, including absence.
+            options.pop(CONF_GEOREFERENCE, None)
+            current_options = self._source_entry.options
+            if CONF_GEOREFERENCE in current_options:
+                options[CONF_GEOREFERENCE] = current_options[CONF_GEOREFERENCE]
             return self.async_create_entry(title="", data=options)
 
         video_transport = self._entry_options.get(

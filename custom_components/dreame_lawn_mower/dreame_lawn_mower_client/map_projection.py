@@ -51,6 +51,20 @@ class MapProjection:
             self.rotation,
         )
 
+    def native_point(self, px: float, py: float) -> tuple[float, float]:
+        """Invert ``point_exact``: a canvas pixel back to native coordinates."""
+        u, v = px, py
+        if self.rotation == 90:
+            u, v = py, self.native_height - 1 - px
+        elif self.rotation == 180:
+            u, v = self.native_width - 1 - px, self.native_height - 1 - py
+        elif self.rotation == 270:
+            u, v = self.native_width - 1 - py, px
+        return (
+            self.max_x - (u - self.padding) / self.scale,
+            self.min_y + (v - self.padding) / self.scale,
+        )
+
 
 def vector_map_projection(
     x1: float, y1: float, x2: float, y2: float, *, rotation: int = 0

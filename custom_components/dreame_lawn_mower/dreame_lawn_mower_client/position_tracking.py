@@ -136,6 +136,12 @@ class MowerPositionTracker:
         self._geometry: str | None = None
         self._geometry_changed_at: float | None = None
 
+    @property
+    def geometry(self) -> str | None:
+        """Return the map frame that retained evidence is bound to."""
+        with self._lock:
+            return self._geometry
+
     def checkpoint(self, *, now: datetime | None = None) -> dict[str, Any] | None:
         """Export at most two validated poses and a geometry fingerprint."""
         current = (now or datetime.now(UTC)).timestamp()

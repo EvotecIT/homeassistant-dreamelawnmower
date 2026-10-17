@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .const import (
+    CONF_GEOREFERENCE,
     CONF_MAP_BACKGROUND,
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
@@ -34,7 +35,9 @@ PRESENTATION_OPTIONS = frozenset({
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
 })
-HOT_UPDATE_OPTIONS = PRESENTATION_OPTIONS | {CONF_SCAN_INTERVAL}
+# The map calibration is read on demand by the tracker and the map API. Saving
+# an adjustment must not reconnect the mower.
+HOT_UPDATE_OPTIONS = PRESENTATION_OPTIONS | {CONF_SCAN_INTERVAL, CONF_GEOREFERENCE}
 
 
 @dataclass(slots=True)

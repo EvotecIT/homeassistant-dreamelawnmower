@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -12,7 +11,7 @@ from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .exceptions import DreameLawnMowerConnectionError
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
-from .position_tracking import position_at_charger, snapshot_is_docked
+from .position_tracking import snapshot_is_docked
 from .vector_map import _parse_drawable_batch_vector_map, with_charger
 from .zone_mowing_history import reported_charger_for_map
 
@@ -110,6 +109,7 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         )
         vector_map_position(
             self, vector_map, expected_generation=geometry_generation,
+            app_maps=app_maps,
         )
         return build_mowing_map_scene(vector_map, style=style, label_scale=label_scale)
 
@@ -132,17 +132,10 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
             snapshot=self._latest_snapshot,
             allow_geometry_change=False,
         )
-        deadline = self._runtime_map_identity_expires_at
-        if (
-            deadline is not None and deadline.timestamp() > time.time()
-            and self._runtime_geometry_map_index in (None, scene.map_index)
-            and self._observed_map_geometry
-            == (scene.map_index, scene.position_identity)
-        ):
-            position = position_at_charger(
-                position, self._latest_snapshot, scene.charger, scene.map_index,
-                time.time(), runtime_map_index=self._runtime_live_map_index,
-            )
+        position = self._place_docked_on_station(
+            position, map_index=scene.map_index,
+            geometry=scene.position_identity, charger=scene.charger,
+        )
         blob = self._latest_runtime_status_blob
         # The tracker owns geometry binding, including negative decisions.
         # A raw packet must not resurrect a rejected position in the projector.
