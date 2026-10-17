@@ -59,6 +59,13 @@ addopts = "-q"
 strict = true
 
 [[tool.mypy.overrides]]
+# HA documents these package-level tracker exports, but supported releases do
+# not mark every re-export explicitly. Keep the public API instead of importing
+# the config_entry aliases deprecated in HA 2026.9.
+module = ["homeassistant.components.device_tracker"]
+implicit_reexport = true
+
+[[tool.mypy.overrides]]
 # Minimum HA uses Requests 2.32 and Paho MQTT 1.6 without type markers.
 # Exempt only these third-party imports when type information is unavailable;
 # typed installations and all integration/bundled-client modules stay checked.

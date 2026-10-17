@@ -6,8 +6,7 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
-from homeassistant.components.device_tracker.config_entry import TrackerEntity
-from homeassistant.components.device_tracker.const import SourceType
+from homeassistant.components.device_tracker import SourceType, TrackerEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -50,6 +49,7 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
         self._position_observed_at: str | None = None
         self._written_available: bool | None = None
         self._update_position()
+        self._written_available = self.available
 
     @property
     def force_update(self) -> bool:
@@ -76,11 +76,7 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
         # Repeated identical evidence would write one history row per poll.
         if self._update_position() or self.available != self._written_available:
             super()._handle_coordinator_update()
-
-    def async_write_ha_state(self) -> None:
-        """Remember what was last published to suppress identical writes."""
-        self._written_available = self.available
-        super().async_write_ha_state()
+            self._written_available = self.available
 
     def _update_position(self) -> bool:
         """Recompute the position, returning whether the published one changed."""
