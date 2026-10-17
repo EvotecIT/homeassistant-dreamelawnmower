@@ -509,15 +509,25 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
         ("mowing", "mowing", False, True),
     ],
 )
-def test_fresh_inactive_heartbeat_cannot_weaken_new_untimestamped_active_state(
+@pytest.mark.parametrize("property_event_at", [None, 99.0])
+@pytest.mark.parametrize(
+    ("model", "frame"),
+    [("dreame.mower.g2541e", _A3_STANDBY_FRAME),
+     ("mova.mower.g2405a", _MOVA_600_STANDBY_FRAME),
+     ("dreame.mower.g2568d", _MOVA_600_STANDBY_FRAME)],
+)
+def test_fresh_inactive_heartbeat_cannot_weaken_new_active_observation(
     state: str,
     activity: str,
     paused: bool,
     mowing: bool,
+    property_event_at: float | None,
+    model: str,
+    frame: tuple[int, ...],
 ) -> None:
-    """A first local active observation outranks an older cached heartbeat."""
+    """Local activity remains authoritative alongside older property timestamps."""
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_FRAME,
+        frame,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -528,15 +538,18 @@ def test_fresh_inactive_heartbeat_cannot_weaken_new_untimestamped_active_state(
         received_at="1970-01-01T00:01:40+00:00",
     )
     active_snapshot = replace(
-        _snapshot(),
+        _snapshot(model=model),
         state=state,
         state_name=state,
         activity=activity,
         paused=paused,
         mowing=mowing,
         started=True,
-        state_event_at=None,
-        task_status_event_at=None,
+        state_event_at=property_event_at,
+        task_status_event_at=property_event_at,
+        task_status=state,
+        mowing_session_active=True,
+        task_resumable=paused,
     )
 
     reconciled = snapshot_with_heartbeat_task_state(
@@ -548,16 +561,31 @@ def test_fresh_inactive_heartbeat_cannot_weaken_new_untimestamped_active_state(
 
     assert reconciled is active_snapshot
     assert reconciled.activity == activity
-    assert reconciled.mowing_session_active is None
+    assert reconciled.mowing_session_active is True
+    assert reconciled.task_resumable is paused
 
 
-def test_refresh_keeps_new_untimestamped_active_observation() -> None:
-    raw_snapshot = _snapshot(
-        model="dreame.mower.g2541e",
-        display_model="A3 AWD Pro 3500",
+@pytest.mark.parametrize("property_event_at", [None, 99.0])
+@pytest.mark.parametrize("read_path", ["cached", "refresh"])
+@pytest.mark.parametrize(
+    ("model", "frame"),
+    [("dreame.mower.g2541e", _A3_STANDBY_FRAME),
+     ("mova.mower.g2405a", _MOVA_600_STANDBY_FRAME),
+     ("dreame.mower.g2568d", _MOVA_600_STANDBY_FRAME)],
+)
+def test_cached_and_refresh_reads_keep_new_active_observation(
+    property_event_at, read_path, model, frame
+) -> None:
+    raw_snapshot = replace(
+        _snapshot(model=model),
+        state_event_at=property_event_at,
+        task_status_event_at=property_event_at,
+        task_status="paused",
+        mowing_session_active=True,
+        task_resumable=True,
     )
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_FRAME,
+        frame,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -576,7 +604,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
         token=None,
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
-                "value": list(_A3_STANDBY_FRAME),
+                "value": list(frame),
                 "last_seen": 100.0,
             }
         },
@@ -604,11 +632,15 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
         ),
         patch.object(client_core_module.time, "time", return_value=101.0),
     ):
-        refreshed = asyncio.run(client.async_refresh())
+        refreshed = asyncio.run(
+            client.async_refresh() if read_path == "refresh"
+            else client.async_get_cached_snapshot()
+        )
 
     assert refreshed.state == "paused"
     assert refreshed.activity == "paused"
-    assert refreshed.mowing_session_active is None
+    assert refreshed.mowing_session_active is True
+    assert refreshed.task_resumable is True
 
 
 @pytest.mark.parametrize(
@@ -887,6 +919,7 @@ def test_mova_standby_cadence_cannot_clear_newer_active_evidence(
     observed = 19.0
     if newer_evidence == "active_state_observed_at":
         observed = 21.0
+        snapshot = replace(snapshot, state_event_at=19.0, task_status_event_at=19.0)
     else:
         snapshot = replace(snapshot, **{newer_evidence: 21.0})
 

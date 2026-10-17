@@ -164,9 +164,9 @@ def _inactive_heartbeat_is_current(
         return False
 
     event_times = [state_event_at, task_event_at]
-    if (physical_state_active and state_event_at is None) or (
-        task_state_active and task_event_at is None
-    ):
+    # A changed raw activity is independent evidence, including when older
+    # property timestamps remain in the snapshot.
+    if physical_state_active or task_state_active:
         event_times.append(active_observed_at)
     for event_at in event_times:
         if (
