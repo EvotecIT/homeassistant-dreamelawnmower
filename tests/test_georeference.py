@@ -40,6 +40,7 @@ from custom_components.dreame_lawn_mower.georeference import (
     store_georeference,
 )
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
+from custom_components.dreame_lawn_mower.map_preview import CONF_MAP_RESTART_PREVIEW
 from custom_components.dreame_lawn_mower.option_updates import EntryUpdateSnapshot
 from tests.runtime_fixtures import runtime_hass
 
@@ -277,6 +278,29 @@ def test_open_options_form_preserves_later_calibration_actions(cleared):
     entry.options = {} if cleared else {
         CONF_GEOREFERENCE: _stored({**REFERENCE, "heading": 10})
     }
+    result = asyncio.run(flow.async_step_init({CONF_SCAN_INTERVAL: 45}))
+    assert result["data"] == {CONF_SCAN_INTERVAL: 45, **entry.options}
+
+
+@pytest.mark.parametrize("cleared", [False, True])
+def test_options_preview_cleanup_preserves_overlapping_calibration_actions(
+    monkeypatch, cleared
+):
+    entry = _entry({CONF_GEOREFERENCE: _stored(), CONF_MAP_RESTART_PREVIEW: True})
+    flow = DreameLawnMowerOptionsFlow(entry)
+    flow.hass = SimpleNamespace()
+
+    async def remove_preview(hass, target):
+        # The storage boundary suspends while an alignment action completes.
+        await asyncio.sleep(0)
+        target.options = {} if cleared else {
+            CONF_GEOREFERENCE: _stored({**REFERENCE, "heading": 10})
+        }
+
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.config_flow.async_remove_restart_preview",
+        remove_preview,
+    )
     result = asyncio.run(flow.async_step_init({CONF_SCAN_INTERVAL: 45}))
     assert result["data"] == {CONF_SCAN_INTERVAL: 45, **entry.options}
 

@@ -389,19 +389,19 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 options[CONF_MAP_ROTATION] = int(options[CONF_MAP_ROTATION])
             if CONF_MAP_ROTATIONS in self._entry_options:
                 options[CONF_MAP_ROTATIONS] = self._entry_options[CONF_MAP_ROTATIONS]
-            # An action may save or clear alignment while this form is open.
-            # Preserve its latest value, including absence, instead of the
-            # snapshot captured when the options flow began.
-            options.pop(CONF_GEOREFERENCE, None)
-            current_options = self._source_entry.options
-            if CONF_GEOREFERENCE in current_options:
-                options[CONF_GEOREFERENCE] = current_options[CONF_GEOREFERENCE]
             if self._entry_options.get(CONF_MAP_RESTART_PREVIEW) and not options.get(
                 CONF_MAP_RESTART_PREVIEW
             ):
                 await async_remove_restart_preview(
                     self.hass, self._source_entry
                 )
+            # Actions may change alignment while this form is open or while
+            # preview cleanup awaits storage. Read after the final suspension
+            # so saving options preserves the latest value, including absence.
+            options.pop(CONF_GEOREFERENCE, None)
+            current_options = self._source_entry.options
+            if CONF_GEOREFERENCE in current_options:
+                options[CONF_GEOREFERENCE] = current_options[CONF_GEOREFERENCE]
             return self.async_create_entry(title="", data=options)
 
         video_transport = self._entry_options.get(
