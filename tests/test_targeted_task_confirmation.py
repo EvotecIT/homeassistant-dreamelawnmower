@@ -196,3 +196,109 @@ def test_already_active_unclassified_task_is_not_dispatched_again() -> None:
         _run(client, client.async_start_zone_mowing([2]))
 
     client._async_call_mowing_task.assert_not_awaited()
+
+
+def _leaving_station() -> SimpleNamespace:
+    """Measured +0 s after a LiDAX zone start: mowing state, task starting."""
+    return _new_mowing_session(task_status="starting")
+
+
+def _driving_to_zone() -> SimpleNamespace:
+    """Measured +15 s and +30 s: the drive to the zone reads as remote control."""
+    return _snapshot(
+        state="remote_control", activity="idle", task_status="starting",
+        mowing_session_active=True,
+    )
+
+
+def _zone_two_mowing() -> SimpleNamespace:
+    """Measured +45 s: the requested zone task is published."""
+    return _new_mowing_session(task_operation=102, task_region_ids=(2,))
+
+
+@pytest.fixture
+def _fast_transit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(client_module, "_TARGETED_TASK_TRANSIT_POLL_SECONDS", 0)
+
+
+@pytest.mark.usefixtures("_fast_transit")
+def test_zone_start_waits_through_the_drive_from_the_station() -> None:
+    client = _client()
+    response = {"r": 0}
+    client._async_call_mowing_task = AsyncMock(return_value=response)
+    client._async_refresh_authoritative_snapshot = AsyncMock(side_effect=[
+        _snapshot(),  # docked baseline
+        _leaving_station(),
+        *[_driving_to_zone() for _ in range(5)],  # the 15 s window ends here
+        _driving_to_zone(),
+        _driving_to_zone(),
+        _zone_two_mowing(),
+    ])
+
+    assert _run(client, client.async_start_zone_mowing([2])) is response
+    assert client._async_refresh_authoritative_snapshot.await_count == 10
+
+
+@pytest.mark.usefixtures("_fast_transit")
+@pytest.mark.parametrize("other", [
+    _new_mowing_session(task_operation=1),  # whole-lawn mowing
+    _new_mowing_session(task_operation=101),  # edge mowing
+    _new_mowing_session(task_operation=102, task_region_ids=(3,)),  # other zone
+])
+def test_drive_from_the_station_never_hides_another_mode(other) -> None:
+    client = _client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+    client._async_refresh_authoritative_snapshot = AsyncMock(side_effect=[
+        _snapshot(), *[_driving_to_zone() for _ in range(7)], other, _zone_two_mowing(),
+    ])
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="did not enter"):
+        _run(client, client.async_start_zone_mowing([2]))
+    # The conflicting readback ends the wait; the later one is never read.
+    assert client._async_refresh_authoritative_snapshot.await_count == 9
+
+
+def test_drive_from_the_station_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(client_module, "_TARGETED_TASK_TRANSIT_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_TARGETED_TASK_TRANSIT_TIMEOUT_SECONDS", 0.1)
+    client = _client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+    client._async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[_snapshot(), *[_driving_to_zone() for _ in range(1000)]]
+    )
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="did not enter"):
+        _run(client, client.async_start_zone_mowing([2]))
+    assert client._async_refresh_authoritative_snapshot.await_count < 1000
+
+
+@pytest.mark.usefixtures("_fast_transit")
+def test_pending_control_takes_over_during_the_drive() -> None:
+    client = _client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+    reads = 0
+
+    async def readback(**kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == 8:
+            # A pause or dock request is now waiting for the control gate.
+            await client._task_control_admission_gate.acquire()
+        return _snapshot() if reads == 1 else _driving_to_zone()
+
+    client._async_refresh_authoritative_snapshot = readback
+
+    assert _run(client, client.async_start_zone_mowing([2])) == {"r": 0}
+    assert reads == 8
+
+
+def test_station_without_transit_still_fails_after_the_short_window() -> None:
+    client = _client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+    client._async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[_snapshot(), *[_snapshot() for _ in range(6)]]
+    )
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="did not enter"):
+        _run(client, client.async_start_zone_mowing([2]))
+    assert client._async_refresh_authoritative_snapshot.await_count == 7
