@@ -18,8 +18,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map imp
 from custom_components.dreame_lawn_mower.georeference import Georeference
 from tests.runtime_fixtures import runtime_hass
 
-from .test_georeference import REFERENCE
+from .test_georeference import REFERENCE, _stored
 from .test_real_scene_cache import _photo
+from .test_zone_mowing_history import HASH, _maps
 
 
 def scene():
@@ -239,17 +240,16 @@ def test_real_scene_layer_matches_the_background_canvas(monkeypatch):
         monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
         photo = BytesIO()
         Image.new("RGBA", (40, 20), (0, 128, 0, 255)).save(photo, format="PNG")
-        photo_scene = real_scene_from_png(
-            0, "x/IQ1/a_20_10_3cm.png", photo.getvalue()
-        )
+        photo_scene = real_scene_from_png(0, "x/IQ1/a_20_10_3cm.png", photo.getvalue())
         entry = await api.scene("entry")
         view = module.MowingMapRealSceneView(api)
 
         assert module._real_scene_path("entry", entry) is None
         coordinator.entry.options["map_background"] = "real_scene"
         monkeypatch.setattr(
-            real_scene_cache, "async_fetch_real_scene",
-            AsyncMock(return_value=photo_scene)
+            real_scene_cache,
+            "async_fetch_real_scene",
+            AsyncMock(return_value=photo_scene),
         )
         await real_scene_cache.real_scene_owner(coordinator).request()
         path = module._real_scene_path("entry", entry)
@@ -272,7 +272,8 @@ def test_real_scene_layer_matches_the_background_canvas(monkeypatch):
 
 @pytest.mark.parametrize("change", ["none", "map", "rotation", "disable", "unload"])
 def test_photo_layer_coalesces_requests_and_rejects_changed_context(
-    monkeypatch, change,
+    monkeypatch,
+    change,
 ):
     async def run():
         async def load(**kwargs):
@@ -281,8 +282,9 @@ def test_photo_layer_coalesces_requests_and_rejects_changed_context(
         hass, coordinator, api = environment(load)
         coordinator.entry.options["map_background"] = "real_scene"
         photo = _photo()
-        monkeypatch.setattr(real_scene_cache, "async_fetch_real_scene",
-                            AsyncMock(return_value=photo))
+        monkeypatch.setattr(
+            real_scene_cache, "async_fetch_real_scene", AsyncMock(return_value=photo)
+        )
         monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
         await api.scene("entry")
         pending_photo = real_scene_cache.real_scene_owner(coordinator).request()
@@ -370,12 +372,16 @@ def test_scene_json_publishes_projection_and_calibration(monkeypatch) -> None:
 
         _, coordinator, api = environment(load)
         coordinator.entry.options = options
+        coordinator.app_maps = _maps()
+        for item in coordinator.app_maps["maps"]:
+            item["info"]["size"] = 100
         coordinator.client.mowing_map_runtime_overlay = Mock(return_value={})
         monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
         response = await module.MowingMapView(api).get({}, "entry")
         return json.loads(response.body)
 
-    payload = asyncio.run(run({CONF_GEOREFERENCE: REFERENCE}))
+    payload = asyncio.run(run({CONF_GEOREFERENCE: _stored()}))
+    assert payload["map_revision"] == HASH
     projection = scene().projection
     assert payload["schema_version"] == 1
     assert payload["projection"] == {
@@ -389,9 +395,7 @@ def test_scene_json_publishes_projection_and_calibration(monkeypatch) -> None:
     }
     assert payload["georeference"] == Georeference.parse(REFERENCE).as_dict()
     # Existing fields are kept.
-    assert {"revision", "width", "height", "overlay", "background_path"} <= set(
-        payload
-    )
+    assert {"revision", "width", "height", "overlay", "background_path"} <= set(payload)
     assert asyncio.run(run({}))["georeference"] is None
 
 
@@ -403,7 +407,8 @@ def test_scene_json_lists_zone_labels_and_background_drops_names(monkeypatch):
     )
 
     labelled = replace(
-        scene(), image_png_unlabeled=b"no-names",
+        scene(),
+        image_png_unlabeled=b"no-names",
         zone_labels=(ZoneLabel(1, "Front", 300, 250), ZoneLabel(2, "Back", 800, 200)),
     )
 
@@ -414,9 +419,7 @@ def test_scene_json_lists_zone_labels_and_background_drops_names(monkeypatch):
         _, coordinator, api = environment(load)
         coordinator.client.mowing_map_runtime_overlay = Mock(return_value={})
         monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
-        payload = json.loads(
-            (await module.MowingMapView(api).get({}, "entry")).body
-        )
+        payload = json.loads((await module.MowingMapView(api).get({}, "entry")).body)
         background = module.MowingMapBackgroundView(api)
         default = await background.get(SimpleNamespace(query={}), "entry", "a" * 64)
         stripped = await background.get(

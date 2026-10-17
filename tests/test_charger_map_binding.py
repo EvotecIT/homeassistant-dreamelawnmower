@@ -103,7 +103,7 @@ def test_unverified_or_unmatched_revision_has_no_station(revision_state):
     assert view.details["position_x"] is None
 
 
-@pytest.mark.parametrize("rejected", ["foreign_map", "overtaken", "expired"])
+@pytest.mark.parametrize("rejected", ["foreign_map", "overtaken"])
 def test_camera_cannot_replace_rejected_frame_with_docked_position(rejected):
     client = docked_client()
     vector = parse_batch_vector_map(_batch_payload())
@@ -156,7 +156,10 @@ def test_camera_and_interactive_scene_share_current_station_and_docked_point():
     assert overlay["position_source"] == view.details["position_source"]
     assert (view.details["position_x"], view.details["position_y"]) == (20, 40)
     client._runtime_map_identity_expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    assert client.mowing_map_runtime_overlay(scene)["position"] is None
+    expired = client.mowing_map_runtime_overlay(scene)
+    assert expired["position_status"] == "known_dock"
+    assert expired["trail"] == []
+    assert client._runtime_live_map_index is None
 
 
 def test_cached_history_refresh_keeps_per_revision_evidence_without_cloud_read():

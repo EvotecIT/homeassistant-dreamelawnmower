@@ -23,7 +23,10 @@ from .const import (
     DOMAIN,
 )
 from .control_options import active_map_index
-from .dreame_lawn_mower_client.map_inventory import _app_map_inventory_identity
+from .dreame_lawn_mower_client.map_inventory import (
+    _app_map_inventory_identity,
+    selected_map_revision,
+)
 from .dreame_lawn_mower_client.map_projection import MapProjection
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
@@ -302,6 +305,9 @@ class MowingMapView(HomeAssistantView):
                 "schema_version": 1,
                 "revision": scene.revision,
                 "map_index": scene.map_index,
+                "map_revision": selected_map_revision(
+                    entry.coordinator.app_maps, scene.map_index
+                ),
                 "map_id": scene.map_id,
                 "name": scene.name,
                 "width": scene.projection.width,
@@ -313,7 +319,9 @@ class MowingMapView(HomeAssistantView):
                 "real_scene_path": _real_scene_path(entry_id, entry),
                 "projection": projection_payload(scene.projection),
                 "zones": [label.as_dict() for label in scene.zone_labels],
-                "georeference": _georeference_payload(entry.coordinator),
+                "georeference": _georeference_payload(
+                    entry.coordinator, scene.map_index
+                ),
             },
             headers=_HEADERS,
         )
@@ -329,9 +337,13 @@ def projection_payload(projection: MapProjection) -> dict[str, Any]:
     return asdict(projection)
 
 
-def _georeference_payload(coordinator: Any) -> dict[str, float] | None:
+def _georeference_payload(
+    coordinator: Any, map_index: int
+) -> dict[str, float] | None:
     """Share the entry's calibration so the card and the tracker agree."""
-    georeference = entry_georeference(coordinator.entry)
+    georeference = entry_georeference(
+        coordinator.entry, coordinator.app_maps, map_index
+    )
     return georeference.as_dict() if georeference is not None else None
 
 

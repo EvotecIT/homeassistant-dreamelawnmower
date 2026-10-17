@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from .map_inventory import selected_map_revision
 from .position_tracking import MowerPosition, map_position_identity, snapshot_is_docked
 from .vector_map import position_within_vector_map
 
@@ -17,6 +19,7 @@ def vector_map_position(
     client: _DreameLawnMowerClientTrackingMixin,
     vector_map: DreameLawnMowerVectorMap,
     *, expected_generation: int | None = None,
+    app_maps: Mapping[str, Any] | None = None,
 ) -> MowerPosition | None:
     """Resolve the same geometry-scoped evidence as the interactive overlay."""
     return client._observe_runtime_geometry(
@@ -25,6 +28,10 @@ def vector_map_position(
         contains=lambda x, y: position_within_vector_map(vector_map, (x, y)),
         expected_generation=expected_generation,
         charger=vector_map.charger,
+        station_revision=(
+            selected_map_revision(app_maps, vector_map.map_index)
+            if vector_map.charger is not None else None
+        ),
     )
 
 

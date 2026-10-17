@@ -389,9 +389,13 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 options[CONF_MAP_ROTATION] = int(options[CONF_MAP_ROTATION])
             if CONF_MAP_ROTATIONS in self._entry_options:
                 options[CONF_MAP_ROTATIONS] = self._entry_options[CONF_MAP_ROTATIONS]
-            # Set by an action, not by this form: saving the form keeps it.
-            if CONF_GEOREFERENCE in self._entry_options:
-                options[CONF_GEOREFERENCE] = self._entry_options[CONF_GEOREFERENCE]
+            # An action may save or clear alignment while this form is open.
+            # Preserve its latest value, including absence, instead of the
+            # snapshot captured when the options flow began.
+            options.pop(CONF_GEOREFERENCE, None)
+            current_options = self._source_entry.options
+            if CONF_GEOREFERENCE in current_options:
+                options[CONF_GEOREFERENCE] = current_options[CONF_GEOREFERENCE]
             if self._entry_options.get(CONF_MAP_RESTART_PREVIEW) and not options.get(
                 CONF_MAP_RESTART_PREVIEW
             ):

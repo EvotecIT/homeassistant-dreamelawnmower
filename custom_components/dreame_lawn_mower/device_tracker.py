@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,15 +13,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
-from .georeference import entry_georeference
+from .georeference import current_georeference_map_index, entry_georeference
 from .runtime_data import DreameLawnMowerConfigEntry
 
 PARALLEL_UPDATES = 0
 
-# Reported accuracy in metres. The map pose itself is finer than this; the
-# bound is dominated by how well a hand-set calibration lines the map up with
-# aerial imagery. It is a conservative estimate, not a measured figure.
-LOCATION_ACCURACY_METERS = 2
+# HA's default zero means no measured accuracy is supplied. Manual alignment
+# cannot establish a metre-level accuracy bound for every garden and model.
+LOCATION_ACCURACY_METERS = 0
 
 # Only evidence that describes where the mower is now. A ``last_known`` pose
 # is history and must never be presented as the current location.
@@ -84,9 +84,16 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
 
     def _update_position(self) -> bool:
         """Recompute the position, returning whether the published one changed."""
-        georeference = entry_georeference(self.coordinator.entry)
         reader = getattr(self.coordinator.client, "current_map_position", None)
         position = reader() if callable(reader) else None
+        map_index = current_georeference_map_index(self.coordinator)
+        georeference = entry_georeference(
+            self.coordinator.entry,
+            self.coordinator.app_maps,
+            map_index
+            if position is not None and position.map_index == map_index
+            else None,
+        )
         latitude = longitude = None
         observed_at = None
         if position is None or position.status not in CURRENT_POSITION_STATUSES:
@@ -96,8 +103,17 @@ class DreameLawnMowerGpsTracker(DreameLawnMowerEntity, TrackerEntity):
             observed_at = datetime.fromtimestamp(position.observed_at, UTC).isoformat()
             if georeference is not None:
                 latitude, longitude = georeference.to_gps(position.x, position.y)
+                if (
+                    not math.isfinite(latitude)
+                    or not math.isfinite(longitude)
+                    or not -90 <= latitude <= 90
+                    or not -180 <= longitude <= 180
+                ):
+                    latitude = longitude = None
         if (latitude, longitude, status) == (
-            self._attr_latitude, self._attr_longitude, self._position_status
+            self._attr_latitude,
+            self._attr_longitude,
+            self._position_status,
         ):
             return False
         self._attr_latitude, self._attr_longitude = latitude, longitude

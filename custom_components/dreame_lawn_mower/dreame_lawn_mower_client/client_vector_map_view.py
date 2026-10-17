@@ -151,6 +151,7 @@ def geometry_map_view(
         else:
             position = vector_map_position(
                 client, vector_map, expected_generation=geometry_generation,
+                app_maps=app_maps,
             )
             position = client._place_docked_on_station(
                 position, map_index=vector_map.map_index,

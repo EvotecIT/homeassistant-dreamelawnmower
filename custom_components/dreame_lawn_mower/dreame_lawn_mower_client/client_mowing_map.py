@@ -109,6 +109,7 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         )
         vector_map_position(
             self, vector_map, expected_generation=geometry_generation,
+            app_maps=app_maps,
         )
         return build_mowing_map_scene(vector_map, style=style, label_scale=label_scale)
 

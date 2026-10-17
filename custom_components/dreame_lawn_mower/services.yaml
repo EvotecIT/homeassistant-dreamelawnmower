@@ -267,8 +267,8 @@ set_georeference:
     Store the calibration that converts native map coordinates (millimetres)
     to GPS. One map point, usually the charging station, is tied to its
     latitude and longitude; the heading is the compass direction of the map's
-    native +Y axis. Saving it does not reload the integration or reconnect the
-    mower.
+    native +Y axis. The calibration belongs to the verified current map and
+    revision. Saving it does not reload the integration or reconnect the mower.
   target:
     entity:
       integration: dreame_lawn_mower
@@ -339,8 +339,9 @@ set_georeference:
 clear_georeference:
   name: Clear map georeference
   description: >-
-    Remove the stored map-to-GPS calibration. The GPS position becomes unknown
-    until a new calibration is set. Does not reload the integration.
+    Remove the current map's stored map-to-GPS calibration, preserving other
+    maps. The derived GPS position becomes unknown until a new calibration is
+    set. Does not reload the integration.
   target:
     entity:
       integration: dreame_lawn_mower

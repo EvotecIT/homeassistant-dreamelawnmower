@@ -46,6 +46,7 @@ class _PositionFrame:
     geometry: str
     contains: Callable[[int, int], bool]
     charger: tuple[int, int] | None
+    station_revision: str | None = None
 
 
 class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
@@ -80,29 +81,13 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         self, *, map_index: int, geometry: str,
         contains: Callable[[int, int], bool], expected_generation: int | None = None,
         charger: tuple[int, int] | None = None,
+        station_revision: str | None = None,
     ) -> MowerPosition | None:
         """Commit one current observation atomically, rejecting overtaken reads."""
         with self._runtime_geometry_lock:
-            expired = self._expire_runtime_live_tracking()
             frame = (map_index, geometry)
-            if expired:
-                # Revoked identity permits labelled projection of the retained
-                # frame, never a new frame that could erase its history.
-                position = self._position_tracker.resolve(
-                    map_index=map_index, geometry=geometry, contains=contains,
-                    snapshot=self._latest_snapshot, allow_geometry_change=False,
-                )
-                if self._position_tracker.geometry == geometry:
-                    # A docked mower has no live session. Readers may still
-                    # judge against the frame the tracker accepted; the
-                    # observed frame and its fences stay untouched.
-                    self._position_frame = _PositionFrame(
-                        map_index, geometry, contains, charger,
-                    )
-                return position
+            # Judge the captured scope before expiry retires its live fields.
             if self._runtime_geometry_map_index not in (None, map_index):
-                # Reading another slot cannot claim the verified current scope,
-                # even before that scope's first geometry read has completed.
                 return None
             if (
                 expected_generation is not None
@@ -110,12 +95,29 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 and frame != self._observed_map_geometry
             ):
                 return None
+            expired = self._expire_runtime_live_tracking()
+            if expired:
+                position = self._position_tracker.resolve(
+                    map_index=map_index, geometry=geometry, contains=contains,
+                    snapshot=self._latest_snapshot, allow_geometry_change=False,
+                )
+                # A verified current station is static evidence. Remember its
+                # observed frame without renewing a live lease, admitting a
+                # packet, rebinding tracker history or restoring a trail.
+                if (
+                    station_revision is not None and charger is not None
+                    and self._observed_map_geometry in (None, frame)
+                ) or self._position_tracker.geometry == geometry:
+                    self._position_frame = _PositionFrame(
+                        map_index, geometry, contains, charger, station_revision,
+                    )
+                return position
             if frame != self._observed_map_geometry:
                 self._observed_map_geometry = frame
                 self._runtime_geometry_revision += 1
             self._bind_runtime_live_geometry(map_index, geometry)
             self._position_frame = _PositionFrame(
-                map_index, geometry, contains, charger,
+                map_index, geometry, contains, charger, station_revision,
             )
             return self._position_tracker.resolve(
                 map_index=map_index, geometry=geometry, contains=contains,
@@ -141,7 +143,11 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 or self._observed_map_geometry
                 not in (None, (frame.map_index, frame.geometry))
                 # The station is only valid in the frame the evidence is bound to.
-                or self._position_tracker.geometry != frame.geometry
+                or self._position_tracker.geometry not in (None, frame.geometry)
+                or (
+                    self._position_tracker.geometry is None
+                    and frame.station_revision is None
+                )
                 or self._runtime_geometry_map_index not in (None, frame.map_index)
                 or self._runtime_live_geometry_identity not in (None, frame.geometry)
             ):
@@ -166,10 +172,22 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         and position readers. Call it under the runtime geometry lock.
         """
         deadline = self._runtime_map_identity_expires_at
-        if not (
+        live_frame = (
             deadline is not None and deadline.timestamp() > time.time()
-            and self._runtime_geometry_map_index in (None, map_index)
             and self._observed_map_geometry == (map_index, geometry)
+        )
+        frame = self._position_frame
+        static_station_frame = (
+            frame is not None and frame.station_revision is not None
+            and (frame.map_index, frame.geometry) == (map_index, geometry)
+            and frame.charger == charger
+            and self._position_tracker.geometry in (None, geometry)
+            and self._observed_map_geometry in (None, (map_index, geometry))
+        )
+        if not (
+            (live_frame or static_station_frame)
+            and self._runtime_geometry_map_index in (None, map_index)
+            and self._runtime_live_geometry_identity in (None, geometry)
         ):
             return position
         return position_at_charger(

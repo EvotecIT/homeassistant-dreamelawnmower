@@ -1,4 +1,4 @@
-"""One stored calibration between native map coordinates and GPS.
+"""Revision-bound calibrations between native map coordinates and GPS.
 
 The calibration ties one native map point (usually the charging station) to its
 latitude and longitude, plus the compass heading of the native +Y axis and the
@@ -16,6 +16,11 @@ from typing import Any
 import voluptuous as vol
 
 from .const import CONF_GEOREFERENCE
+from .control_options import active_map_index
+from .dreame_lawn_mower_client.map_inventory import (
+    map_revision_hash,
+    selected_map_revision,
+)
 
 DEFAULT_GEOREFERENCE_SCALE = 0.001  # Native map units are millimetres.
 SERVICE_SET_GEOREFERENCE = "set_georeference"
@@ -43,7 +48,7 @@ def _finite(value: Any, name: str) -> float:
         raise ValueError(f"{name} must be a number.")
     try:
         number = float(value)
-    except (TypeError, ValueError) as err:
+    except (TypeError, ValueError, OverflowError) as err:
         raise ValueError(f"{name} must be a number.") from err
     if not math.isfinite(number):
         raise ValueError(f"{name} must be finite.")
@@ -89,9 +94,7 @@ def validate_scale(value: Any) -> float:
 def metres_per_degree(latitude: float) -> tuple[float, float]:
     """Return metres per degree of latitude and of longitude at a latitude."""
     phi = math.radians(latitude)
-    per_latitude = (
-        111132.954 - 559.822 * math.cos(2 * phi) + 1.175 * math.cos(4 * phi)
-    )
+    per_latitude = 111132.954 - 559.822 * math.cos(2 * phi) + 1.175 * math.cos(4 * phi)
     per_longitude = 111412.84 * math.cos(phi) - 93.5 * math.cos(3 * phi)
     return per_latitude, per_longitude
 
@@ -112,9 +115,7 @@ class Georeference:
         """Validate untrusted fields, raising ``ValueError`` on the first fault."""
         if not isinstance(value, Mapping):
             raise ValueError("Georeference must be a mapping.")
-        missing = [
-            key for key in GEOREFERENCE_FIELDS[:-1] if value.get(key) is None
-        ]
+        missing = [key for key in GEOREFERENCE_FIELDS[:-1] if value.get(key) is None]
         if missing:
             raise ValueError(f"Georeference is missing {', '.join(missing)}.")
         scale = value.get(ATTR_SCALE)
@@ -125,9 +126,7 @@ class Georeference:
             longitude=validate_longitude(value[ATTR_LONGITUDE]),
             heading=normalize_heading(value[ATTR_HEADING]),
             scale=(
-                DEFAULT_GEOREFERENCE_SCALE
-                if scale is None
-                else validate_scale(scale)
+                DEFAULT_GEOREFERENCE_SCALE if scale is None else validate_scale(scale)
             ),
         )
 
@@ -174,25 +173,69 @@ class Georeference:
         return self.anchor_x + dx / self.scale, self.anchor_y + dy / self.scale
 
 
-def entry_georeference(entry: Any) -> Georeference | None:
-    """Return the entry's calibration: the only reader of the stored option."""
+def current_georeference_map_index(coordinator: Any) -> int | None:
+    """Withhold alignment while a map switch or selection remains unsettled."""
+    if getattr(coordinator, "_map_switch_inventory_pending_event", None) is not None:
+        return None
+    index = active_map_index(coordinator.app_maps)
+    selected = getattr(coordinator, "selected_map_index", None)
+    return index if selected in (None, index) else None
+
+
+def entry_georeference(
+    entry: Any, app_maps: Any, map_index: int | None
+) -> Georeference | None:
+    """Read only a calibration bound to the unique verified current revision."""
+    revision = selected_map_revision(app_maps, map_index)
+    if revision is None:
+        return None
     options = getattr(entry, "options", None)
     if not isinstance(options, Mapping):
         return None
-    return Georeference.from_mapping(options.get(CONF_GEOREFERENCE))
+    stored = options.get(CONF_GEOREFERENCE)
+    maps = stored.get("maps") if isinstance(stored, Mapping) else None
+    value = maps.get(str(map_index)) if isinstance(maps, Mapping) else None
+    if not isinstance(value, Mapping) or value.get("map_revision") != revision:
+        return None
+    return Georeference.from_mapping(value)
 
 
 def store_georeference(
-    hass: Any, entry: Any, georeference: Georeference | None
+    hass: Any,
+    entry: Any,
+    georeference: Georeference | None,
+    *,
+    app_maps: Any,
+    map_index: int | None,
+    expected_map_index: int | None = None,
+    expected_map_revision: str | None = None,
 ) -> None:
-    """Save or remove the calibration; the update listener keeps the mower up."""
+    """Change only the active map calibration, rejecting stale editor context."""
+    revision = selected_map_revision(app_maps, map_index)
+    if revision is None:
+        raise ValueError("The current map revision could not be verified.")
+    if (
+        expected_map_index is not None
+        and expected_map_index != map_index
+        or expected_map_revision is not None
+        and expected_map_revision != revision
+    ):
+        raise ValueError("The map changed. Reopen alignment before saving.")
     options = dict(entry.options)
+    stored = options.get(CONF_GEOREFERENCE)
+    existing = stored.get("maps") if isinstance(stored, Mapping) else None
+    maps = dict(existing) if isinstance(existing, Mapping) else {}
+    key = str(map_index)
     if georeference is None:
-        if CONF_GEOREFERENCE not in options:
+        if key not in maps:
             return
-        options.pop(CONF_GEOREFERENCE)
+        maps.pop(key)
     else:
-        options[CONF_GEOREFERENCE] = georeference.as_dict()
+        maps[key] = {**georeference.as_dict(), "map_revision": revision}
+    if maps:
+        options[CONF_GEOREFERENCE] = {"maps": maps}
+    else:
+        options.pop(CONF_GEOREFERENCE, None)
     hass.config_entries.async_update_entry(entry, options=options)
 
 
@@ -224,11 +267,31 @@ SET_GEOREFERENCE_SCHEMA: dict[str | vol.Marker, Any] = {
 }
 
 
+def _map_index(value: Any) -> int:
+    if type(value) is not int or value < 0:
+        raise vol.Invalid("Map index must be a non-negative integer.")
+    return value
+
+
+def _map_revision(value: Any) -> str:
+    revision = map_revision_hash(value)
+    if revision is None:
+        raise vol.Invalid("Map revision must be a 32-digit hexadecimal hash.")
+    return revision
+
+
+MAP_CONTEXT_SCHEMA: dict[str | vol.Marker, Any] = {
+    vol.Optional("map_index"): _map_index,
+    vol.Optional("map_revision"): _map_revision,
+}
+SET_GEOREFERENCE_SCHEMA.update(MAP_CONTEXT_SCHEMA)
+
+
 def register_georeference_services(platform: Any) -> None:
     """Register the calibration actions on the mower entity platform."""
     platform.async_register_entity_service(
         SERVICE_SET_GEOREFERENCE, SET_GEOREFERENCE_SCHEMA, "async_set_georeference"
     )
     platform.async_register_entity_service(
-        SERVICE_CLEAR_GEOREFERENCE, {}, "async_clear_georeference"
+        SERVICE_CLEAR_GEOREFERENCE, MAP_CONTEXT_SCHEMA, "async_clear_georeference"
     )
