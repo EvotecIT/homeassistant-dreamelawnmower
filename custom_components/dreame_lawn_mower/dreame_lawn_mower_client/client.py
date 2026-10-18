@@ -364,6 +364,12 @@ _SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | 
 }
 _TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS = (0.5, 2.0, 5.0, 9.0, 12.0, 14.5)
 _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS = 15.0
+# Bounded wait while an acknowledged start drives from the station to its
+# target; measured transits are well below this.
+_TARGETED_TASK_TRANSIT_TIMEOUT_SECONDS = 120.0
+_TARGETED_TASK_TRANSIT_POLL_SECONDS = 5.0
+# Keep a read plus the polling delay below the queued-control admission budget.
+_TARGETED_TASK_TRANSIT_READ_TIMEOUT_SECONDS = 5.0
 _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS = 20.0
 _TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS = 0.5
 _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS = 2.0
@@ -1265,12 +1271,76 @@ class DreameLawnMowerClient(
             ):
                 return
 
+        transit_refresh_failed = False
+        if original_error is None:
+            transit_deadline = started_at + _TARGETED_TASK_TRANSIT_TIMEOUT_SECONDS
+            while (
+                last_fresh_snapshot is not None
+                and not conflicting_task_seen
+                and _task_confirmation.acknowledged_task_in_transit(
+                    last_fresh_snapshot, baseline, expected_operation,
+                    requested_target_ids,
+                )
+            ):
+                if self._task_control_admission_gate.locked():
+                    if transit_refresh_failed:
+                        break
+                    # A newer control (pause, dock, stop) is waiting. The start
+                    # was acknowledged and is under way; yield to it.
+                    _LOGGER.warning(
+                        "The mower acknowledged %s and is driving to its task; "
+                        "a newer control takes over before the task is published.",
+                        label,
+                    )
+                    return
+                remaining = transit_deadline - loop.time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(
+                    min(_TARGETED_TASK_TRANSIT_POLL_SECONDS, remaining)
+                )
+                read_budget = min(
+                    _TARGETED_TASK_TRANSIT_READ_TIMEOUT_SECONDS,
+                    transit_deadline - loop.time(),
+                )
+                if read_budget <= 0:
+                    break
+                try:
+                    async with asyncio.timeout(read_budget):
+                        snapshot = await self._async_refresh_authoritative_snapshot(
+                            deadline=time.monotonic() + read_budget,
+                        )
+                except (DreameLawnMowerConnectionError, TimeoutError):
+                    transit_refresh_failed = True
+                    continue
+                transit_refresh_failed = False
+                last_fresh_snapshot = snapshot
+                conflicting_task_seen = (
+                    _task_confirmation.targeted_task_conflicts(
+                        snapshot, expected_operation, requested_target_ids
+                    )
+                )
+                if _targeted_task_confirmed(
+                    snapshot,
+                    baseline,
+                    expected_statuses,
+                    expected_operation=expected_operation,
+                    requested_target_ids=requested_target_ids,
+                ):
+                    return
+
         if original_error is not None:
             raise DreameLawnMowerConnectionError(
                 f"The mower may have received the {label} request, but its exact "
                 "targeted task could not be confirmed after the connection was "
                 "interrupted. Refresh the mower state before trying again."
             ) from original_error
+        if transit_refresh_failed:
+            raise DreameLawnMowerConnectionError(
+                f"The mower acknowledged the {label} request, but fresh task "
+                "readback failed during station departure. Check the mower "
+                "state before retrying."
+            )
         if (
             last_fresh_snapshot is not None
             and not conflicting_task_seen

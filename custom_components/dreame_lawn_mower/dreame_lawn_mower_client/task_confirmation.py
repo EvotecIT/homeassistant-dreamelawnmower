@@ -47,3 +47,31 @@ def acknowledged_task_started_without_metadata(
         and snapshot.task_region_ids is None
         and snapshot.task_area_ids is None
     )
+
+
+# A zone start can drive from the station to its zone before the task is
+# published; the LiDAX Ultra reports "starting" with a remote-control state
+# for that leg.
+TRANSIT_STATES = frozenset({"mowing", "remote_control"})
+
+
+def acknowledged_task_in_transit(
+    snapshot: DreameLawnMowerSnapshot,
+    baseline: DreameLawnMowerSnapshot,
+    expected_operation: int,
+    requested_target_ids: frozenset[int] | None,
+) -> bool:
+    """Recognize a mower leaving its station toward a not yet published task.
+
+    This only extends the wait for the requested task. Published metadata
+    that names another mode or other targets is never in transit.
+    """
+    return bool(
+        baseline.mowing_session_active is False
+        and baseline.activity in {"docked", "idle"}
+        and snapshot.task_status == "starting"
+        and snapshot.state in TRANSIT_STATES
+        and not targeted_task_conflicts(
+            snapshot, expected_operation, requested_target_ids
+        )
+    )
