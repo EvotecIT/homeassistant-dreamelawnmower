@@ -302,3 +302,98 @@ def test_station_without_transit_still_fails_after_the_short_window() -> None:
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="did not enter"):
         _run(client, client.async_start_zone_mowing([2]))
     assert client._async_refresh_authoritative_snapshot.await_count == 7
+
+
+def test_failed_transit_reads_cannot_confirm_an_old_departure(monkeypatch) -> None:
+    monkeypatch.setattr(client_module, "_TARGETED_TASK_TRANSIT_POLL_SECONDS", 0.002)
+    monkeypatch.setattr(client_module, "_TARGETED_TASK_TRANSIT_TIMEOUT_SECONDS", 0.04)
+    client = _client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+    reads = 0
+
+    async def readback(**kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return _snapshot()
+        if reads <= 7:
+            return _leaving_station()
+        raise DreameLawnMowerConnectionError("link unavailable")
+
+    client._async_refresh_authoritative_snapshot = readback
+    with pytest.raises(DreameLawnMowerConnectionError):
+        _run(client, client.async_start_zone_mowing([2]))
+    assert reads > 7
+
+
+@pytest.mark.usefixtures("_fast_transit")
+def test_transit_can_recover_with_a_new_authoritative_task() -> None:
+    client = _client()
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+    client._async_refresh_authoritative_snapshot = AsyncMock(side_effect=[
+        _snapshot(), *[_driving_to_zone() for _ in range(6)],
+        DreameLawnMowerConnectionError("temporary read failure"), _zone_two_mowing(),
+    ])
+    assert _run(client, client.async_start_zone_mowing([2])) == {"r": 0}
+
+
+@pytest.mark.usefixtures("_fast_transit")
+def test_queued_pause_outlives_a_stalled_transit_read(monkeypatch) -> None:
+    monkeypatch.setattr(
+        client_module, "_TARGETED_TASK_TRANSIT_READ_TIMEOUT_SECONDS", 0.02,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client_task_control._WAIT_TIMEOUT_SECONDS", 0.15,
+    )
+    dispatch_pause = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client_device_actions.async_run_device_plan", dispatch_pause,
+    )
+
+    async def scenario():
+        client = _client()
+        client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
+        entered = asyncio.Event()
+        cancelled = asyncio.Event()
+        never = asyncio.Event()
+        reads = 0
+
+        async def readback(**kwargs):
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                return _snapshot()
+            if reads <= 7:
+                return _driving_to_zone()
+            entered.set()
+            try:
+                await never.wait()
+            finally:
+                cancelled.set()
+
+        client._async_refresh_authoritative_snapshot = readback
+        start = asyncio.create_task(client.async_start_zone_mowing([2]))
+        pause = None
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            pause = asyncio.create_task(client.async_pause())
+            await asyncio.wait_for(pause, 0.5)
+            result = (await asyncio.gather(start, return_exceptions=True))[0]
+            assert isinstance(result, DreameLawnMowerConnectionError)
+            assert cancelled.is_set()
+            dispatch_pause.assert_awaited_once()
+            assert not client._task_control_gate.locked()
+        finally:
+            for task in (start, pause):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *[task for task in (start, pause) if task is not None],
+                return_exceptions=True,
+            )
+            await client.async_close()
+
+    asyncio.run(scenario())

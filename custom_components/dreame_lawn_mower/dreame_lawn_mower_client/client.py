@@ -368,6 +368,8 @@ _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS = 15.0
 # target; measured transits are well below this.
 _TARGETED_TASK_TRANSIT_TIMEOUT_SECONDS = 120.0
 _TARGETED_TASK_TRANSIT_POLL_SECONDS = 5.0
+# Keep a read plus the polling delay below the queued-control admission budget.
+_TARGETED_TASK_TRANSIT_READ_TIMEOUT_SECONDS = 5.0
 _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS = 20.0
 _TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS = 0.5
 _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS = 2.0
@@ -1269,6 +1271,7 @@ class DreameLawnMowerClient(
             ):
                 return
 
+        transit_refresh_failed = False
         if original_error is None:
             transit_deadline = started_at + _TARGETED_TASK_TRANSIT_TIMEOUT_SECONDS
             while (
@@ -1280,6 +1283,8 @@ class DreameLawnMowerClient(
                 )
             ):
                 if self._task_control_admission_gate.locked():
+                    if transit_refresh_failed:
+                        break
                     # A newer control (pause, dock, stop) is waiting. The start
                     # was acknowledged and is under way; yield to it.
                     _LOGGER.warning(
@@ -1294,13 +1299,21 @@ class DreameLawnMowerClient(
                 await asyncio.sleep(
                     min(_TARGETED_TASK_TRANSIT_POLL_SECONDS, remaining)
                 )
+                read_budget = min(
+                    _TARGETED_TASK_TRANSIT_READ_TIMEOUT_SECONDS,
+                    transit_deadline - loop.time(),
+                )
+                if read_budget <= 0:
+                    break
                 try:
-                    snapshot = await self._async_refresh_authoritative_snapshot(
-                        deadline=time.monotonic()
-                        + max(transit_deadline - loop.time(), 0),
-                    )
-                except DreameLawnMowerConnectionError:
+                    async with asyncio.timeout(read_budget):
+                        snapshot = await self._async_refresh_authoritative_snapshot(
+                            deadline=time.monotonic() + read_budget,
+                        )
+                except (DreameLawnMowerConnectionError, TimeoutError):
+                    transit_refresh_failed = True
                     continue
+                transit_refresh_failed = False
                 last_fresh_snapshot = snapshot
                 conflicting_task_seen = (
                     _task_confirmation.targeted_task_conflicts(
@@ -1322,6 +1335,12 @@ class DreameLawnMowerClient(
                 "targeted task could not be confirmed after the connection was "
                 "interrupted. Refresh the mower state before trying again."
             ) from original_error
+        if transit_refresh_failed:
+            raise DreameLawnMowerConnectionError(
+                f"The mower acknowledged the {label} request, but fresh task "
+                "readback failed during station departure. Check the mower "
+                "state before retrying."
+            )
         if (
             last_fresh_snapshot is not None
             and not conflicting_task_seen
