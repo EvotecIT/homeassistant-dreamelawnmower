@@ -16,6 +16,7 @@ from custom_components.dreame_lawn_mower.performance import (
 )
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_generation,
 )
 
 
@@ -172,7 +173,10 @@ def test_background_map_read_cannot_revive_an_evicted_snapshot(transition):
                 is coordinator.data
             )
             coordinator.client.update_runtime_live_tracking.assert_called_once_with(
-                blob, active=True, map_index=0
+                blob, active=True, map_index=0,
+                mission_generation=runtime_mission_session_generation(
+                    coordinator.runtime_telemetry_cache
+                ),
             )
         else:
             coordinator.client.update_runtime_live_tracking.assert_not_called()

@@ -38,6 +38,7 @@ from custom_components.dreame_lawn_mower.preference_cache import (
 )
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_generation,
 )
 
 
@@ -582,7 +583,7 @@ def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
             side_effect=lambda **_: events.append("runtime") or status_blob
         ),
         async_get_bluetooth_connected=AsyncMock(return_value=False),
-        update_runtime_live_tracking=lambda value, *, active, map_index=None: (
+        update_runtime_live_tracking=lambda value, *, active, map_index=None, **_: (
             events.append("tracking"),
             tracking_updates.append((value, active, map_index)),
         ),
@@ -637,7 +638,7 @@ def test_active_runtime_tracking_survives_status_blob_failure() -> None:
             side_effect=RuntimeError("telemetry unavailable")
         ),
         async_get_bluetooth_connected=AsyncMock(return_value=False),
-        update_runtime_live_tracking=lambda value, *, active, map_index=None: (
+        update_runtime_live_tracking=lambda value, *, active, map_index=None, **_: (
             tracking_updates.append((value, active, map_index))
         ),
     )
@@ -690,7 +691,7 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
         async_get_cached_snapshot=AsyncMock(return_value=snapshot),
         async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
         async_get_bluetooth_connected=AsyncMock(return_value=True),
-        update_runtime_live_tracking=lambda value, *, active, map_index=None: (
+        update_runtime_live_tracking=lambda value, *, active, map_index=None, **_: (
             tracking_updates.append((value, active, map_index))
         ),
     )
@@ -1381,6 +1382,9 @@ def test_cached_device_update_waits_for_verified_active_map_identity() -> None:
         status_blob,
         active=True,
         map_index=None,
+        mission_generation=runtime_mission_session_generation(
+            coordinator.runtime_telemetry_cache
+        ),
     )
 
 

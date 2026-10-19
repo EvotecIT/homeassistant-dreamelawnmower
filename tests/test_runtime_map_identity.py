@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.performance import (
 )
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_generation,
 )
 
 
@@ -163,7 +164,10 @@ def test_active_tracking_does_not_wait_for_geometry_download():
             )
             assert not hydration.done()
             coordinator.client.update_runtime_live_tracking.assert_called_once_with(
-                None, active=True, map_index=2
+                None, active=True, map_index=2,
+                mission_generation=runtime_mission_session_generation(
+                    coordinator.runtime_telemetry_cache
+                ),
             )
         finally:
             release.set()

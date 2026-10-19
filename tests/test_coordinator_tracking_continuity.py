@@ -15,6 +15,7 @@ from custom_components.dreame_lawn_mower.performance import (
 )
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_generation,
 )
 
 
@@ -125,7 +126,10 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
         assert coordinator._snapshot_for_publication(original) is coordinator.data
         if transition == "pose":
             coordinator.client.update_runtime_live_tracking.assert_called_once_with(
-                blob, active=True, map_index=0
+                blob, active=True, map_index=0,
+                mission_generation=runtime_mission_session_generation(
+                    coordinator.runtime_telemetry_cache
+                ),
             )
             assert coordinator.runtime_status_blob is blob
             assert coordinator.runtime_telemetry_cache.blob is blob
