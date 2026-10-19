@@ -243,7 +243,7 @@ def mowing_map_overlay(
         # Retain recent segments, never joining across invalid points or gaps.
         remaining = MAX_TRAIL_POINTS
         retained: list[list[list[int]]] = []
-        for segment in reversed(track_segments[-64:]):
+        for segment in reversed(track_segments):
             if remaining < 2:
                 break
             part: list[list[int]] = []

@@ -953,6 +953,9 @@ class DreameLawnMowerCoordinator(
                         self.runtime_status_blob,
                         active=runtime_active,
                         map_index=runtime_map_index,
+                        mission_generation=runtime_mission_session_generation(
+                            self.runtime_telemetry_cache
+                        ),
                     )
                 except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
                     runtime_status_error = err
@@ -966,6 +969,9 @@ class DreameLawnMowerCoordinator(
                     None,
                     active=runtime_active,
                     map_index=runtime_map_index,
+                    mission_generation=runtime_mission_session_generation(
+                        self.runtime_telemetry_cache
+                    ),
                 )
 
             if bluetooth_error is None:

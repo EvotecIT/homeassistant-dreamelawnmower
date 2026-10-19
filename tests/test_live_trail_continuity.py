@@ -297,3 +297,85 @@ def test_native_camera_and_scene_share_recovered_session_trail(monkeypatch):
         assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 5
 
     asyncio.run(read())
+
+
+
+def _label_mission(client, generation):
+    """Fresh telemetry of the current mission, adding no trail of its own."""
+    blob = replace(
+        a1_pro_packet(), received_at=datetime.now(UTC).isoformat(),
+        hex=f"mission-{generation}", candidate_runtime_track_segments=(),
+    )
+    client.update_runtime_live_tracking(
+        blob, active=True, map_index=0, mission_generation=generation,
+    )
+
+
+def _dock_an_hour_ago(client):
+    """A charging pause: the mower docked an hour ago, its mission still open."""
+    owner = import_module(client.update_runtime_live_tracking.__module__)
+    with patch.object(owner, "datetime") as clock:
+        clock.now.return_value = datetime.now(UTC) - timedelta(hours=1)
+        client.update_runtime_live_tracking(None, active=False)
+
+
+def _resume(client, generation, **changes):
+    _renew(client)
+    blob = replace(
+        a1_pro_packet(), received_at=datetime.now(UTC).isoformat(), hex="after-dock",
+        candidate_runtime_track_segments=(((200, 100), (300, 100)),), **changes,
+    )
+    client.update_runtime_live_tracking(
+        blob, active=True, map_index=0, mission_generation=generation,
+    )
+
+
+@pytest.mark.parametrize("reader", ["camera", "cached_scene"])
+def test_same_mission_trail_survives_a_long_recharge(reader):
+    client = tracked_client()
+    _label_mission(client, 7)
+    scene = _scene(client)
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 3
+    _dock_an_hour_ago(client)
+    assert client.mowing_map_runtime_overlay(scene)["trail"] == []
+    _resume(client, 7)
+    if reader == "camera":
+        details = client._sync_get_vector_map_details()
+        assert details["runtime_track_point_count"] == 5
+    else:
+        overlay = client.mowing_map_runtime_overlay(scene)
+        assert sum(map(len, overlay["trail"])) == 5
+
+
+@pytest.mark.parametrize("boundary", [
+    "new_mission", "new_task", "unlabelled", "too_old",
+])
+def test_recharge_never_attaches_a_trail_to_another_mission(boundary):
+    client = tracked_client()
+    if boundary != "unlabelled":
+        _label_mission(client, 7)
+    scene = _scene(client)
+    if boundary == "too_old":
+        owner = import_module(client.update_runtime_live_tracking.__module__)
+        with patch.object(owner, "datetime") as clock:
+            clock.now.return_value = datetime.now(UTC) - timedelta(hours=25)
+            client.update_runtime_live_tracking(None, active=False)
+    else:
+        _dock_an_hour_ago(client)
+    _resume(
+        client, 8 if boundary == "new_mission" else 7,
+        **({"candidate_runtime_task_id": 101} if boundary == "new_task" else {}),
+    )
+    overlay = client.mowing_map_runtime_overlay(scene)
+    assert sum(map(len, overlay["trail"])) == 2
+
+
+def test_trail_budget_counts_points_not_packets():
+    client = tracked_client()
+    scene = _scene(client)
+    for index in range(200):
+        publish(client, hex=f"segment-{index}", candidate_runtime_track_segments=(
+            ((100 + index, 100), (101 + index, 100)),
+        ))
+    # The former 64-segment cap kept only the last 64 packets of a session.
+    assert len(client.mowing_map_runtime_overlay(scene)["trail"]) > 64
