@@ -741,7 +741,7 @@ def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
     client = _client()
     payload = {
         "map": [
-            {"id": 7, "name": "Front", "data": [[1, 2]]},
+            {"id": 7, "name": "Front", "data": [[1, 2]], "area": 152.236},
             {"id": 8, "name": "Deleted zone", "data": [[3, 4]]},
             {"id": 9, "name": "Path", "type": 1, "data": [[5, 6]]},
             {"id": 200, "name": "Connector", "data": [[7, 8]]},
@@ -757,11 +757,12 @@ def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
 
     first = client._sync_get_app_maps(include_payload=False, include_objects=False)
     assert first["maps"][0]["summary"]["zones"] == [
-        {"zone_id": 7, "name": "Front"},
+        {"zone_id": 7, "name": "Front", "area_m2": 152.24},
         {"zone_id": 8, "name": "Deleted zone"},
         {"zone_id": 300, "name": "Orchard"},
     ]
     assert current_zone_entries(None, first, vector_details)[0]["label"] == "Front (#7)"
+    assert current_zone_entries(None, first, vector_details)[0]["area_m2"] == 152.24
     payload["map"][0]["name"] = "Courtyard"
     cloud.payload_text = json.dumps(payload, separators=(",", ":"))
     cloud.payload_hash = hashlib.md5(cloud.payload_text.encode()).hexdigest()
