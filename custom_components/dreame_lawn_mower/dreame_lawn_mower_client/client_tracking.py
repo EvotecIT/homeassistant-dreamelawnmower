@@ -11,11 +11,33 @@ from typing import TYPE_CHECKING
 
 from .client_transport import _DreameLawnMowerClientTransport
 from .models import DreameLawnMowerStatusBlob
+from .mowing_map import MAX_TRAIL_POINTS
 from .position_tracking import (
     POSITION_MAX_AGE_SECONDS,
     position_at_charger,
     position_timestamp,
 )
+
+# A same-mission trail survives a recharge, which can last hours. The mission
+# generation, task id and coordinate frame must all still match to recover it.
+TRAIL_MISSION_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+def bounded_runtime_trail(
+    segments: tuple[tuple[tuple[int, int], ...], ...],
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    """Keep the newest whole segments that fit the map's trail point budget.
+
+    Packets carry short segments, so a segment count dropped most of a long
+    mowing session. The map overlay applies the same point budget.
+    """
+    total = 0
+    for start in range(len(segments) - 1, -1, -1):
+        total += len(segments[start])
+        if total > MAX_TRAIL_POINTS:
+            return segments[start + 1:]
+    return segments
+
 
 if TYPE_CHECKING:
     from .models import DreameLawnMowerSnapshot
@@ -32,6 +54,9 @@ class _RuntimeTrailCheckpoint:
     geometry: str
     segments: tuple[tuple[tuple[int, int], ...], ...]
     suspended_at: float
+    # The host's mission generation when known. Only a labelled checkpoint may
+    # wait through a recharge; an unlabelled one keeps the short recovery gap.
+    mission_generation: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +84,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     _runtime_live_track_segments: tuple[tuple[tuple[int, int], ...], ...]
     _runtime_live_map_index: int | None
     _runtime_live_task_id: int | None
+    _runtime_mission_generation: int | None = None
     _runtime_trail_checkpoint: _RuntimeTrailCheckpoint | None = None
     _runtime_live_packet_admitted: bool = False
     _position_frame: _PositionFrame | None = None
@@ -220,10 +246,27 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 suspended_at = min(
                     suspended_at, self._runtime_map_identity_expires_at.timestamp(),
                 )
+            segments = self._runtime_live_track_segments
+            previous = self._runtime_trail_checkpoint
+            if (
+                previous is not None
+                and previous.mission_generation is not None
+                and (
+                    previous.map_index, previous.task_id, previous.geometry,
+                    previous.mission_generation,
+                ) == (
+                    self._runtime_live_map_index, self._runtime_live_task_id,
+                    self._runtime_live_geometry_identity,
+                    self._runtime_mission_generation,
+                )
+            ):
+                # An unrecovered earlier part of the same mission stays first.
+                segments = (*previous.segments, *segments)
             self._runtime_trail_checkpoint = _RuntimeTrailCheckpoint(
                 self._runtime_live_map_index, self._runtime_live_task_id,
-                self._runtime_live_geometry_identity, self._runtime_live_track_segments,
-                suspended_at,
+                self._runtime_live_geometry_identity,
+                bounded_runtime_trail(segments), suspended_at,
+                self._runtime_mission_generation,
             )
 
     def _restore_runtime_trail(self, map_index: int, geometry: str) -> None:
@@ -231,9 +274,18 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         checkpoint = self._runtime_trail_checkpoint
         if checkpoint is None:
             return
+        max_age = (
+            TRAIL_MISSION_MAX_AGE_SECONDS
+            if checkpoint.mission_generation is not None
+            else POSITION_MAX_AGE_SECONDS
+        )
         if (
             not 0 <= datetime.now(UTC).timestamp() - checkpoint.suspended_at
-            <= POSITION_MAX_AGE_SECONDS
+            <= max_age
+            or (
+                checkpoint.mission_generation is not None
+                and checkpoint.mission_generation != self._runtime_mission_generation
+            )
             or map_index != checkpoint.map_index
             or geometry != checkpoint.geometry
             or self._runtime_session_active is not True
@@ -256,9 +308,9 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             or observed_at <= checkpoint.suspended_at
         ):
             return
-        self._runtime_live_track_segments = (
+        self._runtime_live_track_segments = bounded_runtime_trail((
             *checkpoint.segments, *self._runtime_live_track_segments,
-        )[-64:]
+        ))
         self._runtime_trail_checkpoint = None
 
     @property
@@ -361,9 +413,25 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         *,
         active: bool,
         map_index: int | None = None,
+        mission_generation: int | None = None,
     ) -> None:
-        """Publish telemetry against the same lock as geometry observations."""
+        """Publish telemetry against the same lock as geometry observations.
+
+        ``mission_generation`` is the host's mission boundary. When supplied,
+        a trail suspended by docking (a recharge) is kept and recovered only if
+        the same mission, task and frame resume.
+        """
         with self._runtime_geometry_lock:
+            if active and mission_generation is not None:
+                if (
+                    self._runtime_mission_generation is not None
+                    and self._runtime_mission_generation != mission_generation
+                ):
+                    self._runtime_live_track_segments = ()
+                    self._runtime_trail_checkpoint = None
+                    self._runtime_live_task_id = None
+                    self._last_runtime_track_blob_hex = None
+                self._runtime_mission_generation = mission_generation
             self._update_runtime_live_tracking(
                 status_blob, active=active, map_index=map_index,
             )
@@ -395,11 +463,18 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
             self._latest_runtime_status_blob = (
                 status_blob if map_index is not None else None
             )
+        if not active and self._runtime_mission_generation is not None:
+            # Docking for a recharge: suspend the observed trail while the
+            # session is still marked active, labelled with its mission.
+            self._remember_runtime_trail()
         self._runtime_session_active = active
         if not active or map_index is None:
             if active:
                 self._remember_runtime_trail()
-            else:
+            elif (
+                self._runtime_trail_checkpoint is not None
+                and self._runtime_trail_checkpoint.mission_generation is None
+            ):
                 self._runtime_trail_checkpoint = None
             self._runtime_live_track_segments = ()
             # Consume unscoped packets so recovery cannot rebind their cached
@@ -459,7 +534,8 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 for segment in segments if len(segment) >= 2
             ),
         )
-        if len(self._runtime_live_track_segments) > 64:
-            self._runtime_live_track_segments = self._runtime_live_track_segments[-64:]
+        self._runtime_live_track_segments = bounded_runtime_trail(
+            self._runtime_live_track_segments
+        )
         if blob_hex:
             self._last_runtime_track_blob_hex = blob_hex

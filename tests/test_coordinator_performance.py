@@ -37,6 +37,7 @@ from custom_components.dreame_lawn_mower.performance import (
 )
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_generation,
 )
 from custom_components.dreame_lawn_mower.schedule_cache import (
     ScheduleActionReadBackoff,
@@ -866,6 +867,9 @@ def test_active_session_reuses_verified_map_identity_between_polls() -> None:
             status_blob,
             active=True,
             map_index=2,
+            mission_generation=runtime_mission_session_generation(
+                coordinator.runtime_telemetry_cache
+            ),
         )
 
     asyncio.run(scenario())
@@ -906,6 +910,9 @@ def test_failed_due_map_refresh_does_not_stamp_runtime_with_stale_identity() -> 
             status_blob,
             active=True,
             map_index=None,
+            mission_generation=runtime_mission_session_generation(
+                coordinator.runtime_telemetry_cache
+            ),
         )
         assert coordinator._runtime_map_identity_verified is False
 

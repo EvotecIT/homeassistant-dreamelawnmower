@@ -15,6 +15,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_protocol i
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
+    MAX_TRAIL_POINTS,
+)
 
 from .test_app_action_live_map import (
     a1_pro_packet,
@@ -297,3 +300,126 @@ def test_native_camera_and_scene_share_recovered_session_trail(monkeypatch):
         assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 5
 
     asyncio.run(read())
+
+
+def _label_mission(client, generation):
+    """Fresh telemetry of the current mission, adding no trail of its own."""
+    blob = replace(
+        a1_pro_packet(), received_at=datetime.now(UTC).isoformat(),
+        hex=f"mission-{generation}", candidate_runtime_track_segments=(),
+    )
+    client.update_runtime_live_tracking(
+        blob, active=True, map_index=0, mission_generation=generation,
+    )
+
+
+def _dock_an_hour_ago(client):
+    """A charging pause: the mower docked an hour ago, its mission still open."""
+    owner = import_module(client.update_runtime_live_tracking.__module__)
+    with patch.object(owner, "datetime") as clock:
+        clock.now.return_value = datetime.now(UTC) - timedelta(hours=1)
+        client.update_runtime_live_tracking(None, active=False)
+
+
+def _resume(client, generation, **changes):
+    _renew(client)
+    blob = replace(
+        a1_pro_packet(), received_at=datetime.now(UTC).isoformat(), hex="after-dock",
+        candidate_runtime_track_segments=(((200, 100), (300, 100)),), **changes,
+    )
+    client.update_runtime_live_tracking(
+        blob, active=True, map_index=0, mission_generation=generation,
+    )
+
+
+@pytest.mark.parametrize("reader", ["camera", "cached_scene"])
+def test_same_mission_trail_survives_a_long_recharge(reader):
+    client = tracked_client()
+    _label_mission(client, 7)
+    scene = _scene(client)
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 3
+    _dock_an_hour_ago(client)
+    assert client.mowing_map_runtime_overlay(scene)["trail"] == []
+    _resume(client, 7)
+    if reader == "camera":
+        details = client._sync_get_vector_map_details()
+        assert details["runtime_track_point_count"] == 5
+    else:
+        overlay = client.mowing_map_runtime_overlay(scene)
+        assert sum(map(len, overlay["trail"])) == 5
+
+
+@pytest.mark.parametrize("boundary", [
+    "new_mission", "new_task", "unlabelled", "too_old",
+])
+def test_recharge_never_attaches_a_trail_to_another_mission(boundary):
+    client = tracked_client()
+    if boundary != "unlabelled":
+        _label_mission(client, 7)
+    scene = _scene(client)
+    if boundary == "too_old":
+        owner = import_module(client.update_runtime_live_tracking.__module__)
+        with patch.object(owner, "datetime") as clock:
+            clock.now.return_value = datetime.now(UTC) - timedelta(hours=25)
+            client.update_runtime_live_tracking(None, active=False)
+    else:
+        _dock_an_hour_ago(client)
+    _resume(
+        client, 8 if boundary == "new_mission" else 7,
+        **({"candidate_runtime_task_id": 101} if boundary == "new_task" else {}),
+    )
+    overlay = client.mowing_map_runtime_overlay(scene)
+    assert sum(map(len, overlay["trail"])) == 2
+
+
+def test_trail_budget_counts_points_not_packets():
+    client = tracked_client()
+    scene = _scene(client)
+    for index in range(200):
+        publish(client, hex=f"segment-{index}", candidate_runtime_track_segments=(
+            ((100 + index, 100), (101 + index, 100)),
+        ))
+    # The former 64-segment cap kept only the last 64 packets of a session.
+    assert len(client.mowing_map_runtime_overlay(scene)["trail"]) > 64
+
+
+@pytest.mark.parametrize("task_id", [100, None])
+@pytest.mark.parametrize("same_bytes", [False, True])
+def test_active_mission_replacement_starts_a_new_trail(task_id, same_bytes):
+    """A fresh mission cannot inherit history even when task identity repeats."""
+    client = tracked_client()
+    _label_mission(client, 7)
+    scene = _scene(client)
+    packet_hex = client._last_runtime_track_blob_hex if same_bytes else "replacement"
+    blob = replace(
+        a1_pro_packet(), received_at=datetime.now(UTC).isoformat(), hex=packet_hex,
+        candidate_runtime_task_id=task_id,
+        candidate_runtime_track_segments=(((200, 100), (300, 100)),),
+    )
+    client.update_runtime_live_tracking(
+        blob, active=True, map_index=0, mission_generation=8,
+    )
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 2
+    # A subsequent recharge cannot preserve the prior mission under its new label.
+    _dock_an_hour_ago(client)
+    _resume(client, 8)
+    expected_points = 4 if task_id is not None else 2
+    overlay = client.mowing_map_runtime_overlay(scene)
+    assert sum(map(len, overlay["trail"])) == expected_points
+
+
+def test_long_mission_stays_within_point_budget_after_recharge():
+    """Both retained history and the displayed overlay honor the point limit."""
+    client = tracked_client()
+    _label_mission(client, 7)
+    scene = _scene(client)
+    for index in range(MAX_TRAIL_POINTS // 2 + 10):
+        publish(client, hex=f"budget-{index}", candidate_runtime_track_segments=(
+            ((100, 100), (200, 100)),
+        ))
+    _dock_an_hour_ago(client)
+    _resume(client, 7)
+    details = client._sync_get_vector_map_details()
+    assert details["runtime_track_point_count"] == MAX_TRAIL_POINTS
+    overlay = client.mowing_map_runtime_overlay(scene)
+    assert sum(map(len, overlay["trail"])) == MAX_TRAIL_POINTS

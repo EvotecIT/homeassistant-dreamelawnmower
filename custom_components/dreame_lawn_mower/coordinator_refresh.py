@@ -570,6 +570,9 @@ class DreameLawnMowerRefreshMixin:
                 self.runtime_status_blob,
                 active=runtime_active,
                 map_index=runtime_map_index,
+                mission_generation=runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                ),
             )
             return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
@@ -597,6 +600,9 @@ class DreameLawnMowerRefreshMixin:
                 None,
                 active=runtime_active,
                 map_index=runtime_map_index,
+                mission_generation=runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                ),
             )
             return True
 
