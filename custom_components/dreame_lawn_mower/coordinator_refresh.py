@@ -334,7 +334,7 @@ class DreameLawnMowerRefreshMixin:
             self,
             "_runtime_map_identity_verified",
             False,
-        )
+        ) or self._runtime_map_identity_renewal_due()
         mission_generation = runtime_mission_session_generation(
             self.runtime_telemetry_cache
         )
@@ -911,7 +911,10 @@ class DreameLawnMowerRefreshMixin:
             snapshot is not None
             and snapshot.available
             and runtime_tracking_active(snapshot)
-            and not getattr(self, "_runtime_map_identity_verified", False)
+            and (
+                not getattr(self, "_runtime_map_identity_verified", False)
+                or self._runtime_map_identity_renewal_due()
+            )
         ):
             await self._async_refresh_active_runtime(cycle, snapshot)
         return await self.async_refresh_app_maps(force=False)

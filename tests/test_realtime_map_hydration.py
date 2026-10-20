@@ -97,6 +97,49 @@ def test_realtime_update_renews_active_map_identity_before_it_lapses(
         coordinator._schedule_metadata_refresh.assert_not_called()
 
 
+@pytest.mark.parametrize("lease_age", [10, 45])
+def test_background_refresh_renews_due_verified_map_lease(monkeypatch, lease_age):
+    """The scheduled owner reads MAPL before expiry and extends client scope."""
+    from datetime import timedelta
+
+    from custom_components.dreame_lawn_mower import coordinator_refresh
+
+    async def scenario():
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        snapshot = SimpleNamespace(
+            available=True, activity="mowing", mowing_session_active=True,
+        )
+        coordinator.data = snapshot
+        coordinator.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
+        coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_identity_generation = 1
+        coordinator._runtime_active_map_index = 0
+        before = datetime.now(UTC) - timedelta(seconds=lease_age)
+        coordinator._runtime_map_index_refreshed_at = before
+        coordinator.app_maps = {"current_map_index": 0}
+        coordinator.app_maps_refreshed_at = before
+        coordinator.client = SimpleNamespace(update_runtime_map_identity=Mock())
+        coordinator._async_refresh_runtime_status = AsyncMock(return_value=True)
+        coordinator.async_refresh_app_maps = AsyncMock()
+        read_index = AsyncMock(return_value=0)
+        monkeypatch.setattr(
+            coordinator_refresh, "async_read_settled_map_index", read_index,
+        )
+        tracker = DreameLawnMowerPerformanceTracker()
+        await coordinator._async_refresh_background_map_runtime(tracker.start("test"))
+        if lease_age >= 40:
+            read_index.assert_awaited_once_with(coordinator)
+            assert coordinator._runtime_map_index_refreshed_at > before
+            coordinator.client.update_runtime_map_identity.assert_called_once()
+            assert coordinator._runtime_map_identity_verified is True
+            assert coordinator._runtime_map_identity_generation == 1
+        else:
+            read_index.assert_not_awaited()
+            assert coordinator._runtime_map_index_refreshed_at == before
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("active_at_execution", [True, False])
 def test_background_map_phase_uses_latest_state_without_foreground_poll(
     active_at_execution,
