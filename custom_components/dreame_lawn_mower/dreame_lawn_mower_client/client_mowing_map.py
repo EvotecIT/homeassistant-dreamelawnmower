@@ -147,12 +147,20 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
             and blob.candidate_runtime_task_id != self._runtime_live_task_id
         ):
             blob = None
+        map_index = self._runtime_live_map_index
+        track_segments = self._runtime_live_track_segments
+        suspended = self._suspended_trail_for_display(
+            scene.map_index, scene.position_identity,
+        )
+        if suspended and map_index is None:
+            # Bridge the gap until the next verified packet restores the trail.
+            map_index, track_segments = scene.map_index, suspended
         return mowing_map_overlay(
             scene,
             blob,
-            map_index=self._runtime_live_map_index,
+            map_index=map_index,
             active=self._runtime_session_active is True,
-            track_segments=self._runtime_live_track_segments,
+            track_segments=track_segments,
             retained_position=position,
             docked=snapshot_is_docked(self._latest_snapshot),
         )

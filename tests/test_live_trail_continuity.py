@@ -423,3 +423,52 @@ def test_long_mission_stays_within_point_budget_after_recharge():
     assert details["runtime_track_point_count"] == MAX_TRAIL_POINTS
     overlay = client.mowing_map_runtime_overlay(scene)
     assert sum(map(len, overlay["trail"])) == MAX_TRAIL_POINTS
+
+
+def _gap(client, gap):
+    if gap == "expiry":
+        _expire(client)
+    elif gap == "revocation":
+        client.runtime_map_identity_expires_at = None
+    else:
+        client.update_runtime_live_tracking(None, active=True, map_index=None)
+
+
+@pytest.mark.parametrize("gap", ["expiry", "revocation", "unscoped"])
+def test_labelled_mission_keeps_its_trail_visible_through_a_verification_gap(gap):
+    """A lapsed lease suspends the trail; a viewer must not see it blink away."""
+    client = tracked_client()
+    _label_mission(client, 7)
+    scene = _scene(client)
+    assert sum(map(len, client.mowing_map_runtime_overlay(scene)["trail"])) == 3
+    _gap(client, gap)
+    bridged = client.mowing_map_runtime_overlay(scene)
+    assert bridged["position_status"] == "last_known"
+    assert sum(map(len, bridged["trail"])) == 3
+    # Display only: the suspended trail is still restored once, not doubled.
+    _renew(client)
+    _next_packet(client)
+    overlay = client.mowing_map_runtime_overlay(scene)
+    assert overlay["position_status"] == "current"
+    assert sum(map(len, overlay["trail"])) == 5
+
+
+@pytest.mark.parametrize("boundary", ["too_old", "new_mission", "inactive"])
+def test_verification_gap_bridge_stays_within_its_mission_and_window(boundary):
+    client = tracked_client()
+    _label_mission(client, 7)
+    scene = _scene(client)
+    _expire(client)
+    if boundary == "too_old":
+        owner = import_module(client.update_runtime_live_tracking.__module__)
+        with patch.object(owner, "datetime") as clock:
+            clock.now.return_value = datetime.now(UTC) + timedelta(seconds=91)
+            assert client._suspended_trail_for_display(
+                scene.map_index, scene.position_identity,
+            ) == ()
+        return
+    if boundary == "new_mission":
+        client._runtime_mission_generation = 8
+    else:
+        client.update_runtime_live_tracking(None, active=False)
+    assert client.mowing_map_runtime_overlay(scene)["trail"] == []
