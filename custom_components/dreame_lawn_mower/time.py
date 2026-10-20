@@ -1,4 +1,4 @@
-"""Time entities for mower-native charging-period settings."""
+"""Time entities for mower-native charging-period and Do Not Disturb settings."""
 
 from __future__ import annotations
 
@@ -30,24 +30,30 @@ async def async_setup_entry(
     """Set up charging-period time entities."""
     coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     entities_added = False
+    dnd_entities_added = False
 
     @callback
     def async_add_supported_entities() -> None:
-        nonlocal entities_added
+        nonlocal entities_added, dnd_entities_added
         settings = device_settings_section(coordinator.device_settings)
-        if (
-            entities_added
-            or settings is None
-            or not settings.get("charging_settings_available")
-        ):
+        if settings is None:
             return
-        entities_added = True
-        async_add_entities(
-            [
-                DreameLawnMowerChargingPeriodStartTime(coordinator),
-                DreameLawnMowerChargingPeriodEndTime(coordinator),
-            ]
-        )
+        if not entities_added and settings.get("charging_settings_available"):
+            entities_added = True
+            async_add_entities(
+                [
+                    DreameLawnMowerChargingPeriodStartTime(coordinator),
+                    DreameLawnMowerChargingPeriodEndTime(coordinator),
+                ]
+            )
+        if not dnd_entities_added and settings.get("dnd_settings_available"):
+            dnd_entities_added = True
+            async_add_entities(
+                [
+                    DreameLawnMowerDoNotDisturbStartTime(coordinator),
+                    DreameLawnMowerDoNotDisturbEndTime(coordinator),
+                ]
+            )
 
     async_add_supported_entities()
     entry.async_on_unload(coordinator.async_add_listener(async_add_supported_entities))
@@ -120,5 +126,63 @@ class DreameLawnMowerChargingPeriodEndTime(DreameLawnMowerChargingPeriodTime):
 
     async def async_set_value(self, value: time) -> None:
         await self.coordinator.async_set_charging_period(
+            end_minutes=time_to_minutes(value)
+        )
+
+
+class DreameLawnMowerDoNotDisturbTime(DreameLawnMowerEntity, TimeEntity):
+    """Base for one end of the mower's Do Not Disturb window."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _settings_key: str
+
+    @property
+    def available(self) -> bool:
+        settings = device_settings_section(self.coordinator.device_settings)
+        return bool(
+            self.coordinator.data is not None
+            and settings
+            and settings.get("dnd_settings_available")
+        )
+
+    @property
+    def native_value(self) -> time | None:
+        settings = device_settings_section(self.coordinator.device_settings)
+        if settings is None:
+            return None
+        value = settings.get(self._settings_key)
+        return minutes_to_time(int(value) if value is not None else None)
+
+
+class DreameLawnMowerDoNotDisturbStartTime(DreameLawnMowerDoNotDisturbTime):
+    """Start of the mower's Do Not Disturb window."""
+
+    _attr_name = "Do Not Disturb Start"
+    _attr_icon = "mdi:clock-start"
+    _settings_key = "dnd_start_minutes"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_do_not_disturb_start"
+
+    async def async_set_value(self, value: time) -> None:
+        await self.coordinator.async_set_do_not_disturb(
+            start_minutes=time_to_minutes(value)
+        )
+
+
+class DreameLawnMowerDoNotDisturbEndTime(DreameLawnMowerDoNotDisturbTime):
+    """End of the mower's Do Not Disturb window."""
+
+    _attr_name = "Do Not Disturb End"
+    _attr_icon = "mdi:clock-end"
+    _settings_key = "dnd_end_minutes"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_do_not_disturb_end"
+
+    async def async_set_value(self, value: time) -> None:
+        await self.coordinator.async_set_do_not_disturb(
             end_minutes=time_to_minutes(value)
         )

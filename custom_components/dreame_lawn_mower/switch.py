@@ -134,6 +134,12 @@ async def async_setup_entry(
             known_setting_switches.add("charging_period")
             new_entities.append(DreameLawnMowerChargingPeriodSwitch(coordinator))
         if (
+            settings.get("dnd_settings_available")
+            and "do_not_disturb" not in known_setting_switches
+        ):
+            known_setting_switches.add("do_not_disturb")
+            new_entities.append(DreameLawnMowerDoNotDisturbSwitch(coordinator))
+        if (
             settings.get("rain_settings_available")
             and "rain_protection" not in known_setting_switches
         ):
@@ -291,6 +297,40 @@ class DreameLawnMowerChargingPeriodSwitch(DreameLawnMowerEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_charging_period(enabled=False)
+
+
+class DreameLawnMowerDoNotDisturbSwitch(DreameLawnMowerEntity, SwitchEntity):
+    """Enable the mower's Do Not Disturb window."""
+
+    _attr_name = "Do Not Disturb"
+    _attr_icon = "mdi:sleep"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_do_not_disturb"
+
+    @property
+    def available(self) -> bool:
+        settings = device_settings_section(self.coordinator.device_settings)
+        return bool(
+            self.coordinator.data is not None
+            and settings
+            and settings.get("dnd_settings_available")
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        settings = device_settings_section(self.coordinator.device_settings)
+        if settings is None or not settings.get("dnd_settings_available"):
+            return None
+        return bool(settings.get("dnd_enabled"))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_do_not_disturb(enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_do_not_disturb(enabled=False)
 
 
 class DreameLawnMowerRainProtectionSwitch(DreameLawnMowerEntity, SwitchEntity):
