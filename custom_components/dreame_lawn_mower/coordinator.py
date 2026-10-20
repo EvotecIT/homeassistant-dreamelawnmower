@@ -3262,6 +3262,25 @@ class DreameLawnMowerCoordinator(
                 source="charging_period_write",
             )
 
+    async def async_set_do_not_disturb(
+        self,
+        *,
+        enabled: bool | None = None,
+        start_minutes: int | None = None,
+        end_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist and publish one confirmed Do Not Disturb update."""
+        async with self._device_settings_write_lock:
+            settings = await self.client.async_set_do_not_disturb(
+                enabled=enabled,
+                start_minutes=start_minutes,
+                end_minutes=end_minutes,
+            )
+            return self._cache_device_settings(
+                settings,
+                source="do_not_disturb_write",
+            )
+
     async def async_set_rain_protection(
         self,
         *,

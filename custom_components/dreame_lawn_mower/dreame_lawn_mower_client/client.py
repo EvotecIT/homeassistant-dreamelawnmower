@@ -1890,6 +1890,18 @@ class DreameLawnMowerClient(
             enabled=enabled, start_minutes=start_minutes, end_minutes=end_minutes,
         ))
 
+    async def async_set_do_not_disturb(
+        self, *, enabled: bool | None = None, start_minutes: int | None = None,
+        end_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        """Set and confirm the mower's Do Not Disturb window."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_do_not_disturb
+
+        return await async_write_device_settings(self, plan_do_not_disturb(
+            enabled=enabled, start_minutes=start_minutes, end_minutes=end_minutes,
+        ))
+
     async def async_set_rain_protection(
         self, *, enabled: bool | None = None, delay_hours: int | None = None,
     ) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from .client_shared_helpers import _ensure_app_write_succeeded
 from .device_settings import (
     build_anti_theft_settings_request,
     build_charging_period_request,
+    build_do_not_disturb_request,
     build_rain_protection_request,
     validate_rain_delay,
     validate_time_of_day,
@@ -112,6 +113,53 @@ def plan_charging_period(
             "not confirm the requested values and preserved BAT thresholds."
         )
     return refreshed
+
+def plan_do_not_disturb(
+    *,
+    enabled: bool | None = None,
+    start_minutes: int | None = None,
+    end_minutes: int | None = None,
+) -> SettingsPlan:
+    """Update only the DND window and require CFG readback."""
+    current: dict[str, Any] = (yield ReadDeviceSettings(False))
+    if not current.get("dnd_settings_available"):
+        raise DreameLawnMowerConnectionError(
+            "The mower did not report Do Not Disturb settings."
+        )
+    next_enabled = (
+        bool(current["dnd_enabled"]) if enabled is None else bool(enabled)
+    )
+    next_start = (
+        int(current["dnd_start_minutes"])
+        if start_minutes is None
+        else validate_time_of_day(start_minutes, "start", "Do Not Disturb")
+    )
+    next_end = (
+        int(current["dnd_end_minutes"])
+        if end_minutes is None
+        else validate_time_of_day(end_minutes, "end", "Do Not Disturb")
+    )
+    request = build_do_not_disturb_request(
+        enabled=next_enabled,
+        start_minutes=next_start,
+        end_minutes=next_end,
+    )
+    response = (yield WriteDeviceSettings(request))
+    _ensure_app_write_succeeded(response, operation="Do Not Disturb update")
+    refreshed: dict[str, Any] = (yield ReadDeviceSettings(False))
+    expected = (next_enabled, next_start, next_end)
+    actual = (
+        refreshed.get("dnd_enabled"),
+        refreshed.get("dnd_start_minutes"),
+        refreshed.get("dnd_end_minutes"),
+    )
+    if actual != expected:
+        raise DreameLawnMowerCommandRejectedError(
+            "The mower acknowledged the Do Not Disturb update but CFG did "
+            "not confirm the requested values."
+        )
+    return refreshed
+
 
 def plan_rain_protection(
     *,
