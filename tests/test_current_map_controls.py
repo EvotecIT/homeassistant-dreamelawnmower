@@ -285,6 +285,7 @@ def test_current_zone_entries_filter_global_and_edge_area_ids() -> None:
             "area_id": 1,
             "label": "Zone #1",
             "map_index": 0,
+            "area_m2": None,
             "preference": {
                 "area_id": 1,
                 "map_index": 0,
@@ -309,6 +310,7 @@ def test_current_zone_entries_filter_global_and_edge_area_ids() -> None:
             "area_id": 3,
             "label": "Zone #3",
             "map_index": 0,
+            "area_m2": None,
             "preference": {
                 "area_id": 3,
                 "map_index": 0,
@@ -380,6 +382,7 @@ def test_current_zone_entries_can_follow_selected_map_override() -> None:
             "area_id": 5,
             "label": "Zone #5",
             "map_index": 1,
+            "area_m2": None,
             "preference": {
                 "area_id": 5,
                 "map_index": 1,

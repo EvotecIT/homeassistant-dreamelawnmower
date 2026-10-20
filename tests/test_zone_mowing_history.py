@@ -486,3 +486,15 @@ def test_unknown_newer_summary_keeps_old_completions_from_becoming_authoritative
         latest_zone_mowing(second.sessions, map_hash=HASH)[1]["completed"].ended_at
         == 40
     )
+
+
+def test_overview_carries_each_zone_area() -> None:
+    zones = [
+        {"area_id": 1, "label": "Zone #1", "area_m2": 120.5},
+        {"area_id": 2, "label": "Zone #2", "area_m2": None},
+    ]
+    overview = zone_mowing_overview(zones, None)
+    assert [(item["zone_id"], item["area_m2"]) for item in overview] == [
+        (1, 120.5),
+        (2, None),
+    ]
