@@ -374,3 +374,37 @@ def test_unlabeled_background_is_the_same_canvas_without_zone_names():
     # Without names both variants are identical and no zone is listed.
     assert plain.image_png == plain.image_png_unlabeled
     assert plain.zone_labels == ()
+
+
+def test_trail_stays_with_a_recent_last_known_marker_between_pose_packets():
+    """A packet without a pose must not blank the session trail for viewers."""
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.position_tracking import (  # noqa: E501
+        MowerPosition,
+    )
+
+    scene = build_mowing_map_scene(garden(), style=map_render_style())
+    segments = (((10, 10), (20, 20), (30, 30)),)
+
+    def last_known(age_seconds):
+        return MowerPosition(
+            x=20, y=20, heading=None, map_index=2,
+            observed_at=(NOW - timedelta(seconds=age_seconds)).timestamp(),
+            status="last_known",
+        )
+
+    recent = mowing_map_overlay(
+        scene, None, map_index=2, active=True, now=NOW,
+        track_segments=segments, retained_position=last_known(5),
+    )
+    assert recent["position_status"] == "last_known"
+    assert [len(part) for part in recent["trail"]] == [3]
+    stale = mowing_map_overlay(
+        scene, None, map_index=2, active=True, now=NOW,
+        track_segments=segments, retained_position=last_known(600),
+    )
+    assert stale["trail"] == []
+    ended = mowing_map_overlay(
+        scene, None, map_index=2, active=False, now=NOW,
+        track_segments=segments, retained_position=last_known(5),
+    )
+    assert ended["trail"] == []
