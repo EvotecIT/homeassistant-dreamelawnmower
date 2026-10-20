@@ -86,3 +86,25 @@ def test_unverified_or_ambiguous_native_labels_keep_existing_fallback(invalid):
         "Stale cloud name (#1)",
         "Removed name (#3)",
     ]
+
+
+def test_zone_areas_come_from_the_same_verified_native_map():
+    maps = _maps()
+    maps["maps"][1]["summary"]["zones"][0]["area_m2"] = 112.5
+    maps["maps"][1]["summary"]["zones"][1]["area_m2"] = 64
+    entries = current_zone_entries(None, maps, _vector(), selected_map_index=1)
+    assert [(entry["area_id"], entry["area_m2"]) for entry in entries] == [
+        (1, 112.5),
+        (3, 64.0),
+    ]
+    maps["maps"][1]["hash_match"] = False
+    entries = current_zone_entries(None, maps, _vector(), selected_map_index=1)
+    assert [entry["area_m2"] for entry in entries] == [None, None]
+
+
+@pytest.mark.parametrize("area", [None, -1, float("nan"), True, "40"])
+def test_invalid_zone_area_is_left_unknown(area):
+    maps = _maps()
+    maps["maps"][0]["summary"]["zones"][0]["area_m2"] = area
+    entries = current_zone_entries(None, maps, _vector(), selected_map_index=0)
+    assert entries[0]["area_m2"] is None

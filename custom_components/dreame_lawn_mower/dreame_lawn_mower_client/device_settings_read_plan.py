@@ -33,7 +33,7 @@ def read_device_settings(
     result: dict[str, Any] = {
         "source": "app_action_device_settings",
         "available": False,
-        "config_keys": ["ATA", "BAT", "WRF", "WRP"],
+        "config_keys": ["ATA", "BAT", "DND", "WRF", "WRP"],
         "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
         "rain_end_time_command": "RPET",
         "errors": [],

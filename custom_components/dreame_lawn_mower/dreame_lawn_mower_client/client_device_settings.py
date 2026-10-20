@@ -10,6 +10,7 @@ from .device_settings_read_plan import read_device_settings
 from .device_settings_write_plan import (
     plan_anti_theft_settings,
     plan_charging_period,
+    plan_do_not_disturb,
     plan_rain_protection,
     run_settings_write,
 )
@@ -43,6 +44,16 @@ class _DreameLawnMowerClientDeviceSettingsMixin(_DreameLawnMowerClientTransport)
         return run_settings_write(
             plan_charging_period(enabled=enabled, start_minutes=start_minutes,
                                  end_minutes=end_minutes),
+            self._sync_get_device_settings, self._sync_call_app_action,
+        )
+
+    def _sync_set_do_not_disturb(
+        self, *, enabled: bool | None = None, start_minutes: int | None = None,
+        end_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        return run_settings_write(
+            plan_do_not_disturb(enabled=enabled, start_minutes=start_minutes,
+                                end_minutes=end_minutes),
             self._sync_get_device_settings, self._sync_call_app_action,
         )
 

@@ -728,3 +728,14 @@ def test_polled_mission_end_starts_history_followup(monkeypatch) -> None:
         assert forced == [True] * 4
 
     asyncio.run(scenario())
+
+def test_overview_carries_each_zone_area() -> None:
+    zones = [
+        {"area_id": 1, "label": "Zone #1", "area_m2": 120.5},
+        {"area_id": 2, "label": "Zone #2", "area_m2": None},
+    ]
+    overview = zone_mowing_overview(zones, None)
+    assert [(item["zone_id"], item["area_m2"]) for item in overview] == [
+        (1, 120.5),
+        (2, None),
+    ]

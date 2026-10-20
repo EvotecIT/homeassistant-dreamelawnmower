@@ -49,6 +49,7 @@ def zone_mowing_overview(
             {
                 "zone_id": zone_id,
                 "label": zone.get("label"),
+                "area_m2": zone.get("area_m2"),
                 "last_completed_at": _iso(
                     completed.ended_at if completed is not None else None
                 ),

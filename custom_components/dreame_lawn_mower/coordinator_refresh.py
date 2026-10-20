@@ -946,7 +946,9 @@ class DreameLawnMowerRefreshMixin:
         spaced forced reads replace waiting for the regular interval. A manual
         request wakes the delay and is served immediately by this same worker.
         """
-        baseline = getattr(self, "_zone_history_mission_baseline", None)
+        baseline: frozenset[str] | None = getattr(
+            self, "_zone_history_mission_baseline", None,
+        )
         if baseline is None:
             return
         for delay in ZONE_HISTORY_AFTER_MISSION_DELAYS:

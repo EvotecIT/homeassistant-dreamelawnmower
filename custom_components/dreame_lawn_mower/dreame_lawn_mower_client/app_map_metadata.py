@@ -19,15 +19,71 @@ def app_map_zone_metadata(zone_records: Sequence[Any]) -> list[dict[str, Any]]:
         name = record.get("name")
         if name is not None and not isinstance(name, str):
             continue
-        result.append(
-            {
-                "zone_id": zone_id,
-                "name": name.strip()[:200]
-                if isinstance(name, str) and name.strip()
-                else None,
-            }
-        )
+        entry: dict[str, Any] = {
+            "zone_id": zone_id,
+            "name": name.strip()[:200]
+            if isinstance(name, str) and name.strip()
+            else None,
+        }
+        area = _zone_area_m2(record.get("area"))
+        if area is not None:
+            entry["area_m2"] = area
+        result.append(entry)
     return result
+
+
+def _zone_area_m2(value: Any) -> float | None:
+    """Lawn area reported by the mower for one zone, in square metres."""
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        return None
+    return round(float(value), 2)
+
+
+def _verified_app_map_zones(
+    app_maps: Any,
+    map_index: int | None,
+) -> list[Mapping[str, Any]]:
+    """Zone summaries of one created, hash-verified matching native map.
+
+    Any malformed or duplicate zone rejects the whole summary.
+    """
+    if not isinstance(app_maps, Mapping) or app_maps.get("map_list_valid") is not True:
+        return []
+    maps = app_maps.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return []
+    candidates = [
+        entry
+        for entry in maps
+        if isinstance(entry, Mapping)
+        and type(entry.get("idx")) is int
+        and entry["idx"] == map_index
+    ]
+    if len(candidates) != 1:
+        return []
+    entry = candidates[0]
+    if any(
+        entry.get(flag) is not True for flag in ("created", "available", "hash_match")
+    ):
+        return []
+    summary = entry.get("summary")
+    zones = summary.get("zones") if isinstance(summary, Mapping) else None
+    if not isinstance(zones, list):
+        return []
+    seen: set[int] = set()
+    for zone in zones:
+        if not isinstance(zone, Mapping):
+            return []
+        zone_id, name = zone.get("zone_id"), zone.get("name")
+        if (
+            type(zone_id) is not int
+            or zone_id <= 0
+            or zone_id in seen
+            or (name is not None and (not isinstance(name, str) or len(name) > 200))
+        ):
+            return []
+        seen.add(zone_id)
+    return zones
 
 
 def verified_app_map_zone_names(
@@ -39,42 +95,23 @@ def verified_app_map_zone_names(
     Callers retain their existing zone membership. An explicit empty name
     overrides a stale cloud name, while unavailable native names use fallback.
     """
-    if not isinstance(app_maps, Mapping) or app_maps.get("map_list_valid") is not True:
-        return {}
-    maps = app_maps.get("maps")
-    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
-        return {}
-    candidates = [
-        entry
-        for entry in maps
-        if isinstance(entry, Mapping)
-        and type(entry.get("idx")) is int
-        and entry["idx"] == map_index
-    ]
-    if len(candidates) != 1:
-        return {}
-    entry = candidates[0]
-    if any(
-        entry.get(flag) is not True for flag in ("created", "available", "hash_match")
-    ):
-        return {}
-    summary = entry.get("summary")
-    zones = summary.get("zones") if isinstance(summary, Mapping) else None
-    if not isinstance(zones, list):
-        return {}
     result: dict[int, str | None] = {}
-    for zone in zones:
-        if not isinstance(zone, Mapping):
-            return {}
-        zone_id, name = zone.get("zone_id"), zone.get("name")
-        if (
-            type(zone_id) is not int
-            or zone_id <= 0
-            or zone_id in result
-            or (name is not None and (not isinstance(name, str) or len(name) > 200))
-        ):
-            return {}
-        result[zone_id] = name.strip() or None if name else None
+    for zone in _verified_app_map_zones(app_maps, map_index):
+        name = zone.get("name")
+        result[zone["zone_id"]] = name.strip() or None if name else None
+    return result
+
+
+def verified_app_map_zone_areas(
+    app_maps: Any,
+    map_index: int | None,
+) -> dict[int, float]:
+    """Lawn area of each zone, from the same verified native map as the labels."""
+    result: dict[int, float] = {}
+    for zone in _verified_app_map_zones(app_maps, map_index):
+        area = _zone_area_m2(zone.get("area_m2"))
+        if area is not None:
+            result[zone["zone_id"]] = area
     return result
 
 
