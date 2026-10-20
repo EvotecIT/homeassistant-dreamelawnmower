@@ -51,6 +51,8 @@ from .runtime_cache import (
     runtime_mission_session_started_at,
 )
 
+# Seconds before each forced history read after a mission ends.
+ZONE_HISTORY_AFTER_MISSION_DELAYS = (15.0, 30.0, 60.0, 120.0, 180.0)
 _LOGGER = logging.getLogger(__name__)
 
 # The reverse-engineered cloud owner shares request ids, login state, and one
@@ -160,6 +162,8 @@ class DreameLawnMowerRefreshMixin:
     _shutting_down: bool
     _metadata_refresh_task: asyncio.Task[None] | None
     _zone_history_refresh_task: asyncio.Task[None] | None
+    _zone_history_mission_baseline: frozenset[str] | None
+    _zone_history_force_next: bool
     _metadata_shutdown_close_task: asyncio.Task[None] | None
     _metadata_refresh_semaphore: asyncio.Semaphore
     _runtime_active_map_index: int | None
@@ -858,10 +862,24 @@ class DreameLawnMowerRefreshMixin:
                     refresh_map_and_runtime=True,
                 )
 
-    def _schedule_zone_history_refresh(self) -> None:
-        """Hydrate optional native-HTTP history after the metadata barrier."""
+    def _schedule_zone_history_refresh(
+        self, *, mission_ended: bool = False, force: bool = False,
+    ) -> None:
+        """Hydrate optional native-HTTP history after the metadata barrier.
+
+        ``mission_ended`` asks the worker to follow up until the summary of the
+        mission that just ended is read, instead of waiting for the interval.
+        ``force`` reads once now, regardless of the interval.
+        """
         if getattr(self, "_shutting_down", False) or not hasattr(self, "hass"):
             return
+        if force or mission_ended:
+            self._zone_history_force_next = True
+        if mission_ended:
+            history = getattr(self, "zone_mowing_sessions", None)
+            self._zone_history_mission_baseline = frozenset(
+                history.sessions if history is not None else ()
+            )
         task = getattr(self, "_zone_history_refresh_task", None)
         if task is not None and not task.done():
             return
@@ -873,12 +891,17 @@ class DreameLawnMowerRefreshMixin:
     async def _async_refresh_zone_history_background(self) -> None:
         """Own history work and publish only while this coordinator is active."""
         current = asyncio.current_task()
-        previous = getattr(self, "zone_mowing_sessions", None)
         try:
-            result = await self.async_refresh_zone_mowing_sessions(force=False)
-            if (result is not previous and not self._shutting_down
-                    and getattr(self, "_metadata_refresh_publish", True)):
-                self.async_update_listeners()
+            await self._async_read_zone_history(force=self._take_forced_history_read())
+            # Requests that arrive while this worker runs are served here, so a
+            # coalesced schedule never loses a forced read or a mission follow-up.
+            while not self._shutting_down:
+                if getattr(self, "_zone_history_mission_baseline", None) is not None:
+                    await self._async_follow_ended_mission_summary()
+                elif self._take_forced_history_read():
+                    await self._async_read_zone_history(force=True)
+                else:
+                    break
         except Exception as err:  # noqa: BLE001 - optional background history
             _LOGGER.debug(
                 "Zone history refresh failed: %s", sanitize_diagnostic_text(err),
@@ -886,6 +909,46 @@ class DreameLawnMowerRefreshMixin:
         finally:
             if getattr(self, "_zone_history_refresh_task", None) is current:
                 self._zone_history_refresh_task = None
+
+    def _take_forced_history_read(self) -> bool:
+        """Consume one pending forced-read request."""
+        force = bool(getattr(self, "_zone_history_force_next", False))
+        self._zone_history_force_next = False
+        return force
+
+    async def _async_read_zone_history(self, *, force: bool) -> None:
+        """Read history once and publish when it changed."""
+        previous = getattr(self, "zone_mowing_sessions", None)
+        result = await self.async_refresh_zone_mowing_sessions(force=force)
+        if (result is not previous and not self._shutting_down
+                and getattr(self, "_metadata_refresh_publish", True)):
+            self.async_update_listeners()
+
+    def _ended_mission_summary_read(self, baseline: frozenset[str]) -> bool:
+        """Return whether a summary unknown at mission end is now decoded."""
+        history = getattr(self, "zone_mowing_sessions", None)
+        return history is not None and any(
+            name not in baseline and name not in history.pending
+            for name in history.sessions
+        )
+
+    async def _async_follow_ended_mission_summary(self) -> None:
+        """Read history again shortly after a mission ends, until its summary lands.
+
+        The cloud publishes the summary a little after the mower stops, so a few
+        spaced forced reads replace waiting for the regular interval. A manual
+        request during the wait is served by the next of these reads.
+        """
+        for delay in ZONE_HISTORY_AFTER_MISSION_DELAYS:
+            baseline = getattr(self, "_zone_history_mission_baseline", None)
+            if baseline is None or self._shutting_down:
+                return
+            if self._ended_mission_summary_read(baseline):
+                break
+            await asyncio.sleep(delay)
+            self._zone_history_force_next = False
+            await self._async_read_zone_history(force=True)
+        self._zone_history_mission_baseline = None
 
     async def _async_refresh_background_map_runtime(
         self, cycle: DreameLawnMowerPerformanceCycle
