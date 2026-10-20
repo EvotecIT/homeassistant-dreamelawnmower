@@ -423,6 +423,14 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         """
         with self._runtime_geometry_lock:
             if active and mission_generation is not None:
+                if (
+                    self._runtime_mission_generation is not None
+                    and self._runtime_mission_generation != mission_generation
+                ):
+                    self._runtime_live_track_segments = ()
+                    self._runtime_trail_checkpoint = None
+                    self._runtime_live_task_id = None
+                    self._last_runtime_track_blob_hex = None
                 self._runtime_mission_generation = mission_generation
             self._update_runtime_live_tracking(
                 status_blob, active=active, map_index=map_index,
