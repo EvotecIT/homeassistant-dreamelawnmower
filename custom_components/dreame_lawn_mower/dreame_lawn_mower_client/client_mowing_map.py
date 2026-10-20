@@ -152,8 +152,9 @@ class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
         suspended = self._suspended_trail_for_display(
             scene.map_index, scene.position_identity,
         )
-        if suspended and map_index is None:
-            # Bridge the gap until the next verified packet restores the trail.
+        if suspended and map_index in (None, scene.map_index):
+            # Bridge the gap until the next verified packet restores the trail:
+            # the lease may already be renewed while restoration still waits.
             map_index, track_segments = scene.map_index, suspended
         return mowing_map_overlay(
             scene,

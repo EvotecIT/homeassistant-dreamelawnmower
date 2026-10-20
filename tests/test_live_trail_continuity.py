@@ -445,8 +445,16 @@ def test_labelled_mission_keeps_its_trail_visible_through_a_verification_gap(gap
     bridged = client.mowing_map_runtime_overlay(scene)
     assert bridged["position_status"] == "last_known"
     assert sum(map(len, bridged["trail"])) == 3
-    # Display only: the suspended trail is still restored once, not doubled.
+    # Renewed lease and a short packet without a task id: the slot is scoped
+    # again, but recovery still waits for task-bearing evidence (seen live).
     _renew(client)
+    publish(client, hex="short-pose", candidate_runtime_task_id=None,
+            candidate_runtime_track_segments=())
+    assert client._runtime_live_map_index == 0
+    assert client._runtime_live_track_segments == ()
+    renewed = client.mowing_map_runtime_overlay(scene)
+    assert sum(map(len, renewed["trail"])) == 3
+    # Display only: the suspended trail is still restored once, not doubled.
     _next_packet(client)
     overlay = client.mowing_map_runtime_overlay(scene)
     assert overlay["position_status"] == "current"
