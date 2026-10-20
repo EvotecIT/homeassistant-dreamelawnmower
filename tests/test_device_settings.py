@@ -9,9 +9,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from custom_components.dreame_lawn_mower.binary_sensor import (
-    DreameLawnMowerDoNotDisturbBinarySensor,
-)
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureWeatherProbeButton,
 )
@@ -42,6 +39,7 @@ from custom_components.dreame_lawn_mower.select import (
 from custom_components.dreame_lawn_mower.switch import (
     DreameLawnMowerAntiTheftSwitch,
     DreameLawnMowerChargingPeriodSwitch,
+    DreameLawnMowerDoNotDisturbSwitch,
     DreameLawnMowerRainProtectionSwitch,
     reported_preference_switch_keys,
 )
@@ -51,6 +49,8 @@ from custom_components.dreame_lawn_mower.switch import (
 from custom_components.dreame_lawn_mower.time import (
     DreameLawnMowerChargingPeriodEndTime,
     DreameLawnMowerChargingPeriodStartTime,
+    DreameLawnMowerDoNotDisturbEndTime,
+    DreameLawnMowerDoNotDisturbStartTime,
 )
 from custom_components.dreame_lawn_mower.time import (
     async_setup_entry as async_setup_time_entry,
@@ -143,7 +143,7 @@ def test_malformed_do_not_disturb_record_is_not_reported(value: object) -> None:
     assert "dnd_settings_available" not in settings
 
 
-def test_do_not_disturb_binary_sensor_reports_window() -> None:
+def test_do_not_disturb_entities_read_and_write_through_coordinator() -> None:
     coordinator = SimpleNamespace(
         data=SimpleNamespace(),
         device_settings={
@@ -153,23 +153,97 @@ def test_do_not_disturb_binary_sensor_reports_window() -> None:
             "dnd_start_minutes": 1120,
             "dnd_end_minutes": 480,
         },
+        async_set_do_not_disturb=AsyncMock(),
     )
-    sensor = object.__new__(DreameLawnMowerDoNotDisturbBinarySensor)
-    sensor.coordinator = coordinator
+    switch = object.__new__(DreameLawnMowerDoNotDisturbSwitch)
+    switch.coordinator = coordinator
+    start = object.__new__(DreameLawnMowerDoNotDisturbStartTime)
+    start.coordinator = coordinator
+    end = object.__new__(DreameLawnMowerDoNotDisturbEndTime)
+    end.coordinator = coordinator
 
-    assert sensor.available is True
-    assert sensor.is_on is True
-    assert sensor.extra_state_attributes == {
-        "start": "18:40",
-        "end": "08:00",
-        "start_minutes": 1120,
-        "end_minutes": 480,
-    }
+    assert switch.available is True
+    assert switch.is_on is True
+    assert start.native_value == time(18, 40)
+    assert end.native_value == time(8, 0)
+
+    asyncio.run(switch.async_turn_off())
+    asyncio.run(start.async_set_value(time(19, 0)))
+    asyncio.run(end.async_set_value(time(7, 30)))
+    coordinator.async_set_do_not_disturb.assert_any_await(enabled=False)
+    coordinator.async_set_do_not_disturb.assert_any_await(start_minutes=1140)
+    coordinator.async_set_do_not_disturb.assert_any_await(end_minutes=450)
 
     coordinator.device_settings = {"available": True}
-    assert sensor.available is False
-    assert sensor.is_on is None
-    assert sensor.extra_state_attributes == {}
+    assert switch.available is False
+    assert switch.is_on is None
+    assert start.available is False
+    assert start.native_value is None
+
+
+def _dnd_cfg(dnd: list[int]) -> dict:
+    payload = _cfg()
+    payload["d"]["DND"] = dnd
+    return payload
+
+
+def test_do_not_disturb_payload_matches_the_app() -> None:
+    assert device_settings.build_do_not_disturb_request(
+        enabled=True, start_minutes=1121, end_minutes=480
+    ) == {"m": "s", "t": "DND", "d": {"value": 1, "time": [1121, 480]}}
+    with pytest.raises(ValueError, match="Do Not Disturb start"):
+        device_settings.build_do_not_disturb_request(
+            enabled=True, start_minutes=1440, end_minutes=480
+        )
+    with pytest.raises(ValueError, match="must differ"):
+        device_settings.build_do_not_disturb_request(
+            enabled=True, start_minutes=480, end_minutes=480
+        )
+
+
+def test_do_not_disturb_write_keeps_other_fields_and_requires_readback() -> None:
+    client = _client()
+    responses = iter(
+        [
+            _dnd_cfg([1, 1120, 480]),
+            {"m": "r", "r": 0, "d": {"value": 1, "start": 1121, "end": 480}},
+            _dnd_cfg([1, 1121, 480]),
+        ]
+    )
+    requests: list[dict] = []
+
+    def call(request: dict, **kwargs) -> dict:  # noqa: ARG001
+        requests.append(request)
+        return next(responses)
+
+    client._sync_call_app_action = call  # type: ignore[method-assign]
+    settings = client._sync_set_do_not_disturb(start_minutes=1121)
+
+    assert settings["dnd_start_minutes"] == 1121
+    assert requests[1] == {
+        "m": "s",
+        "t": "DND",
+        "d": {"value": 1, "time": [1121, 480]},
+    }
+
+
+def test_do_not_disturb_write_rejects_ignored_or_refused_update() -> None:
+    client = _client()
+    ignored = iter(
+        [
+            _dnd_cfg([1, 1120, 480]),
+            {"m": "r", "r": 0, "d": {}},
+            _dnd_cfg([1, 1120, 480]),
+        ]
+    )
+    client._sync_call_app_action = lambda request, **kwargs: next(ignored)  # type: ignore[method-assign]  # noqa: ARG005
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="did not confirm"):
+        client._sync_set_do_not_disturb(enabled=False)
+
+    refused = iter([_dnd_cfg([1, 1120, 480]), {"m": "r", "r": 3}])
+    client._sync_call_app_action = lambda request, **kwargs: next(refused)  # type: ignore[method-assign]  # noqa: ARG005
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="rejected"):
+        client._sync_set_do_not_disturb(enabled=False)
 
 
 def test_setting_payloads_are_narrow_and_preserve_rain_sensitivity() -> None:

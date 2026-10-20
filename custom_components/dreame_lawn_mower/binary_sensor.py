@@ -22,7 +22,6 @@ from .const import (
     ACTIVITY_RETURNING,
 )
 from .coordinator import DreameLawnMowerCoordinator
-from .device_settings_control import device_settings_section
 from .dreame_lawn_mower_client.maintenance import maintenance_status_attributes
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
@@ -277,7 +276,6 @@ async def async_setup_entry(
         + [DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(coordinator)]
         + [DreameLawnMowerRainProtectionEnabledBinarySensor(coordinator)]
         + [DreameLawnMowerRainDelayActiveBinarySensor(coordinator)]
-        + [DreameLawnMowerDoNotDisturbBinarySensor(coordinator)]
         + [DreameLawnMowerMaintenanceWarningBinarySensor(coordinator)]
         + [DreameLawnMowerMaintenanceDueBinarySensor(coordinator)]
     )
@@ -531,62 +529,6 @@ class DreameLawnMowerRainDelayActiveBinarySensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return safe cached weather attributes."""
         return weather_probe_result_attributes(self.coordinator.weather_protection)
-
-
-def _clock_label(minutes: Any) -> str | None:
-    """Return minutes since midnight as HH:MM."""
-    if not isinstance(minutes, int):
-        return None
-    return f"{minutes // 60:02d}:{minutes % 60:02d}"
-
-
-class DreameLawnMowerDoNotDisturbBinarySensor(
-    DreameLawnMowerEntity,
-    BinarySensorEntity,
-):
-    """Expose the mower's Do Not Disturb window as configured in the app."""
-
-    _attr_name = "Do Not Disturb"
-    _attr_icon = "mdi:sleep"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{self._descriptor.unique_id}_do_not_disturb"
-
-    def _settings(self) -> Any:
-        settings = device_settings_section(self.coordinator.device_settings)
-        if settings is None or not settings.get("dnd_settings_available"):
-            return None
-        return settings
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return whether the Do Not Disturb window is enabled."""
-        settings = self._settings()
-        if settings is None:
-            return None
-        return bool(settings.get("dnd_enabled"))
-
-    @property
-    def available(self) -> bool:
-        """Return whether the mower reported a DND record."""
-        return self.coordinator.data is not None and self._settings() is not None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the window bounds (local time, minutes since midnight)."""
-        settings = self._settings()
-        if settings is None:
-            return {}
-        start = settings.get("dnd_start_minutes")
-        end = settings.get("dnd_end_minutes")
-        return {
-            "start": _clock_label(start),
-            "end": _clock_label(end),
-            "start_minutes": start,
-            "end_minutes": end,
-        }
 
 
 class DreameLawnMowerMaintenanceDueBinarySensor(

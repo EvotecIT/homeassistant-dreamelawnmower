@@ -176,17 +176,19 @@ def decode_device_settings(config: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def validate_time_of_day(minutes: int, label: str) -> int:
+def validate_time_of_day(
+    minutes: int, label: str, setting: str = "Charging period"
+) -> int:
     """Return minutes since midnight after validating the device range."""
     try:
         normalized = int(minutes)
     except (TypeError, ValueError) as err:
         raise ValueError(
-            f"Charging period {label} must be a number of minutes."
+            f"{setting} {label} must be a number of minutes."
         ) from err
     if not 0 <= normalized < MINUTES_PER_DAY:
         raise ValueError(
-            f"Charging period {label} must be between 0 and "
+            f"{setting} {label} must be between 0 and "
             f"{MINUTES_PER_DAY - 1} minutes."
         )
     return normalized
@@ -224,6 +226,24 @@ def build_charging_period_request(
             "type": "charging",
             "value": [int(bool(enabled)), start, end],
         },
+    }
+
+
+def build_do_not_disturb_request(
+    *,
+    enabled: bool,
+    start_minutes: int,
+    end_minutes: int,
+) -> dict[str, Any]:
+    """Build the DND setter used by the app: value plus [start, end]."""
+    start = validate_time_of_day(start_minutes, "start", "Do Not Disturb")
+    end = validate_time_of_day(end_minutes, "end", "Do Not Disturb")
+    if start == end:
+        raise ValueError("Do Not Disturb start and end times must differ.")
+    return {
+        "m": "s",
+        "t": "DND",
+        "d": {"value": int(bool(enabled)), "time": [start, end]},
     }
 
 
