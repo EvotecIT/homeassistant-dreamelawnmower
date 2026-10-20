@@ -885,7 +885,7 @@ class DreameLawnMowerRefreshMixin:
         if mission_ended:
             history = getattr(self, "zone_mowing_sessions", None)
             self._zone_history_mission_baseline = frozenset(
-                history.sessions if history is not None else ()
+                (*history.sessions, *history.pending) if history is not None else ()
             )
         task = getattr(self, "_zone_history_refresh_task", None)
         if task is not None and not task.done():

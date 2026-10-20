@@ -522,16 +522,27 @@ def _history_coordinator(monkeypatch, reads):
     return coordinator, forced
 
 
-def test_mission_end_reads_history_until_the_new_summary_lands(monkeypatch) -> None:
+@pytest.mark.parametrize("pending_before_end", [False, True])
+def test_mission_end_reads_history_until_the_new_summary_lands(
+    monkeypatch, pending_before_end,
+) -> None:
+    """Decoding an older pending upload must not finish the new mission's retry."""
     async def scenario():
+        older_sessions = {
+            "old": (), **({"pending_old": ()} if pending_before_end else {}),
+        }
         coordinator, forced = _history_coordinator(
             monkeypatch,
             [
-                ZoneMowingHistory({"old": ()}),
-                ZoneMowingHistory({"old": (), "new": ()}, ("new",)),
-                ZoneMowingHistory({"old": (), "new": ()}),
+                ZoneMowingHistory(older_sessions),
+                ZoneMowingHistory({**older_sessions, "new": ()}, ("new",)),
+                ZoneMowingHistory({**older_sessions, "new": ()}),
             ],
         )
+        if pending_before_end:
+            coordinator.zone_mowing_sessions = ZoneMowingHistory(
+                {"old": ()}, ("pending_old",),
+            )
         coordinator._observe_mission_end(True)
         coordinator._observe_mission_end(False)
         await coordinator._zone_history_refresh_task
