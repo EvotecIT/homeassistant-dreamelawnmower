@@ -488,6 +488,258 @@ def test_unknown_newer_summary_keeps_old_completions_from_becoming_authoritative
     )
 
 
+def _history_coordinator(monkeypatch, reads):
+    """Coordinator whose forced history reads return ``reads`` in order."""
+    from custom_components.dreame_lawn_mower import coordinator_refresh
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+
+    monkeypatch.setattr(
+        coordinator_refresh, "ZONE_HISTORY_AFTER_MISSION_DELAYS", (0, 0, 0)
+    )
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._shutting_down = False
+    coordinator._zone_history_refresh_task = None
+    coordinator._zone_history_mission_baseline = None
+    coordinator._last_mission_active = None
+    coordinator._zone_history_force_next = False
+    coordinator.zone_mowing_sessions = ZoneMowingHistory({"old": ()})
+    coordinator.hass = SimpleNamespace(
+        async_create_background_task=lambda coro, name: asyncio.create_task(coro),
+    )
+    coordinator.async_update_listeners = Mock()
+    forced = []
+
+    async def refresh(*, force):
+        if force:
+            forced.append(force)
+            if reads:
+                coordinator.zone_mowing_sessions = reads.pop(0)
+        return coordinator.zone_mowing_sessions
+
+    coordinator.async_refresh_zone_mowing_sessions = refresh
+    return coordinator, forced
+
+
+@pytest.mark.parametrize("pending_before_end", [False, True])
+def test_mission_end_reads_history_until_the_new_summary_lands(
+    monkeypatch, pending_before_end,
+) -> None:
+    """Decoding an older pending upload must not finish the new mission's retry."""
+    async def scenario():
+        older_sessions = {
+            "old": (), **({"pending_old": ()} if pending_before_end else {}),
+        }
+        coordinator, forced = _history_coordinator(
+            monkeypatch,
+            [
+                ZoneMowingHistory(older_sessions),
+                ZoneMowingHistory({**older_sessions, "new": ()}, ("new",)),
+                ZoneMowingHistory({**older_sessions, "new": ()}),
+            ],
+        )
+        if pending_before_end:
+            coordinator.zone_mowing_sessions = ZoneMowingHistory(
+                {"old": ()}, ("pending_old",),
+            )
+        coordinator._observe_mission_end(True)
+        coordinator._observe_mission_end(False)
+        await coordinator._zone_history_refresh_task
+        # Immediate read unchanged, then still pending, then decoded: stop.
+        assert len(forced) == 3
+        assert coordinator._zone_history_mission_baseline is None
+        assert coordinator.async_update_listeners.call_count == 3
+
+    asyncio.run(scenario())
+
+
+def test_mission_end_follow_up_is_bounded(monkeypatch) -> None:
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        coordinator._observe_mission_end(True)
+        coordinator._observe_mission_end(False)
+        await coordinator._zone_history_refresh_task
+        # One immediate read, then one per configured delay.
+        assert len(forced) == 4
+        assert coordinator._zone_history_mission_baseline is None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "states", [(True, None, True), (False, False), (None, False), (True, True)]
+)
+def test_charging_pause_or_idle_does_not_follow_up(monkeypatch, states) -> None:
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        for state in states:
+            coordinator._observe_mission_end(state)
+        assert coordinator._zone_history_refresh_task is None
+        assert forced == []
+
+    asyncio.run(scenario())
+
+
+def test_manual_refresh_forces_one_read(monkeypatch) -> None:
+    async def scenario():
+        coordinator, forced = _history_coordinator(
+            monkeypatch, [ZoneMowingHistory({"old": (), "new": ()})]
+        )
+        coordinator._schedule_zone_history_refresh(force=True)
+        await coordinator._zone_history_refresh_task
+        assert forced == [True]
+        assert coordinator._zone_history_force_next is False
+        assert set(coordinator.zone_mowing_sessions.sessions) == {"old", "new"}
+
+    asyncio.run(scenario())
+
+
+def test_manual_refresh_during_a_running_read_is_not_lost(monkeypatch) -> None:
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        gate = asyncio.Event()
+        calls = []
+
+        async def refresh(*, force):
+            calls.append(force)
+            if len(calls) == 1:
+                await gate.wait()
+            return coordinator.zone_mowing_sessions
+
+        coordinator.async_refresh_zone_mowing_sessions = refresh
+        coordinator._schedule_zone_history_refresh()
+        task = coordinator._zone_history_refresh_task
+        await asyncio.sleep(0)
+        coordinator._schedule_zone_history_refresh(force=True)
+        assert coordinator._zone_history_refresh_task is task
+        gate.set()
+        await task
+        assert calls == [False, True]
+
+    asyncio.run(scenario())
+
+
+def test_push_updates_catch_up_on_due_history() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.zone_mowing_sessions = None
+    coordinator.zone_mowing_sessions_refreshed_at = None
+    # Never hydrated: the metadata barrier keeps ownership of the first read.
+    assert coordinator._zone_history_due() is False
+    coordinator.zone_mowing_sessions = ZoneMowingHistory({"old": ()})
+    coordinator.zone_mowing_sessions_refreshed_at = datetime.now(UTC)
+    assert coordinator._zone_history_due() is False
+    coordinator.zone_mowing_sessions_refreshed_at -= timedelta(minutes=6)
+    assert coordinator._zone_history_due() is True
+
+
+def test_refresh_history_button_queues_a_forced_read() -> None:
+    from custom_components.dreame_lawn_mower.button import (
+        DreameLawnMowerRefreshMowingHistoryButton,
+    )
+
+    entity = object.__new__(DreameLawnMowerRefreshMowingHistoryButton)
+    schedule = Mock()
+    entity.coordinator = SimpleNamespace(_schedule_zone_history_refresh=schedule)
+    asyncio.run(entity.async_press())
+    schedule.assert_called_once_with(force=True)
+
+
+def test_mission_end_during_a_running_read_is_followed(monkeypatch) -> None:
+    async def scenario():
+        coordinator, _ = _history_coordinator(monkeypatch, [])
+        gate = asyncio.Event()
+        calls = []
+        arrived = ZoneMowingHistory({"old": (), "new": ()})
+
+        async def refresh(*, force):
+            calls.append(force)
+            if len(calls) == 1:
+                await gate.wait()
+            elif len(calls) == 3:
+                coordinator.zone_mowing_sessions = arrived
+            return coordinator.zone_mowing_sessions
+
+        coordinator.async_refresh_zone_mowing_sessions = refresh
+        coordinator._schedule_zone_history_refresh()
+        task = coordinator._zone_history_refresh_task
+        await asyncio.sleep(0)
+        coordinator._observe_mission_end(True)
+        coordinator._observe_mission_end(False)
+        assert coordinator._zone_history_refresh_task is task
+        gate.set()
+        await task
+        # Regular read, forced catch-up, then follow-up until the summary lands.
+        assert calls == [False, True, True]
+        assert coordinator._zone_history_mission_baseline is None
+
+    asyncio.run(scenario())
+
+
+def test_manual_refresh_wakes_post_mission_delay(monkeypatch) -> None:
+    """A button press bypasses the retry delay through the same worker."""
+    from custom_components.dreame_lawn_mower import coordinator_refresh
+
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        monkeypatch.setattr(
+            coordinator_refresh, "ZONE_HISTORY_AFTER_MISSION_DELAYS", (180,)
+        )
+        waiting = asyncio.Event()
+        original = coordinator._ended_mission_summary_read
+
+        def summary_read(baseline):
+            waiting.set()
+            return original(baseline)
+
+        coordinator._ended_mission_summary_read = summary_read
+        coordinator._observe_mission_end(True)
+        coordinator._observe_mission_end(False)
+        task = coordinator._zone_history_refresh_task
+        try:
+            await waiting.wait()
+            coordinator._schedule_zone_history_refresh(force=True)
+            await asyncio.wait_for(task, 1)
+            assert forced == [True, True]
+            assert coordinator._zone_history_refresh_task is None
+        finally:
+            if not task.done():
+                task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_polled_mission_end_starts_history_followup(monkeypatch) -> None:
+    """Polling observes the same mission boundary as realtime pushes."""
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        coordinator._last_mission_active = True
+        snapshot = SimpleNamespace(
+            available=True, activity="docked", docked=True,
+            mowing_session_active=False,
+        )
+        coordinator.runtime_telemetry_cache = SimpleNamespace()
+        coordinator.client = SimpleNamespace(
+            async_refresh=AsyncMock(return_value=snapshot),
+            update_runtime_live_tracking=Mock(),
+        )
+        coordinator._observe_runtime_mission_boundary = Mock(return_value=False)
+        coordinator._schedule_metadata_refresh = Mock()
+        result = await coordinator._async_update_data()
+        assert result is snapshot
+        assert coordinator._last_mission_active is False
+        assert coordinator._zone_history_refresh_task is not None
+        await coordinator._zone_history_refresh_task
+        assert forced == [True] * 4
+
+    asyncio.run(scenario())
+
 def test_overview_carries_each_zone_area() -> None:
     zones = [
         {"area_id": 1, "label": "Zone #1", "area_m2": 120.5},

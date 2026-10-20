@@ -564,6 +564,10 @@ class DreameLawnMowerCoordinator(
         self._last_mowing_preferences_event_at: float | None = None
         self._metadata_refresh_task: asyncio.Task[None] | None = None
         self._zone_history_refresh_task: asyncio.Task[None] | None = None
+        self._zone_history_mission_baseline: frozenset[str] | None = None
+        self._last_mission_active: bool | None = None
+        self._zone_history_force_next = False
+        self._zone_history_wake: asyncio.Event | None = None
         self._metadata_shutdown_close_task: asyncio.Task[None] | None = None
         self._client_close_task: asyncio.Task[None] | None = None
         self._metadata_refresh_semaphore = asyncio.Semaphore(
@@ -684,7 +688,13 @@ class DreameLawnMowerCoordinator(
         if generation is not None:
             self._published_device_snapshot_generation = generation
         if getattr(data, "available", True):
-            self._observe_runtime_mission_boundary(data)
+            mission_active = self._observe_runtime_mission_boundary(data)
+            self._observe_mission_end(mission_active)
+            # Push updates reset Home Assistant's polling interval, so a docked,
+            # charging mower could starve the metadata refresh that normally
+            # schedules history. Let any published snapshot catch up instead.
+            if self._zone_history_due():
+                self._schedule_zone_history_refresh()
         else:
             observe_mowing_time(self, data, None)
         history = getattr(self, "mower_condition_history", None)
@@ -694,6 +704,31 @@ class DreameLawnMowerCoordinator(
             if changed and checkpoint is not None:
                 checkpoint.async_schedule_save(urgent=True)
         super().async_set_updated_data(data)
+
+    def _observe_mission_end(self, mission_active: bool | None) -> None:
+        """Read the session history as soon as a mission ends.
+
+        A charging pause keeps the mission active, so only a real end (finished,
+        cancelled or stopped) schedules the follow-up read.
+        """
+        if mission_active is None:
+            return
+        previous = getattr(self, "_last_mission_active", None)
+        self._last_mission_active = mission_active
+        if previous is True and mission_active is False:
+            self._schedule_zone_history_refresh(mission_ended=True)
+
+    def _zone_history_due(self) -> bool:
+        """Return whether hydrated zone history has outlived its interval."""
+        history = getattr(self, "zone_mowing_sessions", None)
+        refreshed_at = getattr(self, "zone_mowing_sessions_refreshed_at", None)
+        if history is None or refreshed_at is None:
+            return False
+        interval = (
+            ZONE_MOWING_HISTORY_REFRESH_INTERVAL
+            if history.complete else timedelta(seconds=30)
+        )
+        return bool(datetime.now(UTC) - refreshed_at >= interval)
 
     def _observe_runtime_mission_boundary(
         self,

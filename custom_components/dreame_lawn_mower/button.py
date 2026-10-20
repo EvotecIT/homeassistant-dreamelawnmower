@@ -48,6 +48,7 @@ async def async_setup_entry(
             DreameLawnMowerEndCurrentTaskButton(coordinator),
             DreameLawnMowerDockWithoutStoppingButton(coordinator),
             DreameLawnMowerFindMowerButton(coordinator),
+            DreameLawnMowerRefreshMowingHistoryButton(coordinator),
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
@@ -118,6 +119,21 @@ class DreameLawnMowerFindMowerButton(DreameLawnMowerEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Send the locator request once; it does not change the mower state."""
         await async_run_mowing_command(self.coordinator.client.async_find_mower())
+
+
+class DreameLawnMowerRefreshMowingHistoryButton(DreameLawnMowerEntity, ButtonEntity):
+    """Read the finished-session history now instead of waiting for the interval."""
+
+    _attr_name = "Refresh Mowing History"
+    _attr_icon = "mdi:history"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_refresh_mowing_history"
+
+    async def async_press(self) -> None:
+        """Queue one forced read through the single history owner."""
+        self.coordinator._schedule_zone_history_refresh(force=True)
 
 
 class DreameLawnMowerGoToMaintenancePointButton(
