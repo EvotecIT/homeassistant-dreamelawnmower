@@ -48,6 +48,10 @@ from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache as DreameLawnMowerRuntimeTelemetryCache,
 )
 from .runtime_data import DreameLawnMowerConfigEntry
+from .sensor_battery_settings import (
+    DreameLawnMowerRechargeBatteryLevelSensor,
+    DreameLawnMowerResumeBatteryLevelSensor,
+)
 from .sensor_compatibility import DreameLawnMowerCompatibilitySensor
 from .sensor_conditions import DreameLawnMowerConditionSensor
 
@@ -530,6 +534,30 @@ async def async_setup_entry(
 
     async_add_rain_delay_end()
     entry.async_on_unload(coordinator.async_add_listener(async_add_rain_delay_end))
+    battery_thresholds_added = False
+
+    @callback
+    def async_add_battery_thresholds() -> None:
+        nonlocal battery_thresholds_added
+        settings = coordinator.device_settings
+        if (
+            battery_thresholds_added
+            or not isinstance(settings, dict)
+            or not settings.get("charging_settings_available")
+        ):
+            return
+        battery_thresholds_added = True
+        async_add_entities(
+            [
+                DreameLawnMowerResumeBatteryLevelSensor(coordinator),
+                DreameLawnMowerRechargeBatteryLevelSensor(coordinator),
+            ]
+        )
+
+    async_add_battery_thresholds()
+    entry.async_on_unload(
+        coordinator.async_add_listener(async_add_battery_thresholds)
+    )
 
 
 class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
