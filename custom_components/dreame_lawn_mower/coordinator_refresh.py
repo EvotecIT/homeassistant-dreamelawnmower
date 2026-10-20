@@ -64,6 +64,8 @@ METADATA_SHUTDOWN_GRACE_SECONDS = 5.0
 SLOW_FOREGROUND_REFRESH_SECONDS = 15.0
 SLOW_METADATA_REFRESH_SECONDS = 30.0
 RUNTIME_MAP_IDENTITY_INTERVAL = timedelta(seconds=60)
+# Push updates postpone polling; renew the lease before it lapses mid-task.
+RUNTIME_MAP_IDENTITY_RENEW_AFTER = timedelta(seconds=40)
 
 
 def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
@@ -340,7 +342,7 @@ class DreameLawnMowerRefreshMixin:
             self,
             "_runtime_map_identity_verified",
             False,
-        )
+        ) or self._runtime_map_identity_renewal_due()
         mission_generation = runtime_mission_session_generation(
             self.runtime_telemetry_cache
         )
@@ -484,6 +486,18 @@ class DreameLawnMowerRefreshMixin:
             refreshed_at is not None
             and timedelta(0) <= datetime.now(UTC) - refreshed_at
             < RUNTIME_MAP_IDENTITY_INTERVAL
+        )
+
+    def _runtime_map_identity_renewal_due(self) -> bool:
+        """Return whether a still-fresh MAPL lease should be renewed now.
+
+        Renewing ahead of expiry keeps live telemetry scoped to its map, so the
+        session trail is not retired and recovered at every lease boundary.
+        """
+        refreshed_at = getattr(self, "_runtime_map_index_refreshed_at", None)
+        return (
+            refreshed_at is not None
+            and datetime.now(UTC) - refreshed_at >= RUNTIME_MAP_IDENTITY_RENEW_AFTER
         )
 
     def _expire_runtime_map_identity(self) -> None:
@@ -989,7 +1003,10 @@ class DreameLawnMowerRefreshMixin:
             snapshot is not None
             and snapshot.available
             and runtime_tracking_active(snapshot)
-            and not getattr(self, "_runtime_map_identity_verified", False)
+            and (
+                not getattr(self, "_runtime_map_identity_verified", False)
+                or self._runtime_map_identity_renewal_due()
+            )
         ):
             await self._async_refresh_active_runtime(cycle, snapshot)
         return await self.async_refresh_app_maps(force=False)

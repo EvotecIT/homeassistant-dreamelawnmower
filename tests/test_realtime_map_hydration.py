@@ -58,6 +58,88 @@ def test_realtime_update_requests_missing_active_map_identity(active, verified):
         coordinator._schedule_metadata_refresh.assert_not_called()
 
 
+@pytest.mark.parametrize(("lease_age", "renews"), [(10, False), (45, True)])
+def test_realtime_update_renews_active_map_identity_before_it_lapses(
+    lease_age, renews,
+):
+    """Push updates postpone polls, so an active lease is renewed ahead of expiry."""
+    from datetime import timedelta
+
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    snapshot = SimpleNamespace(
+        available=True, activity="mowing", docked=False, mowing_session_active=True,
+    )
+    coordinator._shutting_down = False
+    coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = (
+        datetime.now(UTC) - timedelta(seconds=lease_age)
+    )
+    coordinator._last_device_settings_event_at = None
+    coordinator.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
+    coordinator.app_maps = {"current_map_index": 0}
+    coordinator.selected_map_index = 0
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(return_value=snapshot),
+        async_get_runtime_status_blob=AsyncMock(return_value=None),
+        async_get_bluetooth_connected=AsyncMock(return_value=False),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+    coordinator._schedule_metadata_refresh = Mock()
+    asyncio.run(coordinator._async_process_client_update())
+    # The still-fresh lease keeps the live trail scoped to its map meanwhile.
+    assert coordinator._runtime_map_identity_verified is True
+    if renews:
+        coordinator._schedule_metadata_refresh.assert_called_once_with(
+            refresh_map_and_runtime=True
+        )
+    else:
+        coordinator._schedule_metadata_refresh.assert_not_called()
+
+
+@pytest.mark.parametrize("lease_age", [10, 45])
+def test_background_refresh_renews_due_verified_map_lease(monkeypatch, lease_age):
+    """The scheduled owner reads MAPL before expiry and extends client scope."""
+    from datetime import timedelta
+
+    from custom_components.dreame_lawn_mower import coordinator_refresh
+
+    async def scenario():
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        snapshot = SimpleNamespace(
+            available=True, activity="mowing", mowing_session_active=True,
+        )
+        coordinator.data = snapshot
+        coordinator.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
+        coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_identity_generation = 1
+        coordinator._runtime_active_map_index = 0
+        before = datetime.now(UTC) - timedelta(seconds=lease_age)
+        coordinator._runtime_map_index_refreshed_at = before
+        coordinator.app_maps = {"current_map_index": 0}
+        coordinator.app_maps_refreshed_at = before
+        coordinator.client = SimpleNamespace(update_runtime_map_identity=Mock())
+        coordinator._async_refresh_runtime_status = AsyncMock(return_value=True)
+        coordinator.async_refresh_app_maps = AsyncMock()
+        read_index = AsyncMock(return_value=0)
+        monkeypatch.setattr(
+            coordinator_refresh, "async_read_settled_map_index", read_index,
+        )
+        tracker = DreameLawnMowerPerformanceTracker()
+        await coordinator._async_refresh_background_map_runtime(tracker.start("test"))
+        if lease_age >= 40:
+            read_index.assert_awaited_once_with(coordinator)
+            assert coordinator._runtime_map_index_refreshed_at > before
+            coordinator.client.update_runtime_map_identity.assert_called_once()
+            assert coordinator._runtime_map_identity_verified is True
+            assert coordinator._runtime_map_identity_generation == 1
+        else:
+            read_index.assert_not_awaited()
+            assert coordinator._runtime_map_index_refreshed_at == before
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("active_at_execution", [True, False])
 def test_background_map_phase_uses_latest_state_without_foreground_poll(
     active_at_execution,

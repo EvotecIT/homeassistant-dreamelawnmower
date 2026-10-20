@@ -1019,10 +1019,14 @@ class DreameLawnMowerCoordinator(
             self.async_set_updated_data(snapshot)
             if (
                 runtime_active
-                and not getattr(self, "_runtime_map_identity_verified", False)
+                and (
+                    not getattr(self, "_runtime_map_identity_verified", False)
+                    or self._runtime_map_identity_renewal_due()
+                )
             ) or getattr(self, "_map_switch_inventory_pending_event", None) is not None:
                 # Push updates reset HA's polling interval. Acquire missing map
-                # identity through the existing coalesced background owner.
+                # identity, or renew it before it lapses, through the existing
+                # coalesced background owner.
                 self._schedule_metadata_refresh(refresh_map_and_runtime=True)
             settings_event_at = getattr(snapshot, "device_settings_event_at", None)
             preferences_event_at = getattr(
