@@ -50,6 +50,8 @@ Common user-facing helpers include:
 - `switch.<device>_rain_protection`
 - `time.<device>_charging_period_start`
 - `time.<device>_charging_period_end`
+- `sensor.<device>_resume_battery_level` (app setting: resume an interrupted task at this level; attribute `resume_after_charging`)
+- `sensor.<device>_recharge_battery_level` (app setting: return to the station at this level)
 - `binary_sensor.<device>_docked`
 - `binary_sensor.<device>_charging`
 - `binary_sensor.<device>_bluetooth_connected`
