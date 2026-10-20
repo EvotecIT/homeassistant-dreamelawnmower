@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.binary_sensor import (
+    DreameLawnMowerDoNotDisturbBinarySensor,
+)
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureWeatherProbeButton,
 )
@@ -111,6 +114,62 @@ def test_decode_device_settings_keeps_battery_thresholds_separate() -> None:
         "rain_protection_raw": [1, 8, 1],
         "weather_switch_enabled": True,
     }
+
+
+def test_decode_do_not_disturb_window_from_cfg() -> None:
+    # Values read from a MOVA LiDAX Ultra 1000 (mova.mower.g2529c) whose app
+    # shows Do Not Disturb on from 18:40 to 08:00.
+    settings = device_settings.decode_device_settings({"DND": [1, 1120, 480]})
+
+    assert settings == {
+        "dnd_settings_available": True,
+        "dnd_enabled": True,
+        "dnd_start_minutes": 1120,
+        "dnd_end_minutes": 480,
+        "dnd_raw": [1, 1120, 480],
+    }
+    assert device_settings.decode_device_settings({"DND": [0, 1320, 360]})[
+        "dnd_enabled"
+    ] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, [1, 1120], [1, 1440, 480], [1, -1, 480], "1,1120,480", [1, "x", 480]],
+)
+def test_malformed_do_not_disturb_record_is_not_reported(value: object) -> None:
+    settings = device_settings.decode_device_settings({"DND": value})
+
+    assert "dnd_settings_available" not in settings
+
+
+def test_do_not_disturb_binary_sensor_reports_window() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        device_settings={
+            "available": True,
+            "dnd_settings_available": True,
+            "dnd_enabled": True,
+            "dnd_start_minutes": 1120,
+            "dnd_end_minutes": 480,
+        },
+    )
+    sensor = object.__new__(DreameLawnMowerDoNotDisturbBinarySensor)
+    sensor.coordinator = coordinator
+
+    assert sensor.available is True
+    assert sensor.is_on is True
+    assert sensor.extra_state_attributes == {
+        "start": "18:40",
+        "end": "08:00",
+        "start_minutes": 1120,
+        "end_minutes": 480,
+    }
+
+    coordinator.device_settings = {"available": True}
+    assert sensor.available is False
+    assert sensor.is_on is None
+    assert sensor.extra_state_attributes == {}
 
 
 def test_setting_payloads_are_narrow_and_preserve_rain_sensitivity() -> None:
