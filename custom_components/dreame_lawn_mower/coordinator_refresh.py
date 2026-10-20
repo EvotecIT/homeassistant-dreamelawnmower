@@ -102,6 +102,8 @@ class DreameLawnMowerRefreshMixin:
             self, snapshot: DreameLawnMowerSnapshot
         ) -> bool | None: ...
 
+        def _observe_mission_end(self, mission_active: bool | None) -> None: ...
+
         def async_update_listeners(self) -> None: ...
 
         async def _async_close_client_for_unload(self) -> None: ...
@@ -164,6 +166,7 @@ class DreameLawnMowerRefreshMixin:
     _zone_history_refresh_task: asyncio.Task[None] | None
     _zone_history_mission_baseline: frozenset[str] | None
     _zone_history_force_next: bool
+    _zone_history_wake: asyncio.Event | None
     _metadata_shutdown_close_task: asyncio.Task[None] | None
     _metadata_refresh_semaphore: asyncio.Semaphore
     _runtime_active_map_index: int | None
@@ -297,7 +300,8 @@ class DreameLawnMowerRefreshMixin:
             # Active runtime hydration yields to app-map and telemetry reads.
             # Commit the authoritative mission boundary only after those awaits
             # confirm that this foreground snapshot is still current.
-            self._observe_runtime_mission_boundary(snapshot)
+            mission_active = self._observe_runtime_mission_boundary(snapshot)
+            self._observe_mission_end(mission_active)
             self._schedule_metadata_refresh(
                 refresh_map_and_runtime=True,
             )
@@ -875,6 +879,9 @@ class DreameLawnMowerRefreshMixin:
             return
         if force or mission_ended:
             self._zone_history_force_next = True
+            wake = getattr(self, "_zone_history_wake", None)
+            if wake is not None:
+                wake.set()
         if mission_ended:
             history = getattr(self, "zone_mowing_sessions", None)
             self._zone_history_mission_baseline = frozenset(
@@ -937,18 +944,38 @@ class DreameLawnMowerRefreshMixin:
 
         The cloud publishes the summary a little after the mower stops, so a few
         spaced forced reads replace waiting for the regular interval. A manual
-        request during the wait is served by the next of these reads.
+        request wakes the delay and is served immediately by this same worker.
         """
+        baseline = getattr(self, "_zone_history_mission_baseline", None)
+        if baseline is None:
+            return
         for delay in ZONE_HISTORY_AFTER_MISSION_DELAYS:
-            baseline = getattr(self, "_zone_history_mission_baseline", None)
-            if baseline is None or self._shutting_down:
+            if (
+                self._shutting_down
+                or self._zone_history_mission_baseline is not baseline
+            ):
                 return
             if self._ended_mission_summary_read(baseline):
                 break
-            await asyncio.sleep(delay)
+            wake = self._zone_history_wake = asyncio.Event()
+            if getattr(self, "_zone_history_force_next", False):
+                wake.set()
+            try:
+                async with asyncio.timeout(delay):
+                    await wake.wait()
+            except TimeoutError:
+                pass
+            finally:
+                self._zone_history_wake = None
+            if (
+                self._shutting_down
+                or self._zone_history_mission_baseline is not baseline
+            ):
+                return
             self._zone_history_force_next = False
             await self._async_read_zone_history(force=True)
-        self._zone_history_mission_baseline = None
+        if self._zone_history_mission_baseline is baseline:
+            self._zone_history_mission_baseline = None
 
     async def _async_refresh_background_map_runtime(
         self, cycle: DreameLawnMowerPerformanceCycle

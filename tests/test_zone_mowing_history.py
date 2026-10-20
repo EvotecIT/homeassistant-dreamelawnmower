@@ -669,3 +669,62 @@ def test_mission_end_during_a_running_read_is_followed(monkeypatch) -> None:
         assert coordinator._zone_history_mission_baseline is None
 
     asyncio.run(scenario())
+
+
+def test_manual_refresh_wakes_post_mission_delay(monkeypatch) -> None:
+    """A button press bypasses the retry delay through the same worker."""
+    from custom_components.dreame_lawn_mower import coordinator_refresh
+
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        monkeypatch.setattr(
+            coordinator_refresh, "ZONE_HISTORY_AFTER_MISSION_DELAYS", (180,)
+        )
+        waiting = asyncio.Event()
+        original = coordinator._ended_mission_summary_read
+
+        def summary_read(baseline):
+            waiting.set()
+            return original(baseline)
+
+        coordinator._ended_mission_summary_read = summary_read
+        coordinator._observe_mission_end(True)
+        coordinator._observe_mission_end(False)
+        task = coordinator._zone_history_refresh_task
+        try:
+            await waiting.wait()
+            coordinator._schedule_zone_history_refresh(force=True)
+            await asyncio.wait_for(task, 1)
+            assert forced == [True, True]
+            assert coordinator._zone_history_refresh_task is None
+        finally:
+            if not task.done():
+                task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_polled_mission_end_starts_history_followup(monkeypatch) -> None:
+    """Polling observes the same mission boundary as realtime pushes."""
+    async def scenario():
+        coordinator, forced = _history_coordinator(monkeypatch, [])
+        coordinator._last_mission_active = True
+        snapshot = SimpleNamespace(
+            available=True, activity="docked", docked=True,
+            mowing_session_active=False,
+        )
+        coordinator.runtime_telemetry_cache = SimpleNamespace()
+        coordinator.client = SimpleNamespace(
+            async_refresh=AsyncMock(return_value=snapshot),
+            update_runtime_live_tracking=Mock(),
+        )
+        coordinator._observe_runtime_mission_boundary = Mock(return_value=False)
+        coordinator._schedule_metadata_refresh = Mock()
+        result = await coordinator._async_update_data()
+        assert result is snapshot
+        assert coordinator._last_mission_active is False
+        assert coordinator._zone_history_refresh_task is not None
+        await coordinator._zone_history_refresh_task
+        assert forced == [True] * 4
+
+    asyncio.run(scenario())

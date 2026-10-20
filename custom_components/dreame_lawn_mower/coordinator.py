@@ -567,6 +567,7 @@ class DreameLawnMowerCoordinator(
         self._zone_history_mission_baseline: frozenset[str] | None = None
         self._last_mission_active: bool | None = None
         self._zone_history_force_next = False
+        self._zone_history_wake: asyncio.Event | None = None
         self._metadata_shutdown_close_task: asyncio.Task[None] | None = None
         self._client_close_task: asyncio.Task[None] | None = None
         self._metadata_refresh_semaphore = asyncio.Semaphore(
@@ -727,7 +728,7 @@ class DreameLawnMowerCoordinator(
             ZONE_MOWING_HISTORY_REFRESH_INTERVAL
             if history.complete else timedelta(seconds=30)
         )
-        return datetime.now(UTC) - refreshed_at >= interval
+        return bool(datetime.now(UTC) - refreshed_at >= interval)
 
     def _observe_runtime_mission_boundary(
         self,
