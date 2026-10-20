@@ -163,8 +163,38 @@ def mowing_map_overlay(
 ) -> dict[str, Any]:
     """Project fresh, identity-matched telemetry without fetching or rendering.
 
+    The session trail follows the published marker: it stays visible while the
+    marker was measured within the live window, even when the newest packet
+    carries no pose, so a viewer does not see the trail blink away between
+    position packets. Stale or differently scoped evidence still hides it.
+    """
+    result = _mowing_map_marker(
+        scene, blob, map_index=map_index, now=now,
+        retained_position=retained_position, docked=docked,
+    )
+    if (
+        active
+        and map_index == scene.map_index
+        and _position_recently_observed(result, now)
+    ):
+        result["trail"] = _project_trail(scene, track_segments)
+    return result
+
+
+def _mowing_map_marker(
+    scene: MowingMapScene,
+    blob: DreameLawnMowerStatusBlob | None,
+    *,
+    map_index: int | None,
+    now: datetime | None = None,
+    retained_position: MowerPosition | None = None,
+    docked: bool = False,
+) -> dict[str, Any]:
+    """Project the marker from fresh, identity-matched telemetry.
+
     A movement trail is not a cut-area mask. Missing, stale, out-of-bounds or
-    differently scoped evidence deliberately produces no live marker or trail.
+    differently scoped evidence deliberately produces no live marker; the
+    caller attaches the trail only to a recently measured marker.
     """
     result: dict[str, Any] = {
         "position": None,
@@ -239,28 +269,47 @@ def mowing_map_overlay(
         result["position_observed_at"] = updated.isoformat()
     elif retained_position is None:
         result["position_status"] = "out_of_bounds"
-    if active and result["position_status"] == "current":
-        # Retain recent segments, never joining across invalid points or gaps.
-        remaining = MAX_TRAIL_POINTS
-        retained: list[list[list[int]]] = []
-        for segment in reversed(track_segments):
-            if remaining < 2:
-                break
-            part: list[list[int]] = []
-            parts: list[list[list[int]]] = []
-            for point in segment[-remaining:]:
-                if len(point) == 2 and scene.contains(*point):
-                    part.append(list(scene.projection.point(*point)))
-                else:
-                    if len(part) >= 2:
-                        parts.append(part)
-                    part = []
-            if len(part) >= 2:
-                parts.append(part)
-            remaining -= sum(len(part) for part in parts)
-            retained[0:0] = parts
-        result["trail"] = retained
     return result
+
+
+def _project_trail(
+    scene: MowingMapScene,
+    track_segments: Sequence[Sequence[tuple[int, int]]],
+) -> list[list[list[int]]]:
+    """Retain recent segments, never joining across invalid points or gaps."""
+    remaining = MAX_TRAIL_POINTS
+    retained: list[list[list[int]]] = []
+    for segment in reversed(track_segments):
+        if remaining < 2:
+            break
+        part: list[list[int]] = []
+        parts: list[list[list[int]]] = []
+        for point in segment[-remaining:]:
+            if len(point) == 2 and scene.contains(*point):
+                part.append(list(scene.projection.point(*point)))
+            else:
+                if len(part) >= 2:
+                    parts.append(part)
+                part = []
+        if len(part) >= 2:
+            parts.append(part)
+        remaining -= sum(len(part) for part in parts)
+        retained[0:0] = parts
+    return retained
+
+
+def _position_recently_observed(result: dict[str, Any], now: datetime | None) -> bool:
+    """Return whether the published marker was measured within the live window."""
+    if result["position_status"] not in ("current", "last_known"):
+        return False
+    try:
+        observed = datetime.fromisoformat(result["position_observed_at"] or "")
+    except (ValueError, TypeError):
+        return False
+    if observed.tzinfo is None:
+        return False
+    age = ((now or datetime.now(UTC)) - observed).total_seconds()
+    return -5 <= age <= POSITION_MAX_AGE_SECONDS
 
 
 def _finite(value: Any) -> bool:
