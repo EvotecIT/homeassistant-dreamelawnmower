@@ -265,7 +265,14 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     """Main mower entity."""
 
     _unrecorded_attributes = frozenset(
-        {"observed_mowing_time_details", "recent_scheduled_runs"}
+        {
+            # Change on nearly every refresh; recording them stores a new copy
+            # of the whole (large) attribute set each time.
+            "connection_last_success_at",
+            "observed_mowing_time",
+            "observed_mowing_time_details",
+            "recent_scheduled_runs",
+        }
     )
 
     _attr_supported_features = (
