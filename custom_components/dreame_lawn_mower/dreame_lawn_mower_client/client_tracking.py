@@ -269,6 +269,31 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 self._runtime_mission_generation,
             )
 
+    def _suspended_trail_for_display(
+        self, map_index: int, geometry: str,
+    ) -> tuple[tuple[tuple[int, int], ...], ...]:
+        """Return the trail suspended a moment ago, for display only.
+
+        A lapsed map lease or an unscoped packet suspends the trail until the
+        next verified packet restores it. Between the two, a viewer would see an
+        empty map. Within the live window, and only for the same mission, frame
+        and slot, readers may show the suspended segments. Nothing is restored.
+        """
+        checkpoint = self._runtime_trail_checkpoint
+        if (
+            checkpoint is None
+            or self._runtime_live_track_segments
+            or self._runtime_session_active is not True
+            or checkpoint.mission_generation is None
+            or checkpoint.mission_generation != self._runtime_mission_generation
+            or checkpoint.map_index != map_index
+            or checkpoint.geometry != geometry
+            or not 0 <= datetime.now(UTC).timestamp() - checkpoint.suspended_at
+            <= POSITION_MAX_AGE_SECONDS
+        ):
+            return ()
+        return checkpoint.segments
+
     def _restore_runtime_trail(self, map_index: int, geometry: str) -> None:
         """Recover history only with fresh telemetry in its original context."""
         checkpoint = self._runtime_trail_checkpoint
