@@ -14,14 +14,15 @@ from .models import DreameLawnMowerSnapshot, DreameLawnMowerStatusBlob
 RESUME_MOWING_REQUEST = {"m": "a", "p": 0, "o": 5}
 
 _INACTIVE_HEARTBEAT_MAX_AGE_SECONDS = 130.0
-# Supervised A3 captures show unchanged 22-byte standby frames repeating every
-# five minutes. Keep one coordinator interval of delivery margin while newer
-# property/session evidence below remains authoritative.
-_A3_IDLE_HEARTBEAT_MAX_AGE_SECONDS = 365.0
-# MOVA 600 diagnostics show the same idle-in-station standby state in an
-# unchanged 20-byte frame on the same five-minute cadence. Other models keep
-# the generic 130-second limit for 20-byte frames.
-_MOVA_600_STANDBY_FRAME_MODELS = frozenset({"mova.mower.g2405a", "g2405a"})
+# A3 22-byte captures and MOVA 600/A2 20-byte diagnostics show idle-in-station
+# frames repeating every five minutes. Keep one coordinator interval of margin
+# while newer property/session evidence below remains authoritative.
+_STANDBY_HEARTBEAT_MAX_AGE_SECONDS = 365.0
+# Only models with an observed five-minute cadence get the longer 20-byte
+# standby window; other models retain the generic 130-second limit.
+_SLOW_STANDBY_FRAME_MODELS = frozenset({
+    "mova.mower.g2405a", "g2405a", "dreame.mower.g2408", "g2408",
+})
 _HEARTBEAT_CLOCK_SKEW_SECONDS = 5.0
 # ISO timestamps retain microseconds while vendor reception clocks can expose
 # a slightly finer float. Treat only that serialization quantum as equal.
@@ -136,9 +137,9 @@ def _inactive_heartbeat_is_current(
     if heartbeat_event_at > now + _HEARTBEAT_CLOCK_SKEW_SECONDS:
         return False
     heartbeat_max_age = (
-        _A3_IDLE_HEARTBEAT_MAX_AGE_SECONDS
+        _STANDBY_HEARTBEAT_MAX_AGE_SECONDS
         if _is_a3_idle_heartbeat(status_blob)
-        or _is_mova_600_idle_heartbeat(snapshot, status_blob)
+        or _is_slow_20_byte_idle_heartbeat(snapshot, status_blob)
         else _INACTIVE_HEARTBEAT_MAX_AGE_SECONDS
     )
     if now - heartbeat_event_at > heartbeat_max_age:
@@ -185,13 +186,13 @@ def _is_a3_idle_heartbeat(status_blob: DreameLawnMowerStatusBlob) -> bool:
     )
 
 
-def _is_mova_600_idle_heartbeat(
+def _is_slow_20_byte_idle_heartbeat(
     snapshot: DreameLawnMowerSnapshot,
     status_blob: DreameLawnMowerStatusBlob,
 ) -> bool:
-    """Return whether this is the supervised 20-byte MOVA 600 standby frame."""
+    """Recognize a 20-byte standby frame with an observed five-minute cadence."""
     return bool(
-        snapshot.descriptor.model in _MOVA_600_STANDBY_FRAME_MODELS
+        snapshot.descriptor.model in _SLOW_STANDBY_FRAME_MODELS
         and status_blob.length == 20
         and _is_idle_standby_frame(status_blob)
     )
