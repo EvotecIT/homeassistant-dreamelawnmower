@@ -30,6 +30,37 @@ from .sensor_map_data import (
     current_vector_map_attributes,
 )
 
+# Live runtime telemetry changes every few seconds while mowing. Each change of
+# any recorded attribute makes the recorder store a full new attributes row, so
+# these values bloat the database (and backups) quickly. They stay available in
+# the live state; their history already lives in the dedicated sensors.
+RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES = frozenset(
+    {
+        "area_progress_percent",
+        "captured_at",
+        "current_area_sqm",
+        "frame_valid",
+        "heading_deg",
+        "length",
+        "notes",
+        "pose_x",
+        "pose_y",
+        "progress_percent",
+        "track_length_m",
+        "track_point_count",
+        "track_segment_count",
+    }
+)
+MOWING_PROGRESS_UNRECORDED_ATTRIBUTES = frozenset(
+    {
+        "cleaned_area",
+        "cleaning_time",
+        "mowed_area",
+        "mowing_time",
+        "runtime_status_blob",
+    }
+)
+
 
 def _current_zone_label(snapshot: Any) -> str | None:
     """Return a friendly current-zone label for live mower state."""
@@ -148,6 +179,7 @@ class DreameLawnMowerMowingProgressSensor(
     """Expose a calculated mowing progress percentage for the active map."""
 
     _attr_name = "Mowing Progress"
+    _unrecorded_attributes = MOWING_PROGRESS_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:progress-check"
     _attr_native_unit_of_measurement = "%"
 
@@ -218,6 +250,7 @@ class DreameLawnMowerRuntimeMissionProgressSensor(
     """Expose mission progress decoded from the runtime `1.4` payload."""
 
     _attr_name = "Runtime Mission Progress"
+    _unrecorded_attributes = RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:map-clock-outline"
     _attr_native_unit_of_measurement = "%"
 
@@ -258,6 +291,7 @@ class DreameLawnMowerRuntimeCurrentAreaSensor(
     """Expose the current mission area decoded from runtime `1.4` telemetry."""
 
     _attr_name = "Runtime Current Area"
+    _unrecorded_attributes = RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:texture-box"
     _attr_native_unit_of_measurement = "m²"
 
@@ -290,6 +324,7 @@ class DreameLawnMowerRuntimeTotalAreaSensor(
     """Expose the total mission area decoded from runtime `1.4` telemetry."""
 
     _attr_name = "Runtime Total Area"
+    _unrecorded_attributes = RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:map"
     _attr_native_unit_of_measurement = "m²"
 
@@ -322,6 +357,7 @@ class DreameLawnMowerRuntimePositionXSensor(
     """Expose the current runtime mower X coordinate."""
 
     _attr_name = "Runtime Position X"
+    _unrecorded_attributes = RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:axis-x-arrow"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -360,6 +396,7 @@ class DreameLawnMowerRuntimePositionYSensor(
     """Expose the current runtime mower Y coordinate."""
 
     _attr_name = "Runtime Position Y"
+    _unrecorded_attributes = RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:axis-y-arrow"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -398,6 +435,7 @@ class DreameLawnMowerRuntimeHeadingSensor(
     """Expose the current runtime mower heading."""
 
     _attr_name = "Runtime Heading"
+    _unrecorded_attributes = RUNTIME_TELEMETRY_UNRECORDED_ATTRIBUTES
     _attr_icon = "mdi:compass-outline"
     _attr_native_unit_of_measurement = "°"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
