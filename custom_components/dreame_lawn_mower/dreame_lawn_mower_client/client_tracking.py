@@ -23,20 +23,59 @@ from .position_tracking import (
 TRAIL_MISSION_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
+def _joined_runtime_trail(
+    segments: tuple[tuple[tuple[int, int], ...], ...],
+) -> list[tuple[tuple[int, int], ...]]:
+    """Merge packet windows that repeat or extend the previous segment.
+
+    Packets resend a sliding window of the path's corner points: the same
+    window arrives again until the mower turns, then a window that starts with
+    the tail of the previous one. Kept as-is, a single lane becomes dozens of
+    identical segments and a short session exceeds the map card's segment
+    budget. Windows are joined only when they share at least two exact points
+    (one shared endpoint is not proof of the same window), so explicit breaks
+    stay disconnected.
+    """
+    joined: list[tuple[tuple[int, int], ...]] = []
+    for segment in segments:
+        if joined:
+            last = joined[-1]
+            if len(segment) <= len(last) and last[-len(segment):] == segment:
+                continue
+            overlap = next(
+                (
+                    size
+                    for size in range(min(len(segment), len(last)), 1, -1)
+                    if last[-size:] == segment[:size]
+                ),
+                0,
+            )
+            if overlap:
+                joined[-1] = (*last, *segment[overlap:])
+                continue
+        joined.append(segment)
+    return joined
+
+
 def bounded_runtime_trail(
     segments: tuple[tuple[tuple[int, int], ...], ...],
 ) -> tuple[tuple[tuple[int, int], ...], ...]:
-    """Keep the newest whole segments that fit the map's trail point budget.
+    """Join repeated packet windows, then keep the newest points in budget.
 
     Packets carry short segments, so a segment count dropped most of a long
-    mowing session. The map overlay applies the same point budget.
+    mowing session. The map overlay applies the same point budget. A joined
+    segment can be long: the oldest one that straddles the budget keeps its
+    newest points instead of disappearing whole.
     """
+    joined = _joined_runtime_trail(segments)
     total = 0
-    for start in range(len(segments) - 1, -1, -1):
-        total += len(segments[start])
-        if total > MAX_TRAIL_POINTS:
-            return segments[start + 1:]
-    return segments
+    for start in range(len(joined) - 1, -1, -1):
+        remaining = MAX_TRAIL_POINTS - total
+        if len(joined[start]) > remaining:
+            tail = joined[start][-remaining:] if remaining >= 2 else ()
+            return tuple(([tail] if tail else []) + joined[start + 1:])
+        total += len(joined[start])
+    return tuple(joined)
 
 
 if TYPE_CHECKING:

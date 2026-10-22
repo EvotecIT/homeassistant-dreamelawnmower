@@ -83,7 +83,10 @@ def test_history_only_batch_uses_the_same_app_frame_in_all_views(monkeypatch, na
         ) if native else client._sync_get_mowing_map_scene(
             map_index=0, style=map_render_style(), label_scale=1,
         )
-        publish(client, hex="same-frame-next-packet")
+        # A distinct window: an identical resend is merged into the trail.
+        publish(client, hex="same-frame-next-packet", candidate_runtime_track_segments=(
+            ((150, 150), (250, 150), (250, 300)),
+        ))
         second = await camera()
         details = await client.async_get_vector_map_details() if native else (
             client._sync_get_vector_map_details()
