@@ -269,6 +269,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             # Change on nearly every refresh; recording them stores a new copy
             # of the whole (large) attribute set each time.
             "connection_last_success_at",
+            "mowed_area",
+            "mowing_time",
+            "cleaned_area",
+            "cleaning_time",
             "observed_mowing_time",
             "observed_mowing_time_details",
             "recent_scheduled_runs",

@@ -30,7 +30,6 @@ from .sensor_map_data import (
     current_vector_map_attributes,
 )
 
-
 # Live runtime telemetry changes every few seconds while mowing. Each change of
 # any recorded attribute makes the recorder store a full new attributes row, so
 # these values bloat the database (and backups) quickly. They stay available in
