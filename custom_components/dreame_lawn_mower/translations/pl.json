@@ -247,9 +247,13 @@
       "name": "Usuń georeferencję",
       "description": "Usuwa zapisaną kalibrację mapy do GPS. Pozycja GPS pozostaje nieznana do ustawienia nowej kalibracji."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Anuluj zarządzaną automatyzację koszenia",
+      "description": "Anuluj oczekujące uruchomienia i automatyczne wznowienie bez poruszania kosiarką. Aby przerwać koszenie, użyj osobno pauzy lub powrotu do stacji."
+    },
     "start_scheduled_mowing": {
       "name": "Rozpocznij zaplanowane koszenie po sprawdzeniu warunków",
-      "description": "Sprawdza warunki i rozpoczyna zadanie albo je pomija, podając powód. Wymaga kosiarki online w stacji, nieaktywnego zadania, znanego stanu opóźnienia deszczowego, wystarczającej baterii i wyłączonych harmonogramów urządzenia na wszystkich mapach. Nie kolejkuje ani nie wznawia zadań."
+      "description": "Odśwież warunki uruchomienia kosiarki i rozpocznij wskazane zadanie albo podaj przyczynę pominięcia. Domyślnie bez odraczania, przerywania i wznawiania. Opcjonalna zgoda zewnętrzna, ograniczone odroczenie i wznowienie dotyczą wyłącznie tego zadania automatyzacji."
     },
     "start_zone_mowing": {
       "name": "Rozpocznij koszenie stref",

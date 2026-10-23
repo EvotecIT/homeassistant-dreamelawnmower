@@ -247,9 +247,13 @@
       "name": "Borrar la georreferencia",
       "description": "Elimina la calibración mapa-GPS guardada. La posición GPS queda desconocida hasta que se defina una nueva calibración."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Cancelar la automatización de corte gestionada",
+      "description": "Cancelar inicios pendientes y recuperación automática sin mover el cortacésped. Para interrumpir el corte, usar por separado la pausa o el regreso a la base."
+    },
     "start_scheduled_mowing": {
       "name": "Iniciar corte programado con comprobaciones de seguridad",
-      "description": "Comprueba las condiciones e inicia la tarea o la omite indicando el motivo. Requiere cortacésped conectado y en la base, tarea inactiva, estado de lluvia conocido, batería suficiente y programas nativos desactivados en todos los mapas. No encola ni reanuda tareas."
+      "description": "Actualizar las condiciones de inicio y comenzar una tarea concreta, o indicar por qué se omitió. Por defecto no se aplaza, interrumpe ni reanuda. El permiso externo, el aplazamiento limitado y la recuperación tras pausa solo se aplican a esta tarea gestionada."
     },
     "start_zone_mowing": {
       "name": "Iniciar corte por zonas",

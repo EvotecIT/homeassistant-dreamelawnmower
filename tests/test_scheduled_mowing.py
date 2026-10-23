@@ -236,7 +236,7 @@ def test_concurrent_block_is_skipped_instead_of_waiting_to_start_later():
     asyncio.run(scenario())
 
 
-def substituted_blueprint():
+def substituted_blueprint(**inputs):
     blueprint = Blueprint(
         load_yaml(BLUEPRINT_PATH),
         path=str(BLUEPRINT_PATH),
@@ -251,6 +251,7 @@ def substituted_blueprint():
                 "input": {
                     "mower_entity": "lawn_mower.garden",
                     "schedule_entity": "schedule.garden",
+                    **inputs,
                 },
             }
         },
@@ -263,9 +264,12 @@ def test_blueprint_actions_run_in_ha_and_render_outcome_or_service_failure(
     service_available,
 ):
     async def scenario():
-        config = substituted_blueprint()
+        config = substituted_blueprint(outcome_actions=[{
+            "action": "test.capture_outcome",
+            "data": {"reason": "{{ scheduled_result.reason }}"},
+        }])
         assert config["mode"] == "single"
-        assert config["triggers"] == [
+        assert config["triggers"][:1] == [
             {
                 "trigger": "schedule.block_started",
                 "target": {"entity_id": "schedule.garden"},
@@ -273,6 +277,7 @@ def test_blueprint_actions_run_in_ha_and_render_outcome_or_service_failure(
         ]
         hass = HomeAssistant(str(tmp_path))
         calls = []
+        outcomes = []
 
         async def start(call):
             if not service_available:
@@ -288,6 +293,9 @@ def test_blueprint_actions_run_in_ha_and_render_outcome_or_service_failure(
         async def notify(call):
             calls.append(dict(call.data))
 
+        async def capture(call):
+            outcomes.append(dict(call.data))
+
         hass.services.async_register(
             "dreame_lawn_mower",
             "start_scheduled_mowing",
@@ -295,14 +303,15 @@ def test_blueprint_actions_run_in_ha_and_render_outcome_or_service_failure(
             supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register("persistent_notification", "create", notify)
+        hass.services.async_register("test", "capture_outcome", capture)
         script = Script(
             hass, cv.SCRIPT_SCHEMA(config["actions"]), "Guarded mowing", "automation"
         )
-        result = await script.async_run(config["variables"], context=Context())
+        await script.async_run(config["variables"], context=Context())
         expected = (
             "rain_delay_active" if service_available else "mower_service_unavailable"
         )
-        assert result.variables["scheduled_result"]["reason"] == expected
+        assert outcomes == [{"reason": expected}]
         assert expected.replace("_", " ") in calls[0]["message"]
         await hass.async_stop()
 

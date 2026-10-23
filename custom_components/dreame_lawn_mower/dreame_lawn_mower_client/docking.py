@@ -6,6 +6,8 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
+from .exceptions import MowingAdmissionRevokedError
+
 _LOGGER = logging.getLogger(__name__)
 
 SESSION_STATES_TO_END = frozenset(
@@ -51,6 +53,8 @@ async def async_stop_then_dock(
 
     try:
         await stop()
+    except MowingAdmissionRevokedError:
+        raise
     except Exception as err:  # noqa: BLE001 - dock despite stop race/unavailability
         _LOGGER.warning("Failed to stop mower session: %s; docking anyway.", err)
         await dock()

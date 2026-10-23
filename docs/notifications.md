@@ -227,3 +227,8 @@ the five latest outcomes, newest first, including skipped attempts. These
 records survive reloads and restarts for up to 30 days and never trigger a
 retry. The existing manual
 start action retains its start/resume behavior.
+
+Optional [external mowing permission, bounded deferral, and owned-task pause
+recovery](automation-permission.md) extend this workflow without changing those
+defaults. The guide includes soil-moisture and irrigation helpers, cancellation,
+restart behavior, and the limits of HA-controlled holds.

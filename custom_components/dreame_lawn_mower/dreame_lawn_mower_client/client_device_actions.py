@@ -22,7 +22,11 @@ from .device_action_plan import (
     PropertyRequest,
     PropertyResponse,
 )
-from .exceptions import DeviceException, DreameLawnMowerConnectionError
+from .exceptions import (
+    DeviceException,
+    DreameLawnMowerConnectionError,
+    MowingAdmissionRevokedError,
+)
 
 _ACTION_TIMEOUT = 20
 _ACTION_CLEANUP_GRACE = 2.0
@@ -45,6 +49,7 @@ async def async_run_device_plan(
     _cleanup: OwnedCleanup | None = None,
     require_device: Callable[[Any], None] | None = None,
     deadline: float | None = None,
+    admission: Callable[[], bool] | None = None,
 ) -> Any:
     """Own bounded state steps, cancellable delays and non-replayed actions."""
     action_deadline = time.monotonic() + _ACTION_TIMEOUT
@@ -196,6 +201,11 @@ async def async_run_device_plan(
                                 )
                             def mark_dispatched() -> None:
                                 nonlocal attempted
+                                if admission is not None and not admission():
+                                    raise MowingAdmissionRevokedError(
+                                        "Mowing permission revoked before dispatch",
+                                        write_attempted=attempted,
+                                    )
                                 attempted = True
                                 if (
                                     isinstance(request, PropertyRequest)
@@ -231,6 +241,11 @@ async def async_run_device_plan(
                             deadline=deadline,
                             _cleanup=_cleanup,
                         )
+                except MowingAdmissionRevokedError:
+                    # Device plans may consume ordinary action errors. Admission
+                    # revocation must leave the plan immediately, never look like
+                    # an acknowledgement or a recoverable device reply.
+                    raise
                 except Exception as error:
                     done, effect = await advance(error=error)
                 else:

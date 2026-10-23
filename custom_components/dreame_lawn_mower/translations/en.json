@@ -247,9 +247,13 @@
       "name": "Clear map georeference",
       "description": "Remove the stored map-to-GPS calibration. The GPS position becomes unknown until a new calibration is set."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Cancel managed mowing automation",
+      "description": "Cancel pending starts and automatic recovery without moving the mower. Use normal pause or dock separately to interrupt physical mowing."
+    },
     "start_scheduled_mowing": {
       "name": "Start guarded scheduled mowing",
-      "description": "Refresh eligibility and start an explicit task, or skip immediately with a reason. Requires a docked, online mower, known inactive task and rain-delay state, sufficient battery, and disabled native schedules on every map. Does not queue a run or resume an existing task. Returns per-entity status and reason when response data is requested."
+      "description": "Refresh mower eligibility and start an explicit task, or report why it was skipped. Defaults do not defer, interrupt or resume. Optional external permission, bounded deferral and owned-task pause recovery apply only to this managed run."
     },
     "start_zone_mowing": {
       "name": "Start zone mowing",

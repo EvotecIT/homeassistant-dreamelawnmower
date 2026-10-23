@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 if TYPE_CHECKING:
     from .dreame_lawn_mower_client.real_scene import RealSceneImage
+    from .managed_mowing import ManagedMowing
     from .observation_checkpoint import ObservationCheckpoint
     from .option_updates import EntryUpdateSnapshot
     from .video_lan_cache import DreameLawnMowerVideoLanCache
@@ -431,6 +432,7 @@ class DreameLawnMowerCoordinator(
     # Setup and the map camera attach these resources to this lifecycle owner.
     applied_entry_update: EntryUpdateSnapshot
     observation_checkpoint: ObservationCheckpoint
+    managed_mowing: ManagedMowing | None = None
     video_lan_cache: DreameLawnMowerVideoLanCache
     video_provisioning_cache: DreameLawnMowerVideoProvisioningCache
     loaded_platforms: tuple[Platform, ...]
@@ -3571,6 +3573,8 @@ class DreameLawnMowerCoordinator(
     async def _async_stop_owned_tasks(self) -> None:
         """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
+        if self.managed_mowing is not None:
+            await self.managed_mowing.async_close()
         self._cancel_metadata_refresh()
         photo_owner = getattr(self, "_real_scene_owner", None)
         if photo_owner is not None:

@@ -18,6 +18,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types i
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DreameLawnMowerCommandRejectedError,
+    MowingAdmissionRevokedError,
 )
 
 from .test_async_app_commands import client_for
@@ -244,4 +245,65 @@ def test_dock_sequence_lifetime(monkeypatch, stage, shutdown):
                 release.set()
                 await asyncio.gather(operation, return_exceptions=True)
                 await client.async_close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account", ["dreame", "mova"])
+@pytest.mark.parametrize("stage", ["initial_refresh", "stop_confirmation"])
+def test_managed_dock_revocation_prevents_subsequent_native_commands(
+    monkeypatch, account, stage
+):
+    strings = cloud_strings(account)
+    actions = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        actions.append((await request.json())["data"]["params"]["aiid"])
+        return web.json_response({"code": 0, "data": {"result": {"code": 0}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session, account)
+            configure_dock(client)
+            client.async_refresh_authoritative_snapshot = AsyncMock(
+                return_value=SimpleNamespace(
+                    mission_task_id=11, online=True, task_resumable=False,
+                    mowing_session_active=True,
+                    returning=False, docked=False,
+                )
+            )
+            client.async_get_current_app_map_index = AsyncMock(return_value=2)
+            entered, release = asyncio.Event(), asyncio.Event()
+            permitted = True
+            reads = 0
+
+            async def refresh():
+                nonlocal reads
+                reads += 1
+                if reads == (1 if stage == "initial_refresh" else 2):
+                    entered.set()
+                    await release.wait()
+                return SimpleNamespace(
+                    state="mowing" if reads == 1 else "idle", task_status=None,
+                    mowing_session_active=reads == 1,
+                )
+
+            client.async_refresh = AsyncMock(side_effect=refresh)
+            operation = asyncio.create_task(client.async_control_managed_task(
+                "dock", expected_task_id=11, expected_map_index=2,
+                admission=lambda: permitted,
+            ))
+            try:
+                await asyncio.wait_for(entered.wait(), 3)
+                permitted = False
+                release.set()
+                with pytest.raises(MowingAdmissionRevokedError):
+                    await asyncio.wait_for(operation, 3)
+                assert actions == ([] if stage == "initial_refresh" else [1])
+            finally:
+                release.set()
+                await asyncio.gather(operation, return_exceptions=True)
+                await client.async_close()
+
     asyncio.run(scenario())

@@ -100,9 +100,13 @@
       "name": "Georeferenzierung löschen",
       "description": "Entfernt die gespeicherte Karten-GPS-Kalibrierung. Die GPS-Position ist unbekannt, bis eine neue Kalibrierung gesetzt wird."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Verwaltete Mähautomatisierung abbrechen",
+      "description": "Ausstehende Starts und automatische Fortsetzung abbrechen, ohne den Mäher zu bewegen. Zum Unterbrechen des Mähens separat Pause oder Rückkehr zur Station verwenden."
+    },
     "start_scheduled_mowing": {
       "name": "Geplantes Mähen mit Sicherheitsprüfung starten",
-      "description": "Prüft die Bedingungen und startet die Aufgabe oder überspringt sie mit Begründung. Erfordert einen online angedockten Mäher, eine inaktive Aufgabe, bekannten Regenstatus, genügend Akku und deaktivierte native Zeitpläne auf allen Karten. Keine Warteschlange oder Fortsetzung."
+      "description": "Mäherbedingungen aktualisieren und eine bestimmte Aufgabe starten oder den Grund für das Überspringen melden. Standardmäßig ohne Aufschub, Unterbrechung oder Fortsetzung. Optionale externe Freigabe, begrenzter Aufschub und Fortsetzung nach Pause gelten nur für diesen verwalteten Lauf."
     },
     "start_zone_mowing": {
       "name": "Zonenmähen starten",
