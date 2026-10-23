@@ -607,7 +607,15 @@ class ManagedMowing:
         record = {"record": self.record, "last_run_id": self._last_run_id}
         if not checkpoint_fits(record, self._store.key):
             raise ValueError("Managed mowing state exceeds the private storage budget")
-        await self._store.async_save(record)
+        write = self.hass.async_create_task(self._store.async_save(record))
+        try:
+            await asyncio.shield(write)
+        except asyncio.CancelledError:
+            # Store's atomic executor write can outlive its cancelled await.
+            # Drain it under our lifecycle lock before a final revocation save,
+            # so older waiting bytes cannot replace that revocation afterward.
+            await write
+            raise
 
     @callback
     def _state_changed(self, event: Event) -> None:

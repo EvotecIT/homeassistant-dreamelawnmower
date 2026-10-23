@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
+from threading import Event as ThreadEvent
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -23,6 +25,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
+    MowingAdmissionRevokedError,
 )
 from custom_components.dreame_lawn_mower.managed_mowing import ManagedMowing
 from custom_components.dreame_lawn_mower.managed_mowing_state import (
@@ -489,6 +492,63 @@ async def test_explicit_cancel_returns_with_durable_revocation(tmp_path):
         assert saved["data"]["record"] is None
         assert owner.record is None
         assert client.commands == []
+
+
+@pytest.mark.asyncio
+async def test_close_drains_older_atomic_writer_before_final_revocation(
+    tmp_path, monkeypatch
+):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        hass.states.async_set("binary_sensor.lawn_permission", "off")
+        await owner.async_request(request(
+            permission_entity="binary_sensor.lawn_permission", defer_minutes=60,
+        ))
+        entered, release = asyncio.Event(), ThreadEvent()
+        write_prepared = owner._store._write_prepared_data
+        blocked_once = False
+
+        def hold_waiting_write(mode, data):
+            nonlocal blocked_once
+            saved_record = json.loads(data)["data"]["record"]
+            if saved_record and saved_record["phase"] == "waiting" and not blocked_once:
+                blocked_once = True
+                hass.loop.call_soon_threadsafe(entered.set)
+                if not release.wait(5):
+                    raise RuntimeError("Test writer was not released")
+            write_prepared(mode, data)
+
+        monkeypatch.setattr(owner._store, "_write_prepared_data", hold_waiting_write)
+
+        async def revoke_before_dispatch(**kwargs):
+            hass.states.async_set("binary_sensor.lawn_permission", "off")
+            raise MowingAdmissionRevokedError("Permission changed before dispatch")
+
+        client.async_start_fresh_mowing = revoke_before_dispatch
+        hass.states.async_set("binary_sensor.lawn_permission", "on")
+        await asyncio.wait_for(entered.wait(), 3)
+        owner.cancel("scheduled_run_cancelled")
+        close = asyncio.create_task(owner.async_close())
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(close), 0.05)
+        finally:
+            release.set()
+            await close
+        saved = await hass.async_add_executor_job(
+            lambda: json.loads(
+                Path(hass.config.path(".storage", owner._store.key)).read_text()
+            )
+        )
+        assert saved["data"]["record"] is None
+        hass.states.async_set("binary_sensor.lawn_permission", "on")
+        restored = ManagedMowing(owner.entity)
+        await restored.async_start()
+        try:
+            await hass.async_block_till_done()
+            assert restored.record is None
+            assert client.commands == []
+        finally:
+            await restored.async_close()
 
 
 @pytest.mark.asyncio
