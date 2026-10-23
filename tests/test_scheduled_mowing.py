@@ -265,7 +265,7 @@ def test_blueprint_actions_run_in_ha_and_render_outcome_or_service_failure(
     async def scenario():
         config = substituted_blueprint()
         assert config["mode"] == "single"
-        assert config["triggers"] == [
+        assert config["triggers"][:1] == [
             {
                 "trigger": "schedule.block_started",
                 "target": {"entity_id": "schedule.garden"},

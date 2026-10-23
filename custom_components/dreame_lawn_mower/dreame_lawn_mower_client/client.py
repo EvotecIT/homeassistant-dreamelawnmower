@@ -126,6 +126,7 @@ from .exceptions import (
     DreameLawnMowerTwoFactorRequiredError as DreameLawnMowerTwoFactorRequiredError,
 )
 from .exceptions import InvalidActionException as InvalidActionException
+from .exceptions import MowingAdmissionRevokedError as _MowingAdmissionRevokedError
 from .maintenance import CMS_GET_REQUEST as CMS_GET_REQUEST
 from .maintenance import build_cms_set_request as build_cms_set_request
 from .maintenance import maintenance_item_status as maintenance_item_status
@@ -786,22 +787,31 @@ class DreameLawnMowerClient(
 
     async def _async_call_start_mowing_with_session_identity(
         self, *, require_new_session: bool = False,
+        admission: _typing.Callable[[], bool] | None = None,
     ) -> bool | None:
         """Start through the shared device policy and retain session identity."""
         from .client_start_control import async_start_with_session_identity
 
         return await async_start_with_session_identity(
-            self, require_new_session=require_new_session,
+            self, require_new_session=require_new_session, admission=admission,
         )
 
     @_serialized_task_control
     async def async_pause(self) -> None:
         """Pause mowing."""
+        await self._async_pause_mowing()
+
+    async def _async_pause_mowing(
+        self, *, admission: _typing.Callable[[], bool] | None = None,
+    ) -> None:
+        """Execute pause under the caller's serialized task-control ownership."""
         from .client_device_actions import async_run_device_plan
 
         async def pause(_cloud: _DreameCloudSession) -> None:
             try:
-                await async_run_device_plan(self, lambda device: device._pause_plan())
+                await async_run_device_plan(
+                    self, lambda device: device._pause_plan(), admission=admission,
+                )
             except _DeviceCommandRejectedException as error:
                 raise _DreameLawnMowerCommandRejectedError(str(error)) from error
             except DeviceException as error:
@@ -815,7 +825,23 @@ class DreameLawnMowerClient(
         await self._async_cloud_read(pause)
 
     @_serialized_task_control
-    async def async_start_fresh_mowing(self) -> bool | None:
+    async def async_control_managed_task(
+        self, command: str, *, expected_task_id: int, expected_map_index: int,
+        admission: _typing.Callable[[], bool],
+    ) -> str:
+        """Restrict an automation control to its confirmed task and active map."""
+        from .client_managed_control import async_control_owned_task
+
+        return await async_control_owned_task(
+            self, command, expected_task_id=expected_task_id,
+            expected_map_index=expected_map_index, admission=admission,
+        )
+
+    @_serialized_task_control
+    async def async_start_fresh_mowing(
+        self, *, expected_map_index: int | None = None,
+        admission: _typing.Callable[[], bool] | None = None,
+    ) -> bool | None:
         """Start an explicit all-area task, refusing resumable or unknown sessions."""
         baseline = await self.async_refresh_authoritative_snapshot()
         if (
@@ -826,8 +852,17 @@ class DreameLawnMowerClient(
             raise _DreameLawnMowerCommandRejectedError(
                 "A fresh scheduled run requires a docked mower with no existing task."
             )
+        if expected_map_index is not None:
+            await self._async_require_active_task_map(
+                expected_map_index, "scheduled mowing",
+            )
+        if admission is not None and not admission():
+            raise _MowingAdmissionRevokedError(
+                "Scheduled mowing permission was revoked"
+            )
         return await self._async_call_start_mowing_with_session_identity(
             require_new_session=True,
+            admission=admission,
         )
 
     async def async_get_schedule_start_evidence(self) -> dict[str, Any]:
@@ -1037,6 +1072,7 @@ class DreameLawnMowerClient(
     async def async_start_zone_mowing(
         self, zone_ids: Sequence[int], *, require_inactive_task: bool = False,
         expected_map_index: int | None = None,
+        admission: _typing.Callable[[], bool] | None = None,
     ) -> Any:
         """Start mower-native zone mowing for explicit map area ids."""
         normalized_zone_ids = [int(zone_id) for zone_id in zone_ids]
@@ -1050,11 +1086,16 @@ class DreameLawnMowerClient(
             require_inactive_task=require_inactive_task,
         )
         await self._async_require_active_task_map(expected_map_index, "zone mowing")
+        if admission is not None and not admission():
+            raise _MowingAdmissionRevokedError(
+                "Scheduled mowing permission was revoked"
+            )
         async def start_task(_cloud: _DreameCloudSession) -> Any:
             try:
                 response = await self._async_call_mowing_task(
                     build_zone_mowing_request(normalized_zone_ids),
                     task_name="zone mowing",
+                    admission=admission,
                 )
             except _DreameLawnMowerCommandRejectedError:
                 raise
@@ -1086,6 +1127,7 @@ class DreameLawnMowerClient(
         *,
         require_inactive_task: bool = False,
         expected_map_index: int | None = None,
+        admission: _typing.Callable[[], bool] | None = None,
     ) -> Any:
         """Start edge mowing for one or more contour id pairs."""
         normalized_contour_ids = [
@@ -1100,11 +1142,16 @@ class DreameLawnMowerClient(
             require_inactive_task=require_inactive_task,
         )
         await self._async_require_active_task_map(expected_map_index, "edge mowing")
+        if admission is not None and not admission():
+            raise _MowingAdmissionRevokedError(
+                "Scheduled mowing permission was revoked"
+            )
         async def start_task(_cloud: _DreameCloudSession) -> Any:
             try:
                 response = await self._async_call_mowing_task(
                     build_edge_mowing_request(normalized_contour_ids),
                     task_name="edge mowing",
+                    admission=admission,
                 )
             except _DreameLawnMowerCommandRejectedError:
                 raise
@@ -1131,6 +1178,7 @@ class DreameLawnMowerClient(
     async def async_start_spot_mowing(
         self, spot_ids: Sequence[int], *, require_inactive_task: bool = False,
         expected_map_index: int | None = None,
+        admission: _typing.Callable[[], bool] | None = None,
     ) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
         normalized_spot_ids = [int(spot_id) for spot_id in spot_ids]
@@ -1144,11 +1192,16 @@ class DreameLawnMowerClient(
             require_inactive_task=require_inactive_task,
         )
         await self._async_require_active_task_map(expected_map_index, "spot mowing")
+        if admission is not None and not admission():
+            raise _MowingAdmissionRevokedError(
+                "Scheduled mowing permission was revoked"
+            )
         async def start_task(_cloud: _DreameCloudSession) -> Any:
             try:
                 response = await self._async_call_mowing_task(
                     build_spot_mowing_request(normalized_spot_ids),
                     task_name="spot mowing",
+                    admission=admission,
                 )
             except _DreameLawnMowerCommandRejectedError:
                 raise
@@ -1369,14 +1422,22 @@ class DreameLawnMowerClient(
 
     async def _async_call_mowing_task(
         self, action: Mapping[str, Any], *, task_name: str,
+        admission: _typing.Callable[[], bool] | None = None,
     ) -> Any:
         """Dispatch one app task through the native command and reply owners."""
         from .client_app_reads import async_command_app_action
         from .mowing_tasks import client_task_result
 
+        def guard_dispatch() -> None:
+            if admission is not None and not admission():
+                raise _MowingAdmissionRevokedError(
+                    "Mowing permission revoked before dispatch"
+                )
+
         try:
             response = await async_command_app_action(
                 self, action, deadline=time.monotonic() + 20,
+                on_dispatch=guard_dispatch if admission else None,
             )
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err

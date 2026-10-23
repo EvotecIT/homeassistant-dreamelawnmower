@@ -247,9 +247,13 @@
       "name": "Cancellare la georeferenziazione",
       "description": "Rimuove la calibrazione mappa-GPS salvata. La posizione GPS resta sconosciuta finché non si imposta una nuova calibrazione."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Annulla l’automazione di taglio gestita",
+      "description": "Annullare gli avvii in attesa e la ripresa automatica senza muovere il tosaerba. Per interrompere il taglio, usare separatamente la pausa o il ritorno alla base."
+    },
     "start_scheduled_mowing": {
       "name": "Avviare il taglio programmato con verifica delle condizioni",
-      "description": "Verifica le condizioni e avvia l’attività oppure la salta indicando il motivo. Richiede rasaerba online alla base, attività inattiva, stato della pioggia noto, batteria sufficiente e programmi nativi disattivati su tutte le mappe. Non accoda né riprende attività."
+      "description": "Aggiornare le condizioni di avvio e iniziare un’attività precisa, oppure indicare perché è stata saltata. Per impostazione predefinita non si rinvia, interrompe o riprende. Il consenso esterno, il rinvio limitato e la ripresa dopo pausa riguardano solo questa attività gestita."
     },
     "start_zone_mowing": {
       "name": "Avviare il taglio per zone",

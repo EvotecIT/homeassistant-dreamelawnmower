@@ -248,9 +248,13 @@
       "name": "Smazat georeferenci",
       "description": "Odstraní uloženou kalibraci mapy na GPS. Poloha GPS zůstane neznámá, dokud není nastavena nová kalibrace."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Zrušit řízenou automatizaci sečení",
+      "description": "Zrušit čekající spuštění a automatické obnovení bez pohybu sekačky. K přerušení sečení použijte samostatně pozastavení nebo návrat do stanice."
+    },
     "start_scheduled_mowing": {
       "name": "Spustit plánované sečení s kontrolou podmínek",
-      "description": "Zkontroluje podmínky a spustí úlohu, nebo ji přeskočí s důvodem. Vyžaduje online sekačku v dokovací stanici, neaktivní úlohu, známý stav deště, dostatek baterie a vypnuté vlastní plány na všech mapách. Úlohy neřadí do fronty ani neobnovuje."
+      "description": "Obnovit podmínky spuštění a zahájit konkrétní úlohu, nebo uvést důvod přeskočení. Ve výchozím stavu bez odkladu, přerušení či obnovení. Volitelné externí povolení, omezený odklad a obnovení po pozastavení platí pouze pro tuto řízenou úlohu."
     },
     "start_zone_mowing": {
       "name": "Spustit sečení zón",

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Callable
 from datetime import datetime
 from time import time
 from types import SimpleNamespace
@@ -64,16 +66,19 @@ from .georeference import (
     register_georeference_services,
     store_georeference,
 )
+from .managed_mowing import ManagedMowing
+from .managed_mowing_state import MANAGED_FIELDS
 from .mowing_command import (
     async_run_mowing_command as _async_run_targeted_mowing_command,
 )
+from .mowing_command import cancel_managed_mowing, scheduled_control_fields
 from .mowing_preference_control import async_update_selected_mowing_preference
 from .runtime_cache import (
     begin_runtime_mission_session,
     runtime_mission_session_generation,
 )
 from .runtime_data import DreameLawnMowerConfigEntry
-from .scheduled_mowing import async_start_scheduled_mowing
+from .scheduled_mowing import _publish, async_start_scheduled_mowing
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
     ATTR_EXECUTE,
@@ -176,9 +181,13 @@ async def async_setup_entry(
             vol.Optional("zone_ids"): [vol.All(vol.Coerce(int), vol.Range(min=0))],
             vol.Optional("spot_ids"): [vol.All(vol.Coerce(int), vol.Range(min=0))],
             vol.Optional("contour_ids"): vol.Any([], _validate_contour_ids),
+            **MANAGED_FIELDS,
         },
         "async_start_scheduled_mowing",
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        "cancel_scheduled_mowing", {}, "async_cancel_scheduled_mowing",
     )
     platform.async_register_entity_service(
         "start_zone_mowing",
@@ -290,6 +299,26 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._descriptor.unique_id}_mower"
         self._session_photo_lock = asyncio.Lock()
+        self._managed_mowing: ManagedMowing | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Attach optional automation state to the mower's runtime lifetime."""
+        await super().async_added_to_hass()
+        self._managed_mowing = ManagedMowing(self)
+        self.coordinator.managed_mowing = self._managed_mowing
+        try:
+            await self._managed_mowing.async_start()
+        except Exception:
+            logging.getLogger(__name__).exception("Managed mowing storage unavailable")
+            await self._managed_mowing.async_close()
+            self._managed_mowing = None
+            self.coordinator.managed_mowing = None
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Drain managed automation before the mower entity is removed."""
+        if self._managed_mowing:
+            await self._managed_mowing.async_close()
+        await super().async_will_remove_from_hass()
 
     @property
     def activity(self) -> LawnMowerActivity | None:
@@ -420,6 +449,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             ),
             "task_resumable": getattr(snapshot, "task_resumable", None),
             "last_scheduled_run": getattr(self.coordinator, "last_scheduled_run", None),
+            "scheduled_automation": (
+                manager.summary if (manager := getattr(self, "_managed_mowing", None))
+                else None
+            ),
             "recent_scheduled_runs": self.coordinator.scheduled_run_history.recent()
             if hasattr(self.coordinator, "scheduled_run_history") else [],
             "unknown_property_count": len(
@@ -584,6 +617,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
 
     async def async_start_mowing(self) -> None:
         """Start or resume mowing."""
+        cancel_managed_mowing(self.coordinator)
         action = self.coordinator.selected_mowing_action
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
@@ -652,13 +686,37 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
 
     async def async_start_scheduled_mowing(self, **kwargs: Any) -> dict[str, Any]:
         """Run an explicit scheduled task with refreshed eligibility evidence."""
-        return await async_start_scheduled_mowing(self, **kwargs)
+        managed = bool(
+            kwargs.get("defer_minutes") or kwargs.get("resume_when_allowed")
+            or kwargs.get("interruption", "none") != "none"
+        )
+        manager: ManagedMowing | None = getattr(self, "_managed_mowing", None)
+        if managed or (manager and manager.record):
+            if manager is None:
+                return _publish(
+                    self, kwargs.get("task_type", "all"), "skipped",
+                    "managed_automation_unavailable",
+                )
+            return await manager.async_request(kwargs)
+        arguments = {key: value for key, value in kwargs.items() if key not in {
+            "defer_minutes", "interruption", "resume_when_allowed", "recovery_minutes",
+            "automation_entity", "run_id",
+        }}
+        return await async_start_scheduled_mowing(self, **arguments)
+
+    async def async_cancel_scheduled_mowing(self) -> None:
+        """Cancel pending starts and recovery without moving the mower."""
+        if self._managed_mowing:
+            self._managed_mowing.cancel("scheduled_run_cancelled")
 
     async def async_start_zone_mowing(
         self, zone_ids: list[int], *, require_inactive_task: bool = False,
         expected_map_index: int | None = None,
+        _admission: Callable[[], bool] | None = None,
     ) -> None:
         """Start mowing for one or more explicit current-map zones."""
+        if not require_inactive_task:
+            cancel_managed_mowing(self.coordinator)
         if not zone_ids:
             raise HomeAssistantError("At least one zone id is required.")
         map_index = self._task_map_index(expected_map_index)
@@ -679,7 +737,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_zone_mowing(
                 normalized, expected_map_index=map_index,
-                **({"require_inactive_task": True} if require_inactive_task else {}),
+                **scheduled_control_fields(require_inactive_task, _admission),
             )
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_ZONE
@@ -698,8 +756,11 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     async def async_start_spot_mowing(
         self, spot_ids: list[int], *, require_inactive_task: bool = False,
         expected_map_index: int | None = None,
+        _admission: Callable[[], bool] | None = None,
     ) -> None:
         """Start mowing for one or more explicit current-map spot ids."""
+        if not require_inactive_task:
+            cancel_managed_mowing(self.coordinator)
         if not spot_ids:
             raise HomeAssistantError("At least one spot id is required.")
         map_index = self._task_map_index(expected_map_index)
@@ -719,7 +780,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_spot_mowing(
                 normalized, expected_map_index=map_index,
-                **({"require_inactive_task": True} if require_inactive_task else {}),
+                **scheduled_control_fields(require_inactive_task, _admission),
             )
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_SPOT
@@ -738,8 +799,11 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     async def async_start_edge_mowing(
         self, contour_ids: list[list[int]], *, require_inactive_task: bool = False,
         expected_map_index: int | None = None,
+        _admission: Callable[[], bool] | None = None,
     ) -> None:
         """Start mowing for one or more explicit current-map edge contour ids."""
+        if not require_inactive_task:
+            cancel_managed_mowing(self.coordinator)
         normalized = _normalize_contour_ids(contour_ids)
         map_index = self._task_map_index(expected_map_index)
         self._ensure_contour_ids_available(normalized)
@@ -748,7 +812,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         await _async_run_targeted_mowing_command(
             self.coordinator.client.async_start_edge_mowing(
                 normalized, expected_map_index=map_index,
-                **({"require_inactive_task": True} if require_inactive_task else {}),
+                **scheduled_control_fields(require_inactive_task, _admission),
             )
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_EDGE
@@ -891,6 +955,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
 
     async def async_cancel_current_task(self) -> None:
         """End the current mower task without returning to the dock."""
+        cancel_managed_mowing(self.coordinator)
         await _async_run_targeted_mowing_command(
             self.coordinator.async_cancel_current_task()
         )
@@ -935,11 +1000,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
 
     async def async_pause(self) -> None:
         """Pause mowing."""
+        cancel_managed_mowing(self.coordinator)
         await self.coordinator.client.async_pause()
         await self.coordinator.async_request_refresh()
 
     async def async_dock(self) -> None:
         """Return to base."""
+        cancel_managed_mowing(self.coordinator)
         await self.coordinator.client.async_dock()
         await self.coordinator.async_request_refresh()
 

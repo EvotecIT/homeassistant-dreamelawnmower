@@ -37,6 +37,14 @@ class DreameLawnMowerCommandRejectedError(DreameLawnMowerConnectionError):
     """The mower explicitly rejected a state-changing app command."""
 
 
+class MowingAdmissionRevokedError(DreameLawnMowerCommandRejectedError):
+    """A local permission check refused dispatch, retaining prior-write evidence."""
+
+    def __init__(self, message: str, *, write_attempted: bool = False) -> None:
+        super().__init__(message)
+        self.write_attempted = write_attempted
+
+
 _WRITE_ATTEMPTED_FIELDS_ATTRIBUTE = "_dreame_write_attempted_fields"
 
 

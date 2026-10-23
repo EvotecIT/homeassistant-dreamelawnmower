@@ -21,6 +21,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .managed_mowing import async_remove_managed_mowing
 from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
 from .mowing_map_api import MOWING_MAP_API_KEY, MowingMapAPI, async_setup_mowing_map_api
 from .notifications import DreameLawnMowerNotificationManager
@@ -297,5 +298,6 @@ async def async_remove_entry(
     """Remove private cached evidence when its entry is deleted."""
     await async_remove_restart_preview(hass, entry)
     await async_remove_observation_checkpoint(hass, entry)
+    await async_remove_managed_mowing(hass, entry)
     await async_remove_video_lan_cache(hass, entry)
     await async_remove_video_provisioning_cache(hass, entry)

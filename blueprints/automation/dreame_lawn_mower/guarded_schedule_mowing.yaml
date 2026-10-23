@@ -6,7 +6,9 @@ blueprint:
     before dispatch. Busy or resumable tasks, unknown state, low battery,
     rain delays, and enabled native plans are skipped immediately. Disable
     native plans in the mower app or integration before enabling this automation.
-    There is no catch-up after a restart, no queue, and no action at block end.
+    Defaults skip immediately: no catch-up, retry, interruption, or automatic
+    resume. Optional permission, bounded deferral and pause recovery apply only
+    to this automation's managed run. There is no action at block end.
     Configure one automation per mower schedule. The block length does not set
     mowing duration. Targeted tasks require the saved map index and target IDs.
   domain: automation
@@ -52,6 +54,79 @@ blueprint:
           step: 1
           unit_of_measurement: "%"
           mode: box
+    permission_entity:
+      name: External mowing permission (optional)
+      description: >-
+        An on/off helper that must be on. Missing, unavailable and stale permission
+        blocks a start. Its optional reason attribute explains a block. Leave
+        empty to preserve the existing mower-only checks.
+      default: ""
+      selector:
+        entity:
+          filter:
+            domain: [binary_sensor, input_boolean, switch]
+    permission_max_age:
+      name: Maximum permission report age
+      description: >-
+        Seconds since the permission entity last reported. A composite helper
+        must check its source sensors' freshness itself. Zero disables this
+        additional age check, not the requirement for an explicit on state.
+      default: 1800
+      selector:
+        number:
+          min: 0
+          max: 86400
+          unit_of_measurement: s
+          mode: box
+    defer_minutes:
+      name: Optional deferred-start window
+      description: >-
+        Zero skips a blocked start. A positive value allows one pending run to
+        wait this many minutes from the scheduled attempt for permission, rain
+        delay or battery to clear. It never retries an ambiguous command.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+    interruption:
+      name: If permission is lost during this run
+      description: >-
+        No action is the default. Pause holds this task in place. End and dock
+        ends its task and returns it, with no automatic recovery. A pause request
+        during a native return/charging transition also ends and docks to avoid
+        leaving an automatically resumable charging task.
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Pause the owned task
+              value: pause
+            - label: End the owned task and dock
+              value: dock
+    resume_when_allowed:
+      name: Resume this automation's paused task when permitted
+      description: >-
+        Requires Pause above and a positive recovery window. Fresh native
+        safeguards, the same task and map, and no observed manual intervention
+        are required. Recovery is cancelled after an HA restart or reload.
+      default: false
+      selector:
+        boolean: {}
+    recovery_minutes:
+      name: Latest automatic recovery
+      description: Minutes from the original scheduled attempt; zero disables recovery.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
     map_index:
       name: Target map index
       description: Must be current for zone, edge, and spot tasks. Read from mower attributes.
@@ -87,7 +162,8 @@ blueprint:
       name: Additional outcome actions
       description: >-
         Optional actions can use scheduled_result.status and scheduled_result.reason.
-        Outcomes are started, submitted, skipped, or failed. The result is also
+        Managed runs also report deferred, paused, cancelled, expired and finished.
+        Finished means no longer active, not confirmed lawn coverage. The result is
         visible in the automation trace and last_scheduled_run mower attribute.
       default: []
       selector:
@@ -100,27 +176,51 @@ variables:
   selected_task: !input task_type
   selected_map: !input map_index
   notify_result: !input notify_outcome
+  owning_automation: "{{ this.entity_id if this is defined else '' }}"
 triggers:
   - trigger: schedule.block_started
     target:
       entity_id: !input schedule_entity
-actions:
-  - action: dreame_lawn_mower.start_scheduled_mowing
-    continue_on_error: true
-    target:
+  - trigger: event
+    event_type: dreame_lawn_mower_scheduled_run
+    event_data:
       entity_id: !input mower_entity
-    data:
-      task_type: !input task_type
-      minimum_battery: !input minimum_battery
-      map_index: "{{ selected_map | int }}"
-      zone_ids: !input zone_ids
-      contour_ids: !input contour_ids
-      spot_ids: !input spot_ids
-    response_variable: run_response
-  - variables:
-      scheduled_result: >-
-        {{ (run_response | default({})).get(mower_id,
-           {'status': 'failed', 'reason': 'mower_service_unavailable'}) }}
+    id: managed_outcome
+actions:
+  - choose:
+      - conditions: "{{ trigger is defined and trigger.id == 'managed_outcome' }}"
+        sequence:
+          - condition: template
+            value_template: >-
+              {{ owning_automation != '' and
+                 trigger.event.data.get('automation_entity') == owning_automation }}
+          - variables:
+              scheduled_result: "{{ trigger.event.data }}"
+    default:
+      - action: dreame_lawn_mower.start_scheduled_mowing
+        continue_on_error: true
+        target:
+          entity_id: !input mower_entity
+        data:
+          task_type: !input task_type
+          minimum_battery: !input minimum_battery
+          map_index: "{{ selected_map | int }}"
+          zone_ids: !input zone_ids
+          contour_ids: !input contour_ids
+          spot_ids: !input spot_ids
+          permission_entity: !input permission_entity
+          permission_max_age: !input permission_max_age
+          defer_minutes: !input defer_minutes
+          interruption: !input interruption
+          resume_when_allowed: !input resume_when_allowed
+          recovery_minutes: !input recovery_minutes
+          automation_entity: "{{ owning_automation }}"
+          run_id: "{{ owning_automation }}:{{ utcnow().strftime('%Y-%m-%dT%H:%M') }}"
+        response_variable: run_response
+      - variables:
+          scheduled_result: >-
+            {{ (run_response | default({})).get(mower_id,
+               {'status': 'failed', 'reason': 'mower_service_unavailable'}) }}
   - if: "{{ notify_result }}"
     then:
       - action: persistent_notification.create
@@ -130,5 +230,6 @@ actions:
           message: >-
             {{ state_attr(mower_id, 'friendly_name') or mower_id }}:
             {{ scheduled_result.reason | replace('_', ' ') }}.
+            {{ scheduled_result.get('detail', '') }}
             Task: {{ selected_task }}. See the automation trace for details.
   - sequence: !input outcome_actions

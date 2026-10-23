@@ -1,7 +1,7 @@
 """Native start ownership and the device's guarded session decision."""
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any
 
 from .client_core import _device_start_session_identity
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 async def async_start_with_session_identity(
     client: DreameLawnMowerClient, *, require_new_session: bool,
+    require_resumed_session: bool = False,
+    admission: Callable[[], bool] | None = None,
 ) -> bool | None:
     """Read session identity and select the start branch in one locked plan step."""
     new_session: bool | None = None
@@ -32,11 +34,15 @@ async def async_start_with_session_identity(
             raise DreameLawnMowerCommandRejectedError(
                 "Scheduled mowing cannot resume or replace an existing task."
             )
+        if require_resumed_session and new_session is not False:
+            raise DreameLawnMowerCommandRejectedError(
+                "Managed recovery cannot start or replace a mower task."
+            )
         return (yield from device._start_mowing_plan())
 
     async def start(_cloud: DreameCloudSession) -> bool | None:
         try:
-            await async_run_device_plan(client, plan)
+            await async_run_device_plan(client, plan, admission=admission)
         except DeviceCommandRejectedException as error:
             raise DreameLawnMowerCommandRejectedError(str(error)) from error
         except DeviceException as error:

@@ -1,0 +1,68 @@
+# Home Assistant package fragment. Replace switch.garden_irrigation.
+input_datetime:
+  mower_irrigation_clear_after:
+    name: Irrigation clear after
+    has_date: true
+    has_time: true
+
+input_boolean:
+  mower_irrigation_initialized:
+    name: Irrigation settling initialized
+    initial: false
+
+automation:
+  - id: mower_irrigation_settling
+    alias: Mower irrigation settling deadline
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: switch.garden_irrigation
+        to: "off"
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: state
+        entity_id: switch.garden_irrigation
+        state: "off"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.mower_irrigation_initialized
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.mower_irrigation_clear_after
+        data:
+          timestamp: "{{ now().timestamp() + 15 * 60 }}"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.mower_irrigation_initialized
+
+template:
+  - binary_sensor:
+      - name: Irrigation mowing permitted
+        unique_id: irrigation_mowing_permitted
+        state: >-
+          {{ is_state('switch.garden_irrigation', 'off')
+             and is_state('input_boolean.mower_irrigation_initialized', 'on')
+             and has_value('input_datetime.mower_irrigation_clear_after')
+             and is_number(state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp'))
+             and state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp') | float
+                 >= states.switch.garden_irrigation.last_changed.timestamp()
+             and now().timestamp() >=
+                 state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp') | float }}
+        attributes:
+          reason: >-
+            {% if not is_state('switch.garden_irrigation', 'off') %}
+              Irrigation active or state unknown
+            {% elif not is_state('input_boolean.mower_irrigation_initialized', 'on')
+                    or not is_number(state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp')) %}
+              Irrigation settling deadline not initialized
+            {% elif now().timestamp() <
+                    state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp') | float %}
+              Waiting for irrigation settling period
+            {% elif state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp') | float
+                    < states.switch.garden_irrigation.last_changed.timestamp() %}
+              Waiting for a new settling deadline
+            {% else %}
+              Irrigation inactive and settling period finished
+            {% endif %}

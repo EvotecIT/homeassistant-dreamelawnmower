@@ -1,0 +1,36 @@
+# Home Assistant package fragment. Replace sensor.garden_soil_moisture.
+# Example percentages only: calibrate for your sensor, its units and your soil.
+binary_sensor:
+  - platform: threshold
+    name: Lawn soil too wet
+    entity_id: sensor.garden_soil_moisture
+    upper: 60
+    hysteresis: 5
+
+template:
+  - binary_sensor:
+      - name: Soil mowing permitted
+        unique_id: soil_mowing_permitted
+        # A restart resets this drying wait, which is deliberately conservative.
+        delay_on: "00:30:00"
+        state: >-
+          {% set source = states.sensor.garden_soil_moisture %}
+          {{ source is defined and source is not none
+             and is_number(source.state)
+             and 0 <= source.state | float <= 100
+             and 0 <= (now() - source.last_reported).total_seconds() <= 1800
+             and is_state('binary_sensor.lawn_soil_too_wet', 'off') }}
+        attributes:
+          reason: >-
+            {% set source = states.sensor.garden_soil_moisture %}
+            {% if source is not defined or source is none or not is_number(source.state) %}
+              Soil moisture unavailable
+            {% elif not 0 <= source.state | float <= 100 %}
+              Soil moisture outside the configured percentage range
+            {% elif not 0 <= (now() - source.last_reported).total_seconds() <= 1800 %}
+              Soil moisture report is stale
+            {% elif not is_state('binary_sensor.lawn_soil_too_wet', 'off') %}
+              Soil too wet or wetness state unknown
+            {% else %}
+              Soil acceptable; permission waits for the drying period
+            {% endif %}

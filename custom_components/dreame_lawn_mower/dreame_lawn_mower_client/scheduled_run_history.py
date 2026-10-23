@@ -84,7 +84,10 @@ def _valid_record(record: Any, now: datetime) -> bool:
         return False
     if (
         record["task_type"] not in ("all", "zone", "spot", "edge")
-        or record["status"] not in ("skipped", "failed", "submitted", "started")
+        or record["status"] not in (
+            "skipped", "failed", "submitted", "started", "deferred", "paused",
+            "cancelled", "expired", "finished",
+        )
         or not isinstance(record["reason"], str)
         or not 1 <= len(record["reason"]) <= 100
         or not all(

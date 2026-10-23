@@ -6,7 +6,7 @@ import asyncio
 import math
 import time
 from collections.abc import Callable, Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .client_device_actions import async_run_device_plan
 from .client_map_frames import (
@@ -129,7 +129,7 @@ class NativeMapApplication:
         return await self._apply_plan(self.manager._add_map_data_plan(partial))
 
     async def _apply_plan[T](self, plan: Generator[MapUpdateRequest, None, T]) -> T:
-        result: T
+        result: T | None = None
 
         def advance() -> MapUpdateRequest | None:
             nonlocal result
@@ -142,7 +142,7 @@ class NativeMapApplication:
         try:
             while (request := await self.state(advance)) is not None:
                 await self.follow_up(request)
-            return result
+            return cast(T, result)
         finally:
             # The frame plan has no state-mutating finalizers.
             plan.close()

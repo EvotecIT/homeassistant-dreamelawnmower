@@ -24,7 +24,7 @@ from .dreame_lawn_mower_client.maintenance import (
 )
 from .entity import DreameLawnMowerEntity
 from .manual_control import maintenance_point_movement_block_reason
-from .mowing_command import async_run_mowing_command
+from .mowing_command import async_run_mowing_command, cancel_managed_mowing
 from .reporting import build_maintenance_point_diagnostics
 from .runtime_data import DreameLawnMowerConfigEntry
 from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
@@ -80,6 +80,7 @@ class DreameLawnMowerEndCurrentTaskButton(DreameLawnMowerEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Use the guarded task cancellation and authoritative state refresh."""
+        cancel_managed_mowing(self.coordinator)
         await async_run_mowing_command(self.coordinator.async_cancel_current_task())
 
 
@@ -100,6 +101,7 @@ class DreameLawnMowerDockWithoutStoppingButton(
 
     async def async_press(self) -> None:
         """Dock directly so the current task remains available to resume."""
+        cancel_managed_mowing(self.coordinator)
         await async_run_mowing_command(
             self.coordinator.client.async_dock_without_stopping()
         )

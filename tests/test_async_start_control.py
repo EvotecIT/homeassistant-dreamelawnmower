@@ -246,3 +246,117 @@ def test_start_uncertain_result_never_replays(monkeypatch, reply, confirmed):
             finally:
                 await client.async_close()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("branch", ["fresh", "unknown", "paused"])
+@pytest.mark.parametrize("account", ["dreame", "mova"])
+def test_managed_resume_native_plan_never_creates_a_fresh_task(
+    monkeypatch, branch, account,
+):
+    """Exercise the actual public control and device plan against a cloud server."""
+    strings = cloud_strings(account)
+    requests = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        requests.append((await request.json())["data"])
+        return web.json_response({"code": 0, "data": {"result": {"code": 0}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session, account)
+            configure_start(client, branch)
+            client.async_refresh_authoritative_snapshot = AsyncMock(
+                return_value=SimpleNamespace(
+                    online=True, mission_task_id=10, task_resumable=True,
+                    paused=True, error_code=0, returning=False, docked=False,
+                ),
+            )
+            client.async_get_current_app_map_index = AsyncMock(return_value=2)
+            try:
+                operation = client.async_control_managed_task(
+                    "resume", expected_task_id=10, expected_map_index=2,
+                    admission=lambda: True,
+                )
+                if branch == "paused":
+                    assert await operation == "resumed"
+                    assert len(requests) == 1
+                else:
+                    with pytest.raises(DreameLawnMowerCommandRejectedError):
+                        await operation
+                    assert requests == []
+            finally:
+                await client.async_close()
+    asyncio.run(scenario())
+
+
+def test_fresh_start_checks_permission_after_task_control_wait(monkeypatch):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        exceptions,
+    )
+
+    async def scenario():
+        async with ClientSession() as session:
+            client = client_for(session)
+            configure_start(client)
+            client.async_refresh_authoritative_snapshot = AsyncMock(
+                return_value=SimpleNamespace(
+                    docked=True, mowing_session_active=False, task_resumable=False,
+                ),
+            )
+            client._async_require_active_task_map = AsyncMock()
+            client._async_call_start_mowing_with_session_identity = AsyncMock()
+            permitted = True
+            await client._task_control_gate.acquire()
+            operation = asyncio.create_task(client.async_start_fresh_mowing(
+                expected_map_index=2, admission=lambda: permitted,
+            ))
+            await asyncio.sleep(0)
+            assert not operation.done()
+            permitted = False
+            client._task_control_gate.release()
+            try:
+                with pytest.raises(exceptions.MowingAdmissionRevokedError):
+                    await operation
+                client._async_call_start_mowing_with_session_identity.assert_not_awaited()
+            finally:
+                await client.async_close()
+    asyncio.run(scenario())
+
+
+def test_permission_rechecked_at_native_http_dispatch(monkeypatch):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        exceptions,
+    )
+
+    strings = cloud_strings("dreame")
+    requests = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        requests.append(await request.json())
+        return web.json_response({"code": 0, "data": {"result": {"code": 0}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session)
+            configure_start(client)
+            client.async_refresh_authoritative_snapshot = AsyncMock(
+                return_value=SimpleNamespace(
+                    docked=True, mowing_session_active=False, task_resumable=False,
+                ),
+            )
+            checks = []
+            def admission():
+                checks.append(True)
+                return len(checks) == 1
+            try:
+                with pytest.raises(exceptions.MowingAdmissionRevokedError):
+                    await client.async_start_fresh_mowing(admission=admission)
+                assert checks == [True, True]
+                assert requests == []
+            finally:
+                await client.async_close()
+    asyncio.run(scenario())

@@ -13,18 +13,27 @@ def scheduled_start_block_reason(
     *,
     minimum_battery: int = 30,
     map_index: int | None = None,
+    resume_task_id: int | None = None,
 ) -> str | None:
     """Return a stable skip reason, retaining unknown as a distinct state."""
     if not isinstance(minimum_battery, int) or not 20 <= minimum_battery <= 100:
         raise ValueError("minimum_battery must be an integer between 20 and 100.")
     if getattr(snapshot, "online", None) is not True:
         return "connectivity_unknown_or_offline"
-    if getattr(snapshot, "docked", None) is not True:
-        return "not_docked"
-    if getattr(snapshot, "task_resumable", None) is not False:
-        return "resumable_or_unknown_task"
-    if getattr(snapshot, "mowing_session_active", None) is not False:
-        return "active_or_unknown_task"
+    if resume_task_id is None:
+        if getattr(snapshot, "docked", None) is not True:
+            return "not_docked"
+        if getattr(snapshot, "task_resumable", None) is not False:
+            return "resumable_or_unknown_task"
+        if getattr(snapshot, "mowing_session_active", None) is not False:
+            return "active_or_unknown_task"
+    elif (
+        type(resume_task_id) is not int
+        or getattr(snapshot, "mission_task_id", None) != resume_task_id
+        or getattr(snapshot, "paused", None) is not True
+        or getattr(snapshot, "task_resumable", None) is not True
+    ):
+        return "owned_paused_task_unknown"
     if getattr(snapshot, "error_code", None) != 0:
         return "fault_or_unknown_fault_state"
     if getattr(snapshot, "child_lock", None) is True:

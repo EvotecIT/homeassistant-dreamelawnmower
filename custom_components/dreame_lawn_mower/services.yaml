@@ -4,13 +4,76 @@ start_scheduled_mowing:
     Refresh eligibility and start an explicit task, or skip immediately with a
     reason. Requires a docked, online mower, known inactive task and rain-delay
     state, sufficient battery, and disabled native schedules on every map.
-    Does not queue a run or resume an existing task. Returns per-entity status
-    and reason when response data is requested.
+    Defaults skip immediately without queueing, interrupting or resuming. Optional
+    external permission, bounded deferral and same-task pause recovery apply only
+    to this managed run. Returns per-entity status and reason when requested.
   target:
     entity:
       integration: dreame_lawn_mower
       domain: lawn_mower
   fields:
+    permission_entity:
+      name: External mowing permission
+      description: Optional on/off helper; only a valid on permits a start. Its reason attribute explains blocks.
+      default: ""
+      selector:
+        entity:
+          filter:
+            domain: [binary_sensor, input_boolean, switch]
+    permission_max_age:
+      name: Maximum permission report age
+      description: Seconds since its last report; zero disables only the age check. Composite helpers must check their source freshness.
+      default: 1800
+      selector:
+        number:
+          min: 0
+          max: 86400
+          unit_of_measurement: s
+          mode: box
+    defer_minutes:
+      name: Deferred-start window
+      description: Zero skips immediately. A positive value retains one pending attempt until this many minutes after the request.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+    interruption:
+      name: Action when permission is lost
+      default: none
+      selector:
+        select:
+          options: [none, pause, dock]
+    resume_when_allowed:
+      name: Resume the owned paused task
+      description: Requires pause and a positive recovery window. Never resumes after restart/reload, manual intervention or a task/map change.
+      default: false
+      selector:
+        boolean: {}
+    recovery_minutes:
+      name: Recovery window
+      description: Latest resume, in minutes from the original request. Zero disables automatic recovery.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+    automation_entity:
+      name: Owning automation
+      description: Optional automation entity; disabling or reloading it cancels pending starts and recovery. The blueprint supplies this automatically.
+      selector:
+        entity:
+          filter:
+            domain: automation
+    run_id:
+      name: Scheduled occurrence ID
+      description: Optional stable ID for deduplication of this scheduled occurrence. The most recent accepted ID survives restart.
+      selector:
+        text: {}
     task_type:
       name: Mowing task
       default: all
@@ -50,6 +113,14 @@ start_scheduled_mowing:
       example: [2, 4]
       selector:
         object: {}
+
+cancel_scheduled_mowing:
+  name: Cancel managed mowing automation
+  description: Cancel pending starts and automatic recovery without moving the mower. Use normal pause or dock separately to interrupt physical mowing.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
 
 start_zone_mowing:
   name: Start zone mowing

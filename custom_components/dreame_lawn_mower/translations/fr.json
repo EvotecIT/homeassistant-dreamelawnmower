@@ -247,9 +247,13 @@
       "name": "Effacer le géoréférencement",
       "description": "Supprime le calage carte-GPS enregistré. La position GPS devient inconnue jusqu’à ce qu’un nouveau calage soit défini."
     },
+    "cancel_scheduled_mowing": {
+      "name": "Annuler l’automatisation de tonte gérée",
+      "description": "Annuler les démarrages en attente et la reprise automatique sans déplacer la tondeuse. Pour interrompre la tonte, utiliser séparément la pause ou le retour à la station."
+    },
     "start_scheduled_mowing": {
       "name": "Démarrer la tonte programmée avec vérification des conditions",
-      "description": "Vérifie les conditions et démarre la tâche ou l’ignore en indiquant la raison. Exige une tondeuse connectée et à la station, une tâche inactive, un état de pluie connu, une batterie suffisante et les programmes natifs désactivés sur toutes les cartes. Aucune mise en attente ni reprise."
+      "description": "Actualiser les conditions de démarrage et lancer une tâche précise, ou indiquer pourquoi elle a été ignorée. Par défaut, aucun report, arrêt ni reprise automatique. L’autorisation externe, le report limité et la reprise après pause ne concernent que cette tâche gérée."
     },
     "start_zone_mowing": {
       "name": "Démarrer la tonte par zones",
