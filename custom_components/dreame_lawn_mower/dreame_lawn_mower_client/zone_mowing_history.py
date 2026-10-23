@@ -59,6 +59,8 @@ class ZoneMowingRecord:
 # Summary coordinates use the coarse MAPD units of the summary's own ``map``
 # polygons (centimetres); drawable geometry uses units ten times finer.
 _SUMMARY_COORDINATE_SCALE = 10
+# Native millimetres: half a metre covers the dock pose noise seen in summaries.
+STABLE_STATION_SPREAD = 500
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,26 @@ class ZoneMowingHistory:
                 return item
         return ordered[0] if revision is None and ordered else None
 
+    def stable_charger(self) -> ChargerPosition | None:
+        """Newest station when every summary reported it at the same place.
+
+        The app re-saves the map often (a renamed zone, an edited path), and
+        each save is a new revision without a session summary yet. A station
+        that never moved across at least two summaries is still where it was;
+        one that moved proves nothing until a session runs on the new map.
+        """
+        known = list(self.chargers.values())
+        if len(known) < 2:
+            return None
+        xs = [item.x for item in known]
+        ys = [item.y for item in known]
+        if (
+            max(xs) - min(xs) > STABLE_STATION_SPREAD
+            or max(ys) - min(ys) > STABLE_STATION_SPREAD
+        ):
+            return None
+        return max(known, key=lambda item: item.observed_at or 0)
+
     @property
     def complete(self) -> bool:
         return self.history_available and not self.pending
@@ -128,11 +150,14 @@ class ZoneMowingHistory:
 def reported_charger_for_map(
     history: ZoneMowingHistory | None, app_maps: Any, map_index: int,
 ) -> ChargerPosition | None:
-    """Bind summary coordinates to one current, uniquely verified revision."""
+    """Bind summary coordinates to one current, uniquely verified revision.
+
+    Without a summary on that revision, a station that never moved is kept.
+    """
     revision = selected_map_revision(app_maps, map_index)
     if history is None or revision is None:
         return None
-    return history.latest_charger(revision)
+    return history.latest_charger(revision) or history.stable_charger()
 
 
 @dataclass(frozen=True)

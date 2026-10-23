@@ -82,6 +82,17 @@ def test_latest_station_prefers_the_current_map_revision() -> None:
     assert ZoneMowingHistory().latest_charger(HASH) is None
 
 
+def test_station_that_never_moved_survives_a_new_revision() -> None:
+    older = ChargerPosition(1160, -20, 0, 100, HASH)
+    newer = ChargerPosition(1220, -40, 0, 200, OTHER_HASH)
+    history = ZoneMowingHistory(chargers={MON: older, TUE: newer})
+    assert history.stable_charger() == newer
+    moved = ChargerPosition(1160, 900, 0, 300, OTHER_HASH)
+    assert ZoneMowingHistory(chargers={MON: older, TUE: moved}).stable_charger() is None
+    assert ZoneMowingHistory(chargers={MON: older}).stable_charger() is None
+    assert ZoneMowingHistory().stable_charger() is None
+
+
 def test_station_is_drawn_inside_the_frame_only() -> None:
     vector_map = parse_batch_vector_map(_batch_payload())
     boundary = vector_map.boundary

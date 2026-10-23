@@ -85,6 +85,13 @@ def test_rejected_interactive_geometry_cannot_manufacture_docked_position(
 @pytest.mark.parametrize("revision_state", ["missing", "unverified", "other"])
 def test_unverified_or_unmatched_revision_has_no_station(revision_state):
     client = docked_client()
+    # A station that moved between summaries is not carried to a new revision.
+    client._charger_history = ZoneMowingHistory(
+        chargers={
+            "old": ChargerPosition(20, 40, 0, 1, HASH),
+            "new": ChargerPosition(2000, 60, 0, 2, OTHER_HASH),
+        }
+    )
     maps = _maps()
     if revision_state == "missing":
         maps = None
@@ -101,6 +108,21 @@ def test_unverified_or_unmatched_revision_has_no_station(revision_state):
     )
     assert view.details["charger_x"] is None
     assert view.details["position_x"] is None
+
+
+def test_new_revision_keeps_a_station_that_never_moved():
+    client = docked_client()
+    maps = _maps()
+    maps["maps"][0].update(md5="c" * 32, info={"hash": "c" * 32})
+    view = geometry_map_view(
+        client,
+        parse_batch_vector_map(_batch_payload()),
+        source="batch_vector_map",
+        app_maps=maps,
+        render_image=False,
+    )
+    assert (view.details["charger_x"], view.details["charger_y"]) == (100, 60)
+    assert view.details["position_source"] == "reported_charging_station"
 
 
 @pytest.mark.parametrize("rejected", ["foreign_map", "overtaken"])
