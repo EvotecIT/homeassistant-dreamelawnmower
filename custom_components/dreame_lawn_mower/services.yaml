@@ -63,12 +63,14 @@ start_scheduled_mowing:
           unit_of_measurement: min
           mode: box
     automation_entity:
-      name: Owning automation
-      description: Optional automation entity; disabling or reloading it cancels pending starts and recovery. The blueprint supplies this automatically.
+      name: Owning automation or switch
+      description: Optional automation or switch entity; turning it off or toggling it revokes pending starts and recovery. Reloading automations also cancels authority. The blueprint and built-in wizard supply their owner automatically.
       selector:
         entity:
           filter:
-            domain: automation
+            domain:
+              - automation
+              - switch
     run_id:
       name: Scheduled occurrence ID
       description: Optional stable ID for deduplication of this scheduled occurrence. The most recent accepted ID survives restart.

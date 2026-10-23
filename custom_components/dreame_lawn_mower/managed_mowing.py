@@ -655,16 +655,22 @@ class ManagedMowing:
 
     @callback
     def _state_changed(self, event: Event) -> None:
-        if self.record and event.data.get("entity_id") in {
-            self.record["params"]["permission_entity"],
-            self.record["params"]["automation_entity"],
+        if not self.record and not self._lock.locked():
+            return
+        params = self.record["params"] if self.record else (self._request_params or {})
+        if event.data.get("entity_id") in {
+            params.get("permission_entity"),
+            params.get("automation_entity"),
         }:
-            owner = self.record["params"]["automation_entity"]
+            owner = params.get("automation_entity")
+            new_state = event.data.get("new_state")
             if (
                 event.data.get("entity_id") == owner
                 and not self._startup_wait
-                and not self.hass.states.is_state(owner, "on")
+                and (new_state is None or new_state.state != "on")
             ):
+                # Inspect the transition, not only the latest state: an off/on
+                # cycle while preflight awaits evidence revokes this occurrence.
                 self.cancel("automation_disabled_or_unknown")
                 return
             self._schedule()
@@ -679,8 +685,17 @@ class ManagedMowing:
         entity_ids = data.get("entity_id", [])
         if isinstance(entity_ids, str):
             entity_ids = [entity_ids]
-        if domain == "automation" and service in {"turn_off", "toggle", "reload"}:
-            if service == "reload" or params.get("automation_entity") in entity_ids:
+        if (
+            domain == "automation" and service in {"turn_off", "toggle", "reload"}
+        ) or (domain == "switch" and service in {"turn_off", "toggle"}):
+            if (
+                service == "reload"
+                or params.get("automation_entity") in entity_ids
+                or (
+                    "all" in entity_ids
+                    and params.get("automation_entity", "").startswith(f"{domain}.")
+                )
+            ):
                 self.cancel("automation_disabled_or_reloaded")
             return
         if domain not in {"lawn_mower", DOMAIN, "button", "select"}:

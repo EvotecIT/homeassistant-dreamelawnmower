@@ -163,8 +163,10 @@ sufficient battery, no fault/rain delay, and disabled native schedules. The
 native start plan must confirm its resume branch; a fresh-task branch is
 rejected. An acknowledged request awaiting confirmation is not resent.
 
-Normal HA mower/device controls, disabling the owning automation, or reloading
-automations cancel pending starts and recovery. Unexpected task/map changes or
+Normal HA mower/device controls, disabling the owning automation or switch, or
+reloading automations cancel pending starts and recovery. Even a brief off/on
+cycle during preflight revokes that occurrence; re-enabling permits future
+scheduled occurrences. Unexpected task/map changes or
 pauses also cancel ownership. Vendor-app intervention is detectable only through
 observed task/state changes; HA cannot identify an app command that leaves
 those values unchanged. HA restart/integration reload cancels recovery of an
