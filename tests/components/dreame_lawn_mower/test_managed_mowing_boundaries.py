@@ -206,7 +206,10 @@ async def test_unexpected_failure_retires_persisted_intent_and_run_id(
 
 
 @pytest.mark.asyncio
-async def test_failed_revocation_write_retains_identity_and_retries_on_close(tmp_path):
+@pytest.mark.parametrize("next_request", ["same_run", "different_run"])
+async def test_failed_revocation_write_retains_identity_and_retries_on_close(
+    tmp_path, next_request
+):
     async with managed_runtime(tmp_path) as (owner, client, hass):
         hass.states.async_set("binary_sensor.lawn_permission", "off")
         params = request(
@@ -227,7 +230,19 @@ async def test_failed_revocation_write_retains_identity_and_retries_on_close(tmp
             "reason"
         ] == "duplicate_scheduled_run"
         assert client.commands == []
+        if next_request == "different_run":
+            other = request(defer_minutes=60, run_id="afternoon")
+            assert (await owner.async_request(other))[
+                "reason"
+            ] == "managed_storage_unavailable"
         owner._store.async_save = save
+        if next_request == "different_run":
+            client.async_get_schedule_start_evidence = AsyncMock(
+                side_effect=DreameLawnMowerConnectionError("Cloud unavailable")
+            )
+            assert (await owner.async_request(other))[
+                "reason"
+            ] == "eligibility_refresh_failed"
         await owner.async_close()
         saved = await hass.async_add_executor_job(
             lambda: json.loads(
@@ -236,3 +251,11 @@ async def test_failed_revocation_write_retains_identity_and_retries_on_close(tmp
         )
         assert saved["data"]["record"] is None
         assert saved["data"]["last_run_id"] == "morning"
+        restored = ManagedMowing(owner.entity)
+        await restored.async_start()
+        try:
+            await hass.async_block_till_done()
+            assert restored.record is None
+            assert client.commands == []
+        finally:
+            await restored.async_close()

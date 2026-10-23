@@ -183,8 +183,22 @@ class ManagedMowing:
                 return self._emit(
                     "skipped", "interruption_requires_permission", params=params
                 )
+            retirement_pending = self._cancel_reason is not None
             self._cancel_reason = None
             self._request_params = params
+            if retirement_pending:
+                try:
+                    # Retire an older failed write before a new preflight can
+                    # return early. The old reason is cleared before awaiting,
+                    # preserving any new cancellation arriving during this save.
+                    await self._save()
+                except (OSError, ValueError):
+                    self._cancel_reason = (
+                        self._cancel_reason or "managed_storage_unavailable"
+                    )
+                    return self._emit(
+                        "failed", "managed_storage_unavailable", params=params
+                    )
             try:
                 native = (
                     await self.coordinator.client.async_get_schedule_start_evidence()
