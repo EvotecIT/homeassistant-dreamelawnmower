@@ -16,6 +16,8 @@ from .dreame_lawn_mower_client.mowing_preferences import (
     individually_writable_obstacle_ai_classes,
 )
 from .entity import DreameLawnMowerEntity
+from .mowing_automation import automation_runtime
+from .mowing_automation_entities import MowingAutomationSwitch
 from .preference_switch import (
     AI_CLASS_SWITCHES,
     PREFERENCE_SWITCHES,
@@ -85,6 +87,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up Dreame mower switch entities."""
     coordinator: DreameLawnMowerCoordinator = entry.runtime_data
+    runtime = automation_runtime(coordinator)
+    if runtime is not None:
+        async_add_entities([MowingAutomationSwitch(coordinator, runtime)])
     async_add_entities(
         [
             *(

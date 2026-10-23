@@ -63,7 +63,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "Opcje kosiarki Dreame",
         "data": {
           "scan_interval": "Interwał odpytywania (sekundy)",
@@ -100,7 +100,63 @@
           "xp2p_runner_command": "Zaawansowana opcja wideo. Użyj wyłącznie lokalnego procesu pomocniczego, który ma zgodne środowisko XP2P i zwraca lokalny adres URL strumienia FLV. Narzędzia pomocnicze dla Androida nie są przeznaczone do uruchamiania na hoście Home Assistanta.",
           "xp2p_runner_mode": "Wybierz tryb procesu, jeśli proces pomocniczy ma działać przez cały czas przesyłania strumienia przez Home Assistanta."
         }
+      },
+      "init": {
+        "title": "Opcje kosiarki Dreame",
+        "menu_options": {
+          "settings": "Ustawienia kosiarki",
+          "mowing_automation": "Automatyczne koszenie"
+        }
+      },
+      "mowing_automation": {
+        "title": "Automatyczne koszenie: harmonogram",
+        "description": "Utwórz pomocnik Harmonogram w Ustawienia → Urządzenia i usługi → Pomocnicy, a następnie wybierz go tutaj. Każdy blok rozpoczyna jedno koszenie wszystkich obszarów bieżącej mapy. Koniec bloku nie zatrzymuje koszenia. Pozostaw wyłączone, aby najpierw sprawdzić ustawienia. Wymagany HA 2026.7+; bez YAML i importowania schematu.",
+        "data": {
+          "enabled": "Włącz automatyczne koszenie HA",
+          "schedule_entity": "Pomocnik harmonogramu tygodniowego"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Automatyczne koszenie: warunki w ogrodzie",
+        "description": "Wybierz potrzebne warunki. Wilgotność gleby musi być podana w procentach. Przykład blokuje powyżej 65%, odblokowuje poniżej 55% i czeka 30 minut. Brakujące lub nieaktualne pomiary blokują koszenie. Nawadnianie musi być wyłączone; restart rozpoczyna nowe oczekiwanie po podlewaniu i na wyschnięcie. Dodatkowe zezwolenie musi być włączone i zgłoszone w ciągu ostatnich 30 minut.",
+        "data": {
+          "soil_entity": "Czujnik wilgotności gleby (0–100%, opcjonalny)",
+          "irrigation_entity": "Encja działającego nawadniania (opcjonalna)",
+          "permission_entity": "Dodatkowe zezwolenie na koszenie (opcjonalne)",
+          "wet_threshold": "Blokuj powyżej tej wilgotności",
+          "dry_threshold": "Rozpocznij odliczanie poniżej tej wilgotności",
+          "drying_minutes": "Ciągły czas schnięcia",
+          "settling_minutes": "Czekaj po zakończeniu nawadniania",
+          "source_max_age": "Maksymalny wiek pomiaru gleby"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Automatyczne koszenie: oczekiwanie i wznowienie",
+        "description": "Domyślnie nieodpowiedni start jest pomijany, a późniejsza utrata zezwolenia niczego nie zmienia. Dodatni czas oczekiwania zachowuje jeden oczekujący start. Wznowienie wymaga pauzy, dodatniego terminu i wyłączenia natywnego wznawiania po ładowaniu. Zakończenie i powrót nie wznawiają zadania. Kontrole kosiarki nadal obowiązują. Wyłączenie automatyzacji anuluje jej uprawnienia bez poruszania kosiarką.",
+        "data": {
+          "minimum_battery": "Minimalny poziom baterii",
+          "defer_minutes": "Maksymalny czas oczekiwania (0 = pomiń od razu)",
+          "recovery_minutes": "Najpóźniejsze wznowienie od planowanego startu (0 = wyłączone)",
+          "interruption": "Po utracie zezwolenia podczas koszenia",
+          "resume_when_allowed": "Automatycznie wznów zadanie wstrzymane przez tę automatyzację",
+          "notify_outcome": "Pokazuj powiadomienia o wyniku"
+        }
+      },
+      "mowing_review": {
+        "title": "Automatyczne koszenie: podsumowanie",
+        "description": "Harmonogram: {schedule}\nGleba: {soil}\nNawadnianie: {irrigation}\nOkno oczekiwania na start: {defer} minut.\n\nWyłącz natywne plany na każdej mapie, w tym domyślne. Zachowaj ochronę przed deszczem. Automatyzacja nie blokuje niezależnych startów z aplikacji, ręcznych przycisków ani planów kosiarki. Zapisz wyłączoną, aby sprawdzić czujnik zezwolenia. Nadzoruj pierwszy cykl. Wyłącz wcześniejsze automatyzacje koszenia, aby uniknąć podwójnych harmonogramów.",
+        "data": {
+          "native_plans_disabled": "Wyłączyłem harmonogramy na każdej mapie i pozostawiłem ochronę przed deszczem"
+        }
       }
+    },
+    "error": {
+      "dry_threshold_below_wet": "Próg suchości musi być niższy od progu wilgotności.",
+      "recovery_requires_pause_and_deadline": "Automatyczne wznowienie wymaga pauzy i dodatniego terminu.",
+      "native_plans_confirmation_required": "Aby włączyć koszenie, potwierdź wyłączenie natywnych planów na każdej mapie."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "Wizualna automatyzacja koszenia wymaga Home Assistant 2026.7 lub nowszego. Dotychczasowe sterowanie kosiarką pozostaje dostępne."
     }
   },
   "selector": {
@@ -174,6 +230,13 @@
       "options": {
         "process": "Stały proces",
         "one-shot": "Polecenie jednorazowe"
+      }
+    },
+    "mowing_interruption": {
+      "options": {
+        "none": "Bez działania",
+        "pause": "Wstrzymaj to zadanie",
+        "dock": "Zakończ zadanie i wróć do stacji"
       }
     }
   },

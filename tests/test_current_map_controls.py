@@ -854,6 +854,7 @@ def test_edge_select_uses_selected_map_scope() -> None:
 def test_lawn_mower_attributes_include_current_vector_map_state() -> None:
     entity = object.__new__(DreameLawnMower)
     entity.coordinator = SimpleNamespace(
+        entry=SimpleNamespace(entry_id="map-test", options={}),
         data=_snapshot(),
         client=SimpleNamespace(device=SimpleNamespace()),
         selected_mowing_action=MOWING_ACTION_EDGE,
@@ -935,6 +936,7 @@ def test_lawn_mower_attributes_fallback_to_vector_map_ids_for_names() -> None:
 
     entity = object.__new__(DreameLawnMower)
     entity.coordinator = SimpleNamespace(
+        entry=SimpleNamespace(entry_id="map-test", options={}),
         data=_snapshot(),
         client=SimpleNamespace(device=SimpleNamespace()),
         selected_mowing_action=MOWING_ACTION_EDGE,

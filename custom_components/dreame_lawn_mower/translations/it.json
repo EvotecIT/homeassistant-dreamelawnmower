@@ -63,7 +63,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "Opzioni del robot tagliaerba Dreame",
         "data": {
           "scan_interval": "Intervallo di aggiornamento in secondi",
@@ -100,7 +100,63 @@
           "xp2p_runner_command": "Opzione video avanzata. Usa solo un processo ausiliario locale con un runtime XP2P compatibile che restituisca un URL FLV locale. Gli strumenti Android non sono progettati per essere eseguiti sull’host Home Assistant.",
           "xp2p_runner_mode": "Scegli la modalità processo se il processo ausiliario deve restare attivo durante l’intero streaming di Home Assistant."
         }
+      },
+      "init": {
+        "title": "Opzioni del robot tagliaerba Dreame",
+        "menu_options": {
+          "settings": "Impostazioni del robot",
+          "mowing_automation": "Taglio automatico"
+        }
+      },
+      "mowing_automation": {
+        "title": "Taglio automatico: programma",
+        "description": "Crea un aiutante Pianificazione in Impostazioni → Dispositivi e servizi → Aiutanti e selezionalo qui. Ogni blocco avvia un’attività su tutte le aree della mappa attuale. La fine del blocco non ferma il taglio. Lascia disabilitato per verificare. Richiede HA 2026.7+; senza YAML o importazione di blueprint.",
+        "data": {
+          "enabled": "Abilita il taglio automatico HA",
+          "schedule_entity": "Aiutante della pianificazione settimanale"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Taglio automatico: condizioni del giardino",
+        "description": "Scegli le condizioni necessarie. L’umidità deve essere percentuale. L’esempio blocca sopra il 65%, consente sotto il 55% e attende 30 minuti. Letture assenti o vecchie bloccano il taglio. L’irrigazione deve essere spenta; un riavvio ricomincia le attese di asciugatura e assestamento. Un permesso aggiuntivo deve essere attivo e segnalato negli ultimi 30 minuti.",
+        "data": {
+          "soil_entity": "Sensore di umidità del terreno (0–100%, facoltativo)",
+          "irrigation_entity": "Entità di irrigazione attiva (facoltativa)",
+          "permission_entity": "Permesso aggiuntivo di taglio (facoltativo)",
+          "wet_threshold": "Blocca sopra questa umidità",
+          "dry_threshold": "Avvia l’asciugatura sotto questa umidità",
+          "drying_minutes": "Tempo continuo di asciugatura",
+          "settling_minutes": "Attesa dopo l’irrigazione",
+          "source_max_age": "Età massima della lettura del terreno"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Taglio automatico: attesa e ripresa",
+        "description": "Per impostazione predefinita gli avvii non adatti vengono saltati e la perdita successiva del permesso non causa azioni. Un’attesa positiva conserva un avvio. La ripresa richiede Pausa, una finestra positiva e la ripresa nativa dopo la carica disabilitata. Termina e torna conclude senza ripresa. Restano i controlli del robot. Disabilitare revoca l’autorità senza muovere il robot.",
+        "data": {
+          "minimum_battery": "Batteria minima",
+          "defer_minutes": "Attesa massima (0 = salta subito)",
+          "recovery_minutes": "Ultima ripresa dall’avvio previsto (0 = disabilitata)",
+          "interruption": "Se il permesso viene perso durante il taglio",
+          "resume_when_allowed": "Riprendi automaticamente l’attività sospesa da questa automazione",
+          "notify_outcome": "Mostra notifiche del risultato"
+        }
+      },
+      "mowing_review": {
+        "title": "Taglio automatico: verifica",
+        "description": "Programma: {schedule}\nTerreno: {soil}\nIrrigazione: {irrigation}\nFinestra di avvio differito: {defer} minuti.\n\nDisabilita i programmi nativi su ogni mappa, inclusi quelli predefiniti. Mantieni la protezione pioggia. Gli avvii indipendenti da app, controlli manuali o programmi nativi non vengono bloccati. Salva disabilitato e verifica il sensore di permesso. Sorveglia il primo ciclo. Disabilita vecchie automazioni per evitare programmi duplicati.",
+        "data": {
+          "native_plans_disabled": "Ho disabilitato i programmi nativi su ogni mappa e mantenuto la protezione pioggia"
+        }
       }
+    },
+    "error": {
+      "dry_threshold_below_wet": "La soglia asciutta deve essere inferiore a quella bagnata.",
+      "recovery_requires_pause_and_deadline": "La ripresa automatica richiede Pausa e una finestra positiva.",
+      "native_plans_confirmation_required": "Per abilitare il taglio, conferma la disattivazione dei programmi nativi su ogni mappa."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "Il taglio visuale richiede Home Assistant 2026.7 o successivo. I controlli esistenti restano disponibili."
     }
   },
   "selector": {
@@ -174,6 +230,13 @@
       "options": {
         "process": "Processo persistente",
         "one-shot": "Comando singolo"
+      }
+    },
+    "mowing_interruption": {
+      "options": {
+        "none": "Nessuna azione",
+        "pause": "Sospendi questa attività",
+        "dock": "Termina e torna alla base"
       }
     }
   },

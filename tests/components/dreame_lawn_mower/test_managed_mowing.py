@@ -133,6 +133,119 @@ def request(**kwargs):
     return TASK_SCHEMA({"task_type": "all", "minimum_battery": 30, **kwargs})
 
 
+async def test_owner_cancel_revokes_inflight_preflight_before_dispatch(tmp_path):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blocked_native_read():
+            entered.set()
+            await release.wait()
+            return deepcopy(client.native)
+
+        client.async_get_schedule_start_evidence = blocked_native_read
+        hass.states.async_set("switch.ui_automation", "on")
+        pending = asyncio.create_task(
+            owner.async_request(
+                request(
+                    automation_entity="switch.ui_automation",
+                    defer_minutes=30,
+                )
+            )
+        )
+        await entered.wait()
+        cancellation = asyncio.create_task(
+            owner.async_cancel_owner("switch.ui_automation")
+        )
+        await asyncio.sleep(0)
+        release.set()
+        result = await pending
+        await cancellation
+        assert result["status"] == "cancelled"
+        assert owner.record is None
+        assert client.commands == []
+
+
+@pytest.mark.parametrize("domain,service,target", [
+    ("automation", "turn_off", "automation.mowing"),
+    ("automation", "toggle", "automation.mowing"),
+    ("automation", "reload", ""),
+    ("switch", "turn_off", "switch.mowing"),
+    ("switch", "toggle", "switch.mowing"),
+    ("switch", "turn_off", "all"),
+    ("switch", "turn_off", "switch.unrelated"),
+])
+async def test_owner_service_revocation_during_preflight(
+    tmp_path, domain, service, target,
+):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blocked_native_read():
+            entered.set()
+            await release.wait()
+            return deepcopy(client.native)
+
+        client.async_get_schedule_start_evidence = blocked_native_read
+        owner_entity = f"{domain}.mowing"
+        hass.states.async_set(owner_entity, "on")
+        pending = asyncio.create_task(owner.async_request(request(
+            automation_entity=owner_entity, defer_minutes=30,
+        )))
+        await entered.wait()
+        # A service call must revoke authority even before its entity changes.
+        hass.services.async_register(domain, service, AsyncMock())
+        await hass.services.async_call(
+            domain, service, {"entity_id": target} if target else {}, blocking=True,
+        )
+        release.set()
+        result = await pending
+        unrelated = target == "switch.unrelated"
+        assert result["status"] == ("started" if unrelated else "cancelled")
+        assert client.commands == (["start"] if unrelated else [])
+        if not unrelated:
+            assert owner.record is None
+
+
+@pytest.mark.parametrize("domain", ["switch", "automation"])
+@pytest.mark.parametrize("stage", ["preflight", "waiting"])
+async def test_owner_state_revocation_survives_fast_reenable(tmp_path, domain, stage):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        owner_entity = f"{domain}.mowing"
+        hass.states.async_set(owner_entity, "on")
+        hass.states.async_set("binary_sensor.garden_permission", "off")
+        await hass.async_block_till_done()
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blocked_native_read():
+            entered.set()
+            await release.wait()
+            return deepcopy(client.native)
+
+        if stage == "preflight":
+            client.async_get_schedule_start_evidence = blocked_native_read
+        pending = asyncio.create_task(owner.async_request(request(
+            automation_entity=owner_entity, defer_minutes=30,
+            permission_entity="binary_sensor.garden_permission",
+        )))
+        if stage == "preflight":
+            await entered.wait()
+        else:
+            assert (await pending)["status"] == "deferred"
+        # Both events are queued before listeners run. Reading only the latest
+        # HA state would lose the off transition and retain the old authority.
+        hass.states.async_set(owner_entity, "off")
+        hass.states.async_set(owner_entity, "on")
+        await hass.async_block_till_done()
+        release.set()
+        if stage == "preflight":
+            assert (await pending)["status"] == "cancelled"
+        await hass.async_block_till_done()
+        hass.states.async_set("binary_sensor.garden_permission", "on")
+        await hass.async_block_till_done()
+        assert owner.record is None
+        assert client.commands == []
+
+
 @pytest.mark.asyncio
 async def test_permission_distinguishes_blocked_unknown_and_stale(tmp_path):
     async with managed_runtime(tmp_path) as (_, client, hass):

@@ -63,7 +63,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "Options du robot tondeuse Dreame",
         "data": {
           "scan_interval": "Intervalle d’interrogation en secondes",
@@ -100,7 +100,63 @@
           "xp2p_runner_command": "Option vidéo avancée. Utilisez uniquement un processus auxiliaire local qui possède un environnement XP2P compatible et renvoie une URL FLV locale. Les outils Android ne sont pas conçus pour s’exécuter sur l’hôte Home Assistant.",
           "xp2p_runner_mode": "Choisissez le mode processus si le processus auxiliaire doit rester actif pendant toute la diffusion par Home Assistant."
         }
+      },
+      "init": {
+        "title": "Options du robot tondeuse Dreame",
+        "menu_options": {
+          "settings": "Réglages du robot",
+          "mowing_automation": "Tonte automatique"
+        }
+      },
+      "mowing_automation": {
+        "title": "Tonte automatique : planning",
+        "description": "Créez un assistant Planning dans Paramètres → Appareils et services → Assistants, puis sélectionnez-le ici. Chaque bloc lance une tâche sur toutes les zones de la carte actuelle. Sa fin n’arrête pas la tonte. Laissez désactivé pour vérifier les réglages. Nécessite HA 2026.7+ ; aucun YAML ni import de blueprint.",
+        "data": {
+          "enabled": "Activer la tonte automatique HA",
+          "schedule_entity": "Assistant de planning hebdomadaire"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Tonte automatique : conditions du jardin",
+        "description": "Choisissez les conditions utiles. L’humidité du sol doit être en pourcentage. L’exemple bloque au-dessus de 65%, autorise sous 55%, puis attend 30 minutes. Les relevés absents ou périmés bloquent la tonte. L’arrosage doit être éteint ; un redémarrage relance les attentes de séchage et de stabilisation. Une autorisation supplémentaire doit être active et avoir été signalée depuis moins de 30 minutes.",
+        "data": {
+          "soil_entity": "Capteur d’humidité du sol (0–100 %, facultatif)",
+          "irrigation_entity": "Entité d’arrosage en cours (facultative)",
+          "permission_entity": "Autorisation supplémentaire de tonte (facultative)",
+          "wet_threshold": "Bloquer au-dessus de cette humidité",
+          "dry_threshold": "Commencer le séchage sous cette humidité",
+          "drying_minutes": "Durée continue de séchage",
+          "settling_minutes": "Attente après l’arrosage",
+          "source_max_age": "Âge maximal du relevé du sol"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Tonte automatique : attente et reprise",
+        "description": "Par défaut, les départs inadaptés sont ignorés et une perte ultérieure d’autorisation ne déclenche rien. Une attente positive conserve un départ. La reprise exige Pause, une fenêtre positive et la désactivation de la reprise native après recharge. Terminer et rentrer ne reprend pas la tâche. Les contrôles du robot restent actifs. Désactiver cette automatisation retire son autorité sans déplacer le robot.",
+        "data": {
+          "minimum_battery": "Batterie minimale",
+          "defer_minutes": "Attente maximale (0 = ignorer immédiatement)",
+          "recovery_minutes": "Dernière reprise depuis le départ prévu (0 = désactivée)",
+          "interruption": "En cas de perte d’autorisation pendant la tonte",
+          "resume_when_allowed": "Reprendre automatiquement la tâche suspendue par cette automatisation",
+          "notify_outcome": "Afficher les notifications de résultat"
+        }
+      },
+      "mowing_review": {
+        "title": "Tonte automatique : vérification",
+        "description": "Planning : {schedule}\nSol : {soil}\nArrosage : {irrigation}\nFenêtre de départ différé : {defer} minutes.\n\nDésactivez les programmes natifs sur chaque carte, créneaux par défaut compris. Gardez la protection pluie. Les départs indépendants depuis l’application, les commandes manuelles ou les programmes natifs ne sont pas bloqués. Enregistrez désactivé pour vérifier le capteur d’autorisation. Surveillez le premier cycle. Désactivez les anciennes automatisations de tonte pour éviter les doublons.",
+        "data": {
+          "native_plans_disabled": "J’ai désactivé les programmes natifs sur chaque carte et conservé la protection pluie"
+        }
       }
+    },
+    "error": {
+      "dry_threshold_below_wet": "Le seuil sec doit être inférieur au seuil humide.",
+      "recovery_requires_pause_and_deadline": "La reprise automatique exige Pause et une fenêtre de reprise positive.",
+      "native_plans_confirmation_required": "Pour activer la tonte, confirmez la désactivation des programmes natifs sur chaque carte."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "La tonte visuelle nécessite Home Assistant 2026.7 ou ultérieur. Les commandes existantes restent disponibles."
     }
   },
   "selector": {
@@ -174,6 +230,13 @@
       "options": {
         "process": "Processus persistant",
         "one-shot": "Commande unique"
+      }
+    },
+    "mowing_interruption": {
+      "options": {
+        "none": "Aucune action",
+        "pause": "Suspendre cette tâche",
+        "dock": "Terminer et rentrer à la base"
       }
     }
   },

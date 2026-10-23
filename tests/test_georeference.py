@@ -266,7 +266,7 @@ def test_options_form_keeps_the_calibration_it_does_not_show() -> None:
         SimpleNamespace(options={CONF_GEOREFERENCE: REFERENCE})
     )
 
-    result = asyncio.run(flow.async_step_init({CONF_SCAN_INTERVAL: 45}))
+    result = asyncio.run(flow.async_step_settings({CONF_SCAN_INTERVAL: 45}))
 
     assert result["data"] == {CONF_SCAN_INTERVAL: 45, CONF_GEOREFERENCE: REFERENCE}
 
@@ -278,7 +278,7 @@ def test_open_options_form_preserves_later_calibration_actions(cleared):
     entry.options = {} if cleared else {
         CONF_GEOREFERENCE: _stored({**REFERENCE, "heading": 10})
     }
-    result = asyncio.run(flow.async_step_init({CONF_SCAN_INTERVAL: 45}))
+    result = asyncio.run(flow.async_step_settings({CONF_SCAN_INTERVAL: 45}))
     assert result["data"] == {CONF_SCAN_INTERVAL: 45, **entry.options}
 
 
@@ -301,7 +301,7 @@ def test_options_preview_cleanup_preserves_overlapping_calibration_actions(
         "custom_components.dreame_lawn_mower.config_flow.async_remove_restart_preview",
         remove_preview,
     )
-    result = asyncio.run(flow.async_step_init({CONF_SCAN_INTERVAL: 45}))
+    result = asyncio.run(flow.async_step_settings({CONF_SCAN_INTERVAL: 45}))
     assert result["data"] == {CONF_SCAN_INTERVAL: 45, **entry.options}
 
 

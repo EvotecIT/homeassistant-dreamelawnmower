@@ -25,6 +25,8 @@ from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.maintenance import maintenance_status_attributes
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
+from .mowing_automation import automation_runtime
+from .mowing_automation_entities import MowingPermissionSensor
 from .runtime_data import DreameLawnMowerConfigEntry
 from .sensor_diagnostics import (
     batch_ota_attributes,
@@ -265,6 +267,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up mower binary sensors."""
     coordinator: DreameLawnMowerCoordinator = entry.runtime_data
+    runtime = automation_runtime(coordinator)
+    if runtime is not None:
+        async_add_entities([MowingPermissionSensor(coordinator, runtime)])
     async_add_entities(
         [
             DreameLawnMowerBinarySensor(coordinator, description)

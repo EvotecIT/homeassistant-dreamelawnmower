@@ -63,7 +63,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "Dreame lawn mower options",
         "data": {
           "scan_interval": "Polling interval in seconds",
@@ -100,7 +100,63 @@
           "xp2p_runner_command": "Advanced video option. Use only a local host runner that owns a compatible XP2P runtime and returns a local FLV URL. Android helpers are not the intended Home Assistant runtime.",
           "xp2p_runner_mode": "Use process mode for a runner that stays alive while Home Assistant streams."
         }
+      },
+      "init": {
+        "title": "Dreame lawn mower options",
+        "menu_options": {
+          "settings": "Mower settings",
+          "mowing_automation": "Mowing automation"
+        }
+      },
+      "mowing_automation": {
+        "title": "Mowing automation: schedule",
+        "description": "Create a Schedule helper in Settings → Devices & services → Helpers, then select it here. Each block starts one all-area task on the current map. Block end does not stop mowing. Leave disabled to check your settings first. This setup needs HA 2026.7+; it needs no YAML or blueprint import.",
+        "data": {
+          "enabled": "Enable HA mowing automation",
+          "schedule_entity": "Weekly Schedule helper"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Mowing automation: garden conditions",
+        "description": "Choose any conditions you need. Soil moisture must use percentage units. The example blocks above 65% and clears below 55%, then waits 30 continuous minutes. Missing or stale soil readings block mowing. Irrigation must report off; a restart starts a fresh settling and drying wait. Additional permission must explicitly report on and have reported within 30 minutes.",
+        "data": {
+          "soil_entity": "Soil moisture sensor (0–100%, optional)",
+          "irrigation_entity": "Irrigation running entity (optional)",
+          "permission_entity": "Additional mowing permission (optional)",
+          "wet_threshold": "Block above this moisture",
+          "dry_threshold": "Allow drying wait below this moisture",
+          "drying_minutes": "Continuous drying wait",
+          "settling_minutes": "Wait after irrigation stops",
+          "source_max_age": "Maximum soil report age"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Mowing automation: wait and recovery",
+        "description": "Defaults skip blocked starts and do nothing if permission is later lost. A positive wait window retains one pending start. Pause recovery requires Pause, a positive recovery window and disabled native resume-after-charging. End and dock ends the task without recovery. Native mower checks still apply. Turning this automation off cancels its authority without moving the mower.",
+        "data": {
+          "minimum_battery": "Minimum battery",
+          "defer_minutes": "Wait up to this long before skipping (0 = skip immediately)",
+          "recovery_minutes": "Latest recovery, from original scheduled start (0 = disabled)",
+          "interruption": "If garden permission is lost while mowing",
+          "resume_when_allowed": "Automatically resume this automation’s paused task",
+          "notify_outcome": "Show outcome notifications"
+        }
+      },
+      "mowing_review": {
+        "title": "Mowing automation: review",
+        "description": "Schedule: {schedule}\nSoil: {soil}\nIrrigation: {irrigation}\nDeferred-start window: {defer} minutes.\n\nDisable native plans on every map, including default slots. Keep Rain Protection enabled. This automation cannot inhibit independent starts from the vendor app, manual controls or onboard plans. Save disabled to inspect the new Mowing permitted sensor before enabling. Supervise the first run. Existing custom mowing automations should be disabled to avoid duplicate schedules.",
+        "data": {
+          "native_plans_disabled": "I disabled native mowing plans on every map and kept Rain Protection enabled"
+        }
       }
+    },
+    "error": {
+      "dry_threshold_below_wet": "The dry threshold must be below the wet threshold.",
+      "recovery_requires_pause_and_deadline": "Automatic recovery requires Pause and a positive recovery window.",
+      "native_plans_confirmation_required": "To enable mowing, confirm that native plans are disabled on every map."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "The visual mowing automation requires Home Assistant 2026.7 or newer. Existing mower controls remain available."
     }
   },
   "selector": {
@@ -174,6 +230,13 @@
       "options": {
         "process": "Persistent process",
         "one-shot": "One-shot command"
+      }
+    },
+    "mowing_interruption": {
+      "options": {
+        "none": "No action",
+        "pause": "Pause this task",
+        "dock": "End this task and dock"
       }
     }
   },

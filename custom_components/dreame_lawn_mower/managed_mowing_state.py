@@ -25,7 +25,7 @@ MANAGED_FIELDS: dict[Any, Any] = {
         vol.Range(min=0, max=1440),
     ),
     vol.Optional("automation_entity", default=""): vol.Any(
-        "", cv.entity_domain("automation")
+        "", cv.entity_domain("automation"), cv.entity_domain("switch")
     ),
     vol.Optional("run_id", default=""): vol.All(str, vol.Length(max=128)),
 }

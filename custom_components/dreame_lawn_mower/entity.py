@@ -17,6 +17,8 @@ _OFFLINE_REPORTING_ENTITY_KEYS = frozenset(
         "last_observed_run_duration",
         "last_mower_error",
         "last_mower_notification",
+        "mowing_permission",
+        "mowing_automation",
     }
 )
 

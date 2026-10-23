@@ -42,7 +42,7 @@ def test_options_flow_preserves_internal_per_map_rotations() -> None:
     )
 
     result = asyncio.run(
-        flow.async_step_init(
+        flow.async_step_settings(
             {
                 CONF_SCAN_INTERVAL: 45,
             }

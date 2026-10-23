@@ -660,6 +660,7 @@ def test_mova_awd_switch_platform_omits_locked_ai_classes() -> None:
         country="us",
     )
     coordinator = SimpleNamespace(
+        entry=SimpleNamespace(entry_id="entry-1", options={}),
         client=SimpleNamespace(descriptor=descriptor),
         data=SimpleNamespace(),
         device_settings=None,
@@ -704,6 +705,7 @@ def test_setting_platforms_add_only_reported_entities_and_follow_late_discovery(
     descriptor = _client().descriptor
     listeners: list = []
     coordinator = SimpleNamespace(
+        entry=SimpleNamespace(entry_id="entry-1", options={}),
         client=SimpleNamespace(descriptor=descriptor),
         data=SimpleNamespace(),
         device_settings=None,

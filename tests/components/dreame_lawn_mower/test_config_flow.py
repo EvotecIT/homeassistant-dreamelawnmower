@@ -375,7 +375,7 @@ async def test_user_flow_aborts_when_all_mowers_are_configured(
 def test_options_flow_accepts_map_label_scale() -> None:
     flow = DreameLawnMowerOptionsFlow(SimpleNamespace(options={}))
 
-    result = asyncio.run(flow.async_step_init())
+    result = asyncio.run(flow.async_step_settings())
 
     assert result["type"] is FlowResultType.FORM
     validated = result["data_schema"](
@@ -393,7 +393,7 @@ def test_options_flow_accepts_map_label_scale() -> None:
     assert validated[CONF_MAP_SPOT_AREA_STYLE] == "outline"
     assert validated[CONF_MAP_MOWING_PATH_STYLE] == "hidden"
 
-    result = asyncio.run(flow.async_step_init(validated))
+    result = asyncio.run(flow.async_step_settings(validated))
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {
@@ -446,7 +446,7 @@ async def test_every_localized_selector_is_wired_to_its_form(hass) -> None:
     _assert_localized_selector(reauth_schema, CONF_COUNTRY)
 
     options_flow = DreameLawnMowerOptionsFlow(SimpleNamespace(options={}))
-    options_schema = _serialized_schema(await options_flow.async_step_init())
+    options_schema = _serialized_schema(await options_flow.async_step_settings())
     for key in (
         CONF_MAP_ROTATION,
         CONF_MAP_THEME,
@@ -464,7 +464,7 @@ async def test_every_localized_selector_is_wired_to_its_form(hass) -> None:
 def test_options_flow_defaults_to_clean_vector_map_layers() -> None:
     flow = DreameLawnMowerOptionsFlow(SimpleNamespace(options={}))
 
-    result = asyncio.run(flow.async_step_init())
+    result = asyncio.run(flow.async_step_settings())
     validated = result["data_schema"]({})
 
     assert validated[CONF_MAP_SPOT_AREA_STYLE] == DEFAULT_MAP_SPOT_AREA_STYLE
@@ -474,12 +474,12 @@ def test_options_flow_defaults_to_clean_vector_map_layers() -> None:
 def test_options_flow_preserves_integer_map_rotation_storage() -> None:
     flow = DreameLawnMowerOptionsFlow(SimpleNamespace(options={CONF_MAP_ROTATION: 270}))
 
-    result = asyncio.run(flow.async_step_init())
+    result = asyncio.run(flow.async_step_settings())
     validated = result["data_schema"]({})
 
     assert validated[CONF_MAP_ROTATION] == "270"
 
-    result = asyncio.run(flow.async_step_init(validated))
+    result = asyncio.run(flow.async_step_settings(validated))
 
     assert result["data"][CONF_MAP_ROTATION] == 270
 
@@ -489,7 +489,7 @@ def test_options_flow_replaces_prerelease_lan_only_default() -> None:
         SimpleNamespace(options={CONF_VIDEO_TRANSPORT: VIDEO_TRANSPORT_LAN})
     )
 
-    result = asyncio.run(flow.async_step_init())
+    result = asyncio.run(flow.async_step_settings())
     validated = result["data_schema"]({})
 
     assert validated[CONF_VIDEO_TRANSPORT] == DEFAULT_VIDEO_TRANSPORT
@@ -500,7 +500,7 @@ def test_options_flow_replaces_unknown_video_retention_default() -> None:
         SimpleNamespace(options={CONF_VIDEO_RETENTION: "unknown"})
     )
 
-    result = asyncio.run(flow.async_step_init())
+    result = asyncio.run(flow.async_step_settings())
     validated = result["data_schema"]({})
 
     assert validated[CONF_VIDEO_RETENTION] == DEFAULT_VIDEO_RETENTION
@@ -511,7 +511,7 @@ def test_options_flow_replaces_unknown_notification_mode_default() -> None:
         SimpleNamespace(options={CONF_NOTIFICATION_MODE: "unknown"})
     )
 
-    result = asyncio.run(flow.async_step_init())
+    result = asyncio.run(flow.async_step_settings())
     validated = result["data_schema"]({})
 
     assert validated[CONF_NOTIFICATION_MODE] == DEFAULT_NOTIFICATION_MODE
@@ -538,6 +538,9 @@ async def test_opt_out_removes_saved_preview(hass, loaded):
     hass.config.components.add("stream")
     await preview_store(hass, entry.entry_id).async_save({"jpeg": "private-map"})
     initial = await hass.config_entries.options.async_init(entry.entry_id)
+    initial = await hass.config_entries.options.async_configure(
+        initial["flow_id"], {"next_step_id": "settings"},
+    )
     assert initial["type"] is FlowResultType.FORM
     result = await hass.config_entries.options.async_configure(
         initial["flow_id"],

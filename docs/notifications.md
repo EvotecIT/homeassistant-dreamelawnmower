@@ -180,6 +180,10 @@ checks required for your property and model.
 
 ## Guarded weekly mowing
 
+For a visual setup with soil moisture and irrigation, use the
+[easy mowing walkthrough](soil-moisture-mowing.md). It needs no YAML or blueprint
+import. The blueprint below remains available for custom automations.
+
 The [guarded weekly schedule blueprint](../blueprints/automation/dreame_lawn_mower/guarded_schedule_mowing.yaml)
 uses a Home Assistant Schedule helper and requires HA 2026.7 or later. It
 triggers once when each block begins, including adjacent touching blocks.
