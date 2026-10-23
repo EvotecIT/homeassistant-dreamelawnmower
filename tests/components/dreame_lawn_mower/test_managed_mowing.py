@@ -11,7 +11,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from homeassistant.core import HomeAssistant, State
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, HomeAssistant, State
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -33,6 +34,16 @@ from custom_components.dreame_lawn_mower.scheduled_mowing import (
     async_start_scheduled_mowing,
 )
 from tests.test_scheduled_mowing import eligible_evidence
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations():
+    """Use the explicit runtime below, including real atomic disk storage.
+
+    The directory's default fixture creates another HA instance whose mocked
+    Store would hide persistence failures in these lifecycle tests.
+    """
+    yield
 
 
 class MowerTransport:
@@ -87,6 +98,7 @@ class MowerTransport:
 @asynccontextmanager
 async def managed_runtime(tmp_path):
     hass = HomeAssistant(str(tmp_path))
+    hass.state = CoreState.running
     if hasattr(dr, "async_setup"):
         dr.async_setup(hass)
     await dr.async_load(hass)
@@ -399,6 +411,84 @@ async def test_restart_restores_only_never_dispatched_intent(tmp_path):
         await hass.async_block_till_done()
         assert client.commands == ["start"]
         await restored.async_close()
+
+
+@pytest.mark.asyncio
+async def test_restored_blueprint_waits_for_owner_after_home_assistant_start(tmp_path):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        hass.states.async_set("automation.mowing", "on")
+        hass.states.async_set("binary_sensor.lawn_permission", "off")
+        await owner.async_request(request(
+            permission_entity="binary_sensor.lawn_permission",
+            automation_entity="automation.mowing", defer_minutes=60,
+        ))
+        await owner.async_close()
+        hass.state = CoreState.starting
+        hass.states.async_remove("automation.mowing")
+        hass.states.async_set("binary_sensor.lawn_permission", "on")
+        restored = ManagedMowing(owner.entity)
+        await restored.async_start()
+        try:
+            await hass.async_block_till_done()
+            assert restored.record["phase"] == "waiting"
+            assert client.commands == []
+            hass.states.async_set("automation.mowing", "on")
+            await hass.async_block_till_done()
+            assert client.commands == []
+            hass.state = CoreState.running
+            hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+            await hass.async_block_till_done()
+            assert client.commands == ["start"]
+            assert restored.record is None
+        finally:
+            await restored.async_close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", [
+    "scheduled_run_cancelled", "manual_intervention", "automation_disabled_or_reloaded",
+])
+async def test_revocation_is_durable_when_close_precedes_queued_tick(tmp_path, reason):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        hass.states.async_set("binary_sensor.lawn_permission", "off")
+        await owner.async_request(request(
+            permission_entity="binary_sensor.lawn_permission", defer_minutes=60,
+        ))
+        owner.cancel(reason)
+        await owner.async_close()
+        saved = await hass.async_add_executor_job(
+            lambda: json.loads(
+                Path(hass.config.path(".storage", owner._store.key)).read_text()
+            )
+        )
+        assert saved["data"]["record"] is None
+        hass.states.async_set("binary_sensor.lawn_permission", "on")
+        restored = ManagedMowing(owner.entity)
+        await restored.async_start()
+        try:
+            await hass.async_block_till_done()
+            assert restored.record is None
+            assert client.commands == []
+        finally:
+            await restored.async_close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_cancel_returns_with_durable_revocation(tmp_path):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        hass.states.async_set("binary_sensor.lawn_permission", "off")
+        await owner.async_request(request(
+            permission_entity="binary_sensor.lawn_permission", defer_minutes=60,
+        ))
+        await owner.async_cancel()
+        saved = await hass.async_add_executor_job(
+            lambda: json.loads(
+                Path(hass.config.path(".storage", owner._store.key)).read_text()
+            )
+        )
+        assert saved["data"]["record"] is None
+        assert owner.record is None
+        assert client.commands == []
 
 
 @pytest.mark.asyncio

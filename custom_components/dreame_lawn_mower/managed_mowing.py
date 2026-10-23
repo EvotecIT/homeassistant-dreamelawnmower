@@ -10,9 +10,10 @@ from typing import Any
 from uuid import uuid4
 
 from homeassistant.const import EVENT_CALL_SERVICE, EVENT_STATE_CHANGED
-from homeassistant.core import Event, callback
+from homeassistant.core import CoreState, Event, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
@@ -64,6 +65,7 @@ class ManagedMowing:
         self._cancel_reason: str | None = None
         self._request_params: dict[str, Any] | None = None
         self._restored = False
+        self._startup_wait = False
         self._closed = False
         self._last_emission: tuple[Any, ...] | None = None
         self._last_result: dict[str, Any] = {}
@@ -89,6 +91,7 @@ class ManagedMowing:
             self.record = decode_managed_record(saved.get("record"), dt_util.utcnow())
         if self.record:
             self._restored = True
+            self._startup_wait = self.hass.state is not CoreState.running
             if self.record["phase"] != "waiting":
                 self._cancel_reason = "restart_cancelled_recovery"
             elif not self.record["params"]["defer_minutes"]:
@@ -99,6 +102,8 @@ class ManagedMowing:
             self.coordinator.async_add_listener(self._schedule),
             async_track_time_interval(self.hass, self._schedule, timedelta(seconds=30)),
         ]
+        if self._startup_wait:
+            self._unsub.append(async_at_started(self.hass, self._started))
         if self.record:
             self._schedule()
 
@@ -115,7 +120,30 @@ class ManagedMowing:
             except asyncio.CancelledError:
                 pass
         async with self._lock:
-            pass  # A service preflight also owns storage and must finish before unload.
+            # A completed revocation must survive even if its queued tick was
+            # cancelled by this unload. Ordinary pending intent remains restorable.
+            await self._flush_revocation()
+
+    async def _flush_revocation(self) -> None:
+        """Persist revocation with the service/lifecycle lock already held."""
+        if self._cancel_reason:
+            if self.record:
+                await self._finish("cancelled", self._cancel_reason)
+            else:
+                # HA can eagerly enter the tick and clear the in-memory
+                # record before its atomic disk write is cancelled by unload.
+                await self._save()
+
+    async def async_cancel(self) -> None:
+        """Return from explicit cancellation only after its durable revocation."""
+        self.cancel("scheduled_run_cancelled")
+        async with self._lock:
+            await self._flush_revocation()
+
+    @callback
+    def _started(self, _: Any) -> None:
+        self._startup_wait = False
+        self._schedule()
 
     @property
     def summary(self) -> dict[str, Any] | None:
@@ -265,6 +293,8 @@ class ManagedMowing:
         owner = params["automation_entity"]
         if self._cancel_reason:
             return await self._finish("cancelled", self._cancel_reason)
+        if self._startup_wait:
+            return self._emit("deferred", "waiting_for_home_assistant_start")
         if owner and not self.hass.states.is_state(owner, "on"):
             return await self._finish("cancelled", "automation_disabled_or_unknown")
         phase = self.record["phase"]
@@ -283,6 +313,8 @@ class ManagedMowing:
             return "managed_run_closed"
         if self._cancel_reason:
             return self._cancel_reason
+        if self._startup_wait:
+            return "waiting_for_home_assistant_start"
         assert self.record is not None
         params = self.record["params"]
         owner = params["automation_entity"]
@@ -583,6 +615,14 @@ class ManagedMowing:
             self.record["params"]["permission_entity"],
             self.record["params"]["automation_entity"],
         }:
+            owner = self.record["params"]["automation_entity"]
+            if (
+                event.data.get("entity_id") == owner
+                and not self._startup_wait
+                and not self.hass.states.is_state(owner, "on")
+            ):
+                self.cancel("automation_disabled_or_unknown")
+                return
             self._schedule()
 
     @callback

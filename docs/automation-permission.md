@@ -33,6 +33,12 @@ check. A composite helper must check its own source freshness: a newly evaluated
 template does not make an old moisture measurement fresh. Reporting age also
 depends on the source integration's update behavior.
 
+The examples below include an `evaluated_at` attribute that changes each minute.
+This keeps a healthy, unchanged permission report fresh. A `now()` expression
+in a boolean template alone does not guarantee a report when its result stays
+unchanged. Keep the source-age checks as well: the heartbeat reports template
+evaluation, not a new sensor measurement.
+
 Custom automations use the same action:
 
 ```yaml
@@ -84,6 +90,7 @@ template:
           {{ is_state('binary_sensor.soil_mowing_permitted', 'on')
              and is_state('binary_sensor.irrigation_mowing_permitted', 'on') }}
         attributes:
+          evaluated_at: "{{ now().isoformat() }}"
           reason: >-
             {% if not is_state('binary_sensor.soil_mowing_permitted', 'on') %}
               {{ state_attr('binary_sensor.soil_mowing_permitted', 'reason') }}
@@ -116,6 +123,8 @@ redirect it. Saved targets still pass normal target validation. Optional
 Intent is stored privately before dispatch. After restart, only a
 never-dispatched intent is reconsidered, within its original deadline and with
 matching known task identity. Unknown or changed prior identity cancels it.
+Restored requests wait for HA to finish startup before checking the owning
+automation, so normal integration startup order cannot discard a valid deferral.
 A record that reached dispatch, including one with a lost acknowledgement,
 is never replayed. A latest start is separate from a finish deadline: expiry
 and the Schedule block's end send no pause or dock command.

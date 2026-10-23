@@ -1006,9 +1006,16 @@ class DreameLawnMowerClient(
 
         await self._async_cloud_read(dock)
 
-    async def _async_device_control(self, *, dock: bool) -> None:
+    async def _async_device_control(
+        self, *, dock: bool,
+        admission: _typing.Callable[[], bool] | None = None,
+    ) -> None:
         """Run a native dock or ordinary STOP with existing confirmation policy."""
         from .client_device_actions import async_run_device_plan
+
+        plan_options: dict[str, Any] = (
+            {"admission": admission} if admission is not None else {}
+        )
 
         async def control(_cloud: _DreameCloudSession) -> None:
             try:
@@ -1016,6 +1023,7 @@ class DreameLawnMowerClient(
                     self, lambda device: (
                         device._dock_plan() if dock else device._ordinary_stop_plan()
                     ),
+                    **plan_options,
                 )
             except _DeviceCommandRejectedException as error:
                 raise _DreameLawnMowerCommandRejectedError(str(error)) from error
@@ -1036,12 +1044,17 @@ class DreameLawnMowerClient(
 
         await self._async_cloud_read(control)
 
-    async def _async_stop_then_dock(self) -> None:
+    async def _async_stop_then_dock(
+        self, *, admission: _typing.Callable[[], bool] | None = None,
+    ) -> None:
         """Keep the complete dock sequence under the caller's operation lifetime."""
         try:
             snapshot = await self.async_refresh()
         except DreameLawnMowerConnectionError:
-            await self._async_device_control(dock=True)
+            await self._async_device_control(
+                dock=True,
+                **({"admission": admission} if admission is not None else {}),
+            )
             return
         initial_state = snapshot_session_control_state(snapshot)
 
@@ -1050,8 +1063,14 @@ class DreameLawnMowerClient(
 
         await async_stop_then_dock(
             initial_state=initial_state,
-            stop=lambda: self._async_device_control(dock=False),
-            dock=lambda: self._async_device_control(dock=True),
+            stop=lambda: self._async_device_control(
+                dock=False,
+                **({"admission": admission} if admission is not None else {}),
+            ),
+            dock=lambda: self._async_device_control(
+                dock=True,
+                **({"admission": admission} if admission is not None else {}),
+            ),
             refresh_state=async_refresh_state,
         )
 
@@ -1095,7 +1114,7 @@ class DreameLawnMowerClient(
                 response = await self._async_call_mowing_task(
                     build_zone_mowing_request(normalized_zone_ids),
                     task_name="zone mowing",
-                    admission=admission,
+                    **({"admission": admission} if admission is not None else {}),
                 )
             except _DreameLawnMowerCommandRejectedError:
                 raise
@@ -1151,7 +1170,7 @@ class DreameLawnMowerClient(
                 response = await self._async_call_mowing_task(
                     build_edge_mowing_request(normalized_contour_ids),
                     task_name="edge mowing",
-                    admission=admission,
+                    **({"admission": admission} if admission is not None else {}),
                 )
             except _DreameLawnMowerCommandRejectedError:
                 raise
@@ -1201,7 +1220,7 @@ class DreameLawnMowerClient(
                 response = await self._async_call_mowing_task(
                     build_spot_mowing_request(normalized_spot_ids),
                     task_name="spot mowing",
-                    admission=admission,
+                    **({"admission": admission} if admission is not None else {}),
                 )
             except _DreameLawnMowerCommandRejectedError:
                 raise

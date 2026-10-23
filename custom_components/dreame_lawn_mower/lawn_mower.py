@@ -707,7 +707,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     async def async_cancel_scheduled_mowing(self) -> None:
         """Cancel pending starts and recovery without moving the mower."""
         if self._managed_mowing:
-            self._managed_mowing.cancel("scheduled_run_cancelled")
+            await self._managed_mowing.async_cancel()
 
     async def async_start_zone_mowing(
         self, zone_ids: list[int], *, require_inactive_task: bool = False,

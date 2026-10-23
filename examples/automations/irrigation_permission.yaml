@@ -51,6 +51,7 @@ template:
              and now().timestamp() >=
                  state_attr('input_datetime.mower_irrigation_clear_after', 'timestamp') | float }}
         attributes:
+          evaluated_at: "{{ now().isoformat() }}"
           reason: >-
             {% if not is_state('switch.garden_irrigation', 'off') %}
               Irrigation active or state unknown

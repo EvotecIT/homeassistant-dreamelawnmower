@@ -21,6 +21,9 @@ template:
              and 0 <= (now() - source.last_reported).total_seconds() <= 1800
              and is_state('binary_sensor.lawn_soil_too_wet', 'off') }}
         attributes:
+          # Report a healthy unchanged permission every minute. Source age is
+          # checked independently above; this does not refresh its measurement.
+          evaluated_at: "{{ now().isoformat() }}"
           reason: >-
             {% set source = states.sensor.garden_soil_moisture %}
             {% if source is not defined or source is none or not is_number(source.state) %}

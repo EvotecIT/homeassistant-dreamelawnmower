@@ -59,7 +59,7 @@ async def async_control_owned_task(
         )
         return "resumed"
     if command == "dock" or snapshot.returning is True or snapshot.docked is True:
-        await client._async_stop_then_dock()
+        await client._async_stop_then_dock(admission=admission)
         return "docked"
     await client._async_pause_mowing(admission=admission)
     return "paused"

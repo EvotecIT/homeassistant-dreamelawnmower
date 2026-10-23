@@ -1,15 +1,18 @@
 """Import and execute the shipped automation examples in Home Assistant."""
 
+import re
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.yaml.loader import load_yaml
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
+from custom_components.dreame_lawn_mower.mowing_permission import permission_block
 from tests.test_scheduled_mowing import substituted_blueprint
 
 EXAMPLES = Path(__file__).parents[3] / "examples" / "automations"
@@ -32,6 +35,14 @@ async def test_soil_example_imports_and_blocks_wet_missing_and_drying_readings(
     hass, freezer
 ):
     config = load_yaml(EXAMPLES / "soil_moisture_permission.yaml")
+    docs = (EXAMPLES.parents[1] / "docs" / "automation-permission.md").read_text()
+    combined = next(
+        yaml.safe_load(block)
+        for block in re.findall(r"```yaml\n(.*?)```", docs, re.DOTALL)
+        if "unique_id: garden_mowing_permitted" in block
+    )
+    config["template"].extend(combined["template"])
+    hass.states.async_set("binary_sensor.irrigation_mowing_permitted", "on")
     hass.states.async_set("sensor.garden_soil_moisture", "70")
     assert await async_setup_component(hass, "binary_sensor", config)
     assert await async_setup_component(hass, "template", config)
@@ -53,6 +64,24 @@ async def test_soil_example_imports_and_blocks_wet_missing_and_drying_readings(
     async_fire_time_changed(hass, later)
     await hass.async_block_till_done()
     assert hass.states.is_state("binary_sensor.soil_mowing_permitted", "on")
+    # Unchanged healthy input must not age the permission into a false block.
+    for _ in range(4):
+        later += timedelta(minutes=10)
+        freezer.move_to(later)
+        hass.states.async_set("sensor.garden_soil_moisture", "50")
+        async_fire_time_changed(hass, later)
+        await hass.async_block_till_done()
+    assert permission_block(hass, "binary_sensor.soil_mowing_permitted", 1800) is None
+    assert permission_block(hass, "binary_sensor.garden_mowing_permitted", 1800) is None
+    later += timedelta(minutes=31)
+    freezer.move_to(later)
+    async_fire_time_changed(hass, later)
+    await hass.async_block_till_done()
+    assert hass.states.is_state("binary_sensor.soil_mowing_permitted", "off")
+    assert hass.states.is_state("binary_sensor.garden_mowing_permitted", "off")
+    assert "stale" in hass.states.get(
+        "binary_sensor.soil_mowing_permitted"
+    ).attributes["reason"]
     hass.states.async_set("sensor.garden_soil_moisture", "unavailable")
     await hass.async_block_till_done()
     assert hass.states.is_state("binary_sensor.soil_mowing_permitted", "off")
@@ -84,6 +113,13 @@ async def test_irrigation_example_initializes_persistent_settling_and_blocks_wat
     async_fire_time_changed(hass, later)
     await hass.async_block_till_done()
     assert hass.states.is_state("binary_sensor.irrigation_mowing_permitted", "on")
+    later += timedelta(minutes=31)
+    freezer.move_to(later)
+    async_fire_time_changed(hass, later)
+    await hass.async_block_till_done()
+    assert permission_block(
+        hass, "binary_sensor.irrigation_mowing_permitted", 1800
+    ) is None
     hass.states.async_set("switch.garden_irrigation", "on")
     await hass.async_block_till_done()
     assert hass.states.is_state("binary_sensor.irrigation_mowing_permitted", "off")
