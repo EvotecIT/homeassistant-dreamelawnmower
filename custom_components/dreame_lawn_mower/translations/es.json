@@ -63,7 +63,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "Opciones del cortacésped Dreame",
         "data": {
           "scan_interval": "Intervalo de sondeo en segundos",
@@ -100,7 +100,63 @@
           "xp2p_runner_command": "Opción avanzada de vídeo. Usa únicamente un ejecutor local que gestione un entorno XP2P compatible y devuelva una URL FLV local. Las herramientas de Android no están diseñadas para ejecutarse en el host de Home Assistant.",
           "xp2p_runner_mode": "Usa el modo de proceso para que el ejecutor permanezca activo mientras Home Assistant transmite vídeo."
         }
+      },
+      "init": {
+        "title": "Opciones del cortacésped Dreame",
+        "menu_options": {
+          "settings": "Ajustes del cortacésped",
+          "mowing_automation": "Corte automático"
+        }
+      },
+      "mowing_automation": {
+        "title": "Corte automático: horario",
+        "description": "Crea un ayudante Horario en Ajustes → Dispositivos y servicios → Ayudantes y selecciónalo aquí. Cada bloque inicia una tarea de todas las zonas del mapa actual. El final del bloque no detiene el corte. Déjalo desactivado para comprobar los ajustes. Requiere HA 2026.7+; sin YAML ni importación de blueprint.",
+        "data": {
+          "enabled": "Activar la automatización de corte de HA",
+          "schedule_entity": "Ayudante de horario semanal"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Corte automático: condiciones del jardín",
+        "description": "Elige las condiciones necesarias. La humedad debe expresarse en porcentaje. El ejemplo bloquea por encima de 65%, permite por debajo de 55% y espera 30 minutos. Las lecturas ausentes o antiguas bloquean el corte. El riego debe estar apagado; reiniciar inicia nuevas esperas de secado y asentamiento. Un permiso adicional debe estar encendido y haber informado en los últimos 30 minutos.",
+        "data": {
+          "soil_entity": "Sensor de humedad del suelo (0–100 %, opcional)",
+          "irrigation_entity": "Entidad de riego activo (opcional)",
+          "permission_entity": "Permiso adicional para cortar (opcional)",
+          "wet_threshold": "Bloquear por encima de esta humedad",
+          "dry_threshold": "Iniciar el secado por debajo de esta humedad",
+          "drying_minutes": "Tiempo continuo de secado",
+          "settling_minutes": "Espera después del riego",
+          "source_max_age": "Antigüedad máxima de la lectura del suelo"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Corte automático: espera y reanudación",
+        "description": "Por defecto se omiten inicios inadecuados y no se actúa si el permiso se pierde después. Una espera positiva conserva un inicio pendiente. Reanudar exige Pausa, una ventana positiva y desactivar la reanudación nativa tras la carga. Finalizar y volver termina sin reanudar. Se mantienen los controles del cortacésped. Desactivar retira la autoridad de esta automatización sin moverlo.",
+        "data": {
+          "minimum_battery": "Batería mínima",
+          "defer_minutes": "Espera máxima (0 = omitir inmediatamente)",
+          "recovery_minutes": "Última reanudación desde el inicio previsto (0 = desactivada)",
+          "interruption": "Si se pierde el permiso durante el corte",
+          "resume_when_allowed": "Reanudar automáticamente la tarea pausada por esta automatización",
+          "notify_outcome": "Mostrar notificaciones de resultado"
+        }
+      },
+      "mowing_review": {
+        "title": "Corte automático: revisión",
+        "description": "Horario: {schedule}\nSuelo: {soil}\nRiego: {irrigation}\nVentana de inicio diferido: {defer} minutos.\n\nDesactiva los planes nativos en todos los mapas, incluidos los predeterminados. Mantén la protección de lluvia. No se bloquean inicios independientes desde la aplicación, controles manuales o planes nativos. Guarda desactivado y comprueba el sensor de permiso. Supervisa el primer ciclo. Desactiva automatizaciones anteriores para evitar horarios duplicados.",
+        "data": {
+          "native_plans_disabled": "He desactivado los planes nativos en todos los mapas y mantenido la protección de lluvia"
+        }
       }
+    },
+    "error": {
+      "dry_threshold_below_wet": "El umbral seco debe ser menor que el húmedo.",
+      "recovery_requires_pause_and_deadline": "La reanudación automática requiere Pausa y una ventana positiva.",
+      "native_plans_confirmation_required": "Para activar el corte, confirma que los planes nativos están desactivados en todos los mapas."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "El corte visual requiere Home Assistant 2026.7 o posterior. Los controles existentes siguen disponibles."
     }
   },
   "selector": {
@@ -174,6 +230,13 @@
       "options": {
         "process": "Proceso persistente",
         "one-shot": "Comando de una sola ejecución"
+      }
+    },
+    "mowing_interruption": {
+      "options": {
+        "none": "Ninguna acción",
+        "pause": "Pausar esta tarea",
+        "dock": "Finalizar y volver a la base"
       }
     }
   },

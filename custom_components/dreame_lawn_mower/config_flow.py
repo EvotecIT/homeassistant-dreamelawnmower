@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import voluptuous as vol
 from aiohttp import ClientSession
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -82,6 +82,8 @@ from .const import (
     XP2P_RUNNER_MODE_PROCESS,
 )
 from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
+from .mowing_automation_config import CONF_MOWING_AUTOMATION
+from .mowing_automation_flow import MowingAutomationOptionsFlow
 from .runtime_data import DreameLawnMowerConfigEntry
 
 CONF_DEVICE = "device"
@@ -372,7 +374,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class DreameLawnMowerOptionsFlow(OptionsFlow):
+class DreameLawnMowerOptionsFlow(MowingAutomationOptionsFlow):
     """Handle integration options."""
 
     def __init__(self, config_entry: DreameLawnMowerConfigEntry) -> None:
@@ -380,6 +382,14 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
         self._entry_options = dict(config_entry.options)
 
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Separate ordinary mower settings from the optional automation wizard."""
+        return self.async_show_menu(
+            step_id="init", menu_options=["settings", "mowing_automation"],
+        )
+
+    async def async_step_settings(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
@@ -402,6 +412,10 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
             current_options = self._source_entry.options
             if CONF_GEOREFERENCE in current_options:
                 options[CONF_GEOREFERENCE] = current_options[CONF_GEOREFERENCE]
+            if CONF_MOWING_AUTOMATION in current_options:
+                options[CONF_MOWING_AUTOMATION] = current_options[
+                    CONF_MOWING_AUTOMATION
+                ]
             return self.async_create_entry(title="", data=options)
 
         video_transport = self._entry_options.get(
@@ -424,7 +438,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
             notification_mode = DEFAULT_NOTIFICATION_MODE
 
         return self.async_show_form(
-            step_id="init",
+            step_id="settings",
             data_schema=vol.Schema(
                 {
                     vol.Optional(

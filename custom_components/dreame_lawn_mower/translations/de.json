@@ -30,7 +30,7 @@
       "already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."
     }
   },
-  "options": {"step": {"init": {
+  "options": {"step": {"settings": {
     "title": "Optionen für Dreame-Mähroboter",
     "data": {"scan_interval": "Abfrageintervall in Sekunden", "map_restart_preview": "Kartenvorschau über Neustarts hinweg speichern", "map_label_scale": "Skalierung der Kartenbeschriftung", "map_rotation": "Kartenausrichtung", "map_theme": "Kartendesign", "map_background": "Kartenhintergrund", "map_stroke_scale": "Linienstärke der Karte", "map_marker_scale": "Größe der Kartenmarkierungen", "map_marker_image": "Eigene Mäher-Markierung", "map_spot_area_style": "Anzeige gespeicherter Punktmähflächen", "map_mowing_path_style": "Anzeige abgeschlossener Mähspuren", "notification_mode": "Home-Assistant-Benachrichtigungen", "video_retention": "Vorhaltezeit für Live-Video", "video_transport": "Übertragungsweg für Live-Video", "xp2p_library_path": "Pfad zur nativen XP2P-Bibliothek", "xp2p_runner_command": "Befehl für den XP2P-Runner", "xp2p_runner_mode": "Betriebsart des XP2P-Runners"},
     "data_description": {
@@ -50,7 +50,65 @@
       "xp2p_runner_command": "Erweiterte Videooption. Verwende nur einen lokalen Host-Runner mit kompatibler XP2P-Laufzeit, der eine lokale FLV-URL zurückgibt. Android-Hilfsprogramme sind nicht als Home-Assistant-Laufzeit vorgesehen.",
       "xp2p_runner_mode": "Verwende den Prozessmodus für einen Runner, der während des Home-Assistant-Streams aktiv bleibt."
     }
-  }}},
+  },
+      "init": {
+        "title": "Optionen für Dreame-Mähroboter",
+        "menu_options": {
+          "settings": "Mähereinstellungen",
+          "mowing_automation": "Mähautomatik"
+        }
+      },
+      "mowing_automation": {
+        "title": "Mähautomatik: Zeitplan",
+        "description": "Erstelle einen Zeitplan-Helfer unter Einstellungen → Geräte & Dienste → Helfer und wähle ihn hier aus. Jeder Block startet einen Auftrag für alle Flächen der aktuellen Karte. Das Blockende stoppt das Mähen nicht. Zum Prüfen zunächst deaktiviert lassen. Benötigt HA 2026.7+; kein YAML oder Blueprint-Import nötig.",
+        "data": {
+          "enabled": "HA-Mähautomatik aktivieren",
+          "schedule_entity": "Wochenplan-Helfer"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Mähautomatik: Gartenbedingungen",
+        "description": "Wähle die benötigten Bedingungen. Bodenfeuchte muss in Prozent vorliegen. Das Beispiel sperrt über 65%, gibt unter 55% frei und wartet 30 Minuten. Fehlende oder veraltete Messungen sperren das Mähen. Die Bewässerung muss aus sein; ein Neustart beginnt neue Trocknungs- und Wartezeiten. Eine zusätzliche Freigabe muss ausdrücklich an sein und innerhalb von 30 Minuten gemeldet worden sein.",
+        "data": {
+          "soil_entity": "Bodenfeuchtesensor (0–100%, optional)",
+          "irrigation_entity": "Entität für laufende Bewässerung (optional)",
+          "permission_entity": "Zusätzliche Mähfreigabe (optional)",
+          "wet_threshold": "Oberhalb dieser Feuchte sperren",
+          "dry_threshold": "Unterhalb dieser Feuchte Trocknungszeit starten",
+          "drying_minutes": "Durchgehende Trocknungszeit",
+          "settling_minutes": "Wartezeit nach der Bewässerung",
+          "source_max_age": "Maximales Alter der Bodenmessung"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Mähautomatik: Warten und Fortsetzen",
+        "description": "Standardmäßig werden ungeeignete Starts übersprungen; späterer Freigabeverlust löst nichts aus. Eine positive Wartezeit hält einen Start zurück. Fortsetzen erfordert Pause, eine positive Frist und deaktiviertes natives Fortsetzen nach dem Laden. Beenden und Andocken beendet ohne Fortsetzung. Mäherprüfungen bleiben aktiv. Ausschalten widerruft die Automatik ohne Bewegung.",
+        "data": {
+          "minimum_battery": "Mindestakkustand",
+          "defer_minutes": "Maximale Wartezeit (0 = sofort überspringen)",
+          "recovery_minutes": "Späteste Fortsetzung ab geplantem Start (0 = deaktiviert)",
+          "interruption": "Bei Verlust der Freigabe während des Mähens",
+          "resume_when_allowed": "Von dieser Automatik pausierte Aufgabe automatisch fortsetzen",
+          "notify_outcome": "Ergebnisbenachrichtigungen anzeigen"
+        }
+      },
+      "mowing_review": {
+        "title": "Mähautomatik: Prüfen",
+        "description": "Zeitplan: {schedule}\nBoden: {soil}\nBewässerung: {irrigation}\nStartwartefenster: {defer} Minuten.\n\nNative Pläne auf jeder Karte einschließlich Standardzeiten deaktivieren. Regenschutz aktiv lassen. Unabhängige Starts über App, manuelle Steuerung oder Gerätepläne werden nicht verhindert. Deaktiviert speichern und zuerst den Freigabesensor prüfen. Ersten Lauf beaufsichtigen. Frühere Mähautomationen deaktivieren, um doppelte Zeitpläne zu vermeiden.",
+        "data": {
+          "native_plans_disabled": "Native Pläne auf jeder Karte sind deaktiviert; Regenschutz bleibt aktiv"
+        }
+      }
+    },
+    "error": {
+      "dry_threshold_below_wet": "Der Trockenwert muss unter dem Nasswert liegen.",
+      "recovery_requires_pause_and_deadline": "Automatisches Fortsetzen erfordert Pause und eine positive Frist.",
+      "native_plans_confirmation_required": "Zum Aktivieren bestätige deaktivierte native Pläne auf jeder Karte."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "Die visuelle Mähautomatik benötigt Home Assistant 2026.7 oder neuer. Bestehende Mähersteuerungen bleiben verfügbar."
+    }
+  },
   "selector": {
     "country": {"options": {"cn": "China", "eu": "Europa", "us": "Vereinigte Staaten", "ru": "Russland", "sg": "Singapur"}},
     "map_rotation": {"options": {"0": "0° (keine Drehung)", "90": "90° im Uhrzeigersinn", "180": "180°", "270": "270° im Uhrzeigersinn"}},
@@ -61,7 +119,14 @@
     "notification_mode": {"options": {"off": "Aus", "faults": "Schwere Fehler", "faults_and_warnings": "Schwere Fehler und Warnungen"}},
     "video_retention": {"options": {"balanced": "Ausgewogen (Live-Ansicht bleibt bereit)", "battery_saver": "Energiesparmodus (nach Ende der Wiedergabe stoppen)", "video_priority": "Videopriorität (auch Schnappschüsse halten die Verbindung bereit)"}},
     "video_transport": {"options": {"auto": "Automatisches XP2P mit schneller Wiederverbindung", "cloud": "XP2P (Bereitstellung über die Cloud)"}},
-    "xp2p_runner_mode": {"options": {"process": "Dauerhafter Prozess", "one-shot": "Einmaliger Befehl"}}
+    "xp2p_runner_mode": {"options": {"process": "Dauerhafter Prozess", "one-shot": "Einmaliger Befehl"}},
+    "mowing_interruption": {
+      "options": {
+        "none": "Keine Aktion",
+        "pause": "Diese Aufgabe pausieren",
+        "dock": "Aufgabe beenden und andocken"
+      }
+    }
   },
   "entity": {
     "device_tracker": {

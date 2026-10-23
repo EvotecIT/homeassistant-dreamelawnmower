@@ -120,6 +120,7 @@ See [live video setup](docs/live-video.md) before troubleshooting playback.
 | Configure maps, themes, saved previews, or 3D | [Maps and 3D](docs/maps.md) |
 | Use the camera or change retention behavior | [Live video](docs/live-video.md) |
 | Send alerts and build automations | [Notifications and automations](docs/notifications.md) |
+| Schedule mowing around wet soil or irrigation without YAML | [Easy mowing setup](docs/soil-moisture-mowing.md) |
 | See the dashboard and device page | [Screenshots](docs/screenshots.md) |
 | Diagnose a problem | [Troubleshooting](docs/troubleshooting.md) |
 | Check qualification evidence and remaining quality work | [Quality qualification](docs/quality.md) |

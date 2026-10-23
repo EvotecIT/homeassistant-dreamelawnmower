@@ -63,7 +63,7 @@
   },
   "options": {
     "step": {
-      "init": {
+      "settings": {
         "title": "Možnosti robotické sekačky Dreame",
         "data": {
           "scan_interval": "Interval dotazování v sekundách",
@@ -101,7 +101,63 @@
           "xp2p_runner_command": "Pokročilá možnost videa. Použijte pouze místní spouštěč hostitele, který vlastní kompatibilní běhové prostředí XP2P a vrací místní adresu URL FLV. Pomocné aplikace pro Android nejsou zamýšleným běhovým prostředím Home Assistanta.",
           "xp2p_runner_mode": "Procesní režim použijte pro spouštěč, který zůstává aktivní, zatímco Home Assistant streamuje."
         }
+      },
+      "init": {
+        "title": "Možnosti robotické sekačky Dreame",
+        "menu_options": {
+          "settings": "Nastavení sekačky",
+          "mowing_automation": "Automatické sečení"
+        }
+      },
+      "mowing_automation": {
+        "title": "Automatické sečení: rozvrh",
+        "description": "Vytvořte pomocníka Rozvrh v Nastavení → Zařízení a služby → Pomocníci a vyberte jej zde. Každý blok spustí jednu úlohu všech oblastí aktuální mapy. Konec bloku sečení nezastaví. Pro kontrolu nechte vypnuto. Vyžaduje HA 2026.7+; bez YAML a importu blueprintu.",
+        "data": {
+          "enabled": "Povolit automatické sečení HA",
+          "schedule_entity": "Pomocník týdenního rozvrhu"
+        }
+      },
+      "mowing_conditions": {
+        "title": "Automatické sečení: podmínky zahrady",
+        "description": "Vyberte potřebné podmínky. Vlhkost půdy musí být v procentech. Příklad blokuje nad 65%, uvolní pod 55% a čeká 30 minut. Chybějící nebo zastaralá měření blokují sečení. Závlaha musí být vypnutá; restart znovu zahájí čekání na vyschnutí a po závlaze. Další povolení musí být zapnuté a hlášené během posledních 30 minut.",
+        "data": {
+          "soil_entity": "Senzor vlhkosti půdy (0–100 %, volitelné)",
+          "irrigation_entity": "Entita probíhající závlahy (volitelné)",
+          "permission_entity": "Další povolení sečení (volitelné)",
+          "wet_threshold": "Blokovat nad touto vlhkostí",
+          "dry_threshold": "Zahájit vysychání pod touto vlhkostí",
+          "drying_minutes": "Nepřetržitá doba vysychání",
+          "settling_minutes": "Čekání po ukončení závlahy",
+          "source_max_age": "Maximální stáří měření půdy"
+        }
+      },
+      "mowing_behavior": {
+        "title": "Automatické sečení: čekání a obnovení",
+        "description": "Ve výchozím stavu se nevhodné starty přeskočí a pozdější ztráta povolení nic nevyvolá. Kladné čekání zachová jeden start. Obnovení vyžaduje Pauzu, kladné časové okno a vypnuté nativní obnovení po nabíjení. Ukončení a návrat úlohu neobnoví. Kontroly sekačky stále platí. Vypnutí odebere automatizaci oprávnění bez pohybu sekačky.",
+        "data": {
+          "minimum_battery": "Minimální stav baterie",
+          "defer_minutes": "Maximální čekání (0 = ihned přeskočit)",
+          "recovery_minutes": "Nejzazší obnovení od plánovaného startu (0 = vypnuto)",
+          "interruption": "Při ztrátě povolení během sečení",
+          "resume_when_allowed": "Automaticky obnovit úlohu pozastavenou touto automatizací",
+          "notify_outcome": "Zobrazovat oznámení výsledků"
+        }
+      },
+      "mowing_review": {
+        "title": "Automatické sečení: kontrola",
+        "description": "Rozvrh: {schedule}\nPůda: {soil}\nZávlaha: {irrigation}\nOkno odloženého startu: {defer} minut.\n\nVypněte nativní plány na všech mapách včetně výchozích časů. Ochranu před deštěm ponechte. Nezávislé starty z aplikace, ručního ovládání nebo nativních plánů nejsou blokovány. Uložte vypnuté a zkontrolujte senzor povolení. První běh sledujte. Vypněte starší automatizace, aby nevznikly duplicitní rozvrhy.",
+        "data": {
+          "native_plans_disabled": "Vypnul jsem nativní plány na všech mapách a ponechal ochranu před deštěm"
+        }
       }
+    },
+    "error": {
+      "dry_threshold_below_wet": "Suchý práh musí být nižší než mokrý práh.",
+      "recovery_requires_pause_and_deadline": "Automatické obnovení vyžaduje Pauzu a kladné časové okno.",
+      "native_plans_confirmation_required": "Pro zapnutí potvrďte vypnutí nativních plánů na všech mapách."
+    },
+    "abort": {
+      "mowing_requires_2026_7": "Vizuální sečení vyžaduje Home Assistant 2026.7 nebo novější. Stávající ovládání zůstává dostupné."
     }
   },
   "selector": {
@@ -175,6 +231,13 @@
       "options": {
         "process": "Trvalý proces",
         "one-shot": "Jednorázový příkaz"
+      }
+    },
+    "mowing_interruption": {
+      "options": {
+        "none": "Žádná akce",
+        "pause": "Pozastavit tuto úlohu",
+        "dock": "Ukončit úlohu a vrátit se do stanice"
       }
     }
   },

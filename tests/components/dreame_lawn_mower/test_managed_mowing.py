@@ -133,6 +133,38 @@ def request(**kwargs):
     return TASK_SCHEMA({"task_type": "all", "minimum_battery": 30, **kwargs})
 
 
+async def test_owner_cancel_revokes_inflight_preflight_before_dispatch(tmp_path):
+    async with managed_runtime(tmp_path) as (owner, client, hass):
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blocked_native_read():
+            entered.set()
+            await release.wait()
+            return deepcopy(client.native)
+
+        client.async_get_schedule_start_evidence = blocked_native_read
+        hass.states.async_set("switch.ui_automation", "on")
+        pending = asyncio.create_task(
+            owner.async_request(
+                request(
+                    automation_entity="switch.ui_automation",
+                    defer_minutes=30,
+                )
+            )
+        )
+        await entered.wait()
+        cancellation = asyncio.create_task(
+            owner.async_cancel_owner("switch.ui_automation")
+        )
+        await asyncio.sleep(0)
+        release.set()
+        result = await pending
+        await cancellation
+        assert result["status"] == "cancelled"
+        assert owner.record is None
+        assert client.commands == []
+
+
 @pytest.mark.asyncio
 async def test_permission_distinguishes_blocked_unknown_and_stale(tmp_path):
     async with managed_runtime(tmp_path) as (_, client, hass):

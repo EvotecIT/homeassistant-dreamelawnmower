@@ -140,6 +140,12 @@ class ManagedMowing:
         async with self._lock:
             await self._flush_revocation()
 
+    async def async_cancel_owner(self, owner_entity: str) -> None:
+        """Revoke a matching owner, including a request still doing preflight."""
+        params = self.record["params"] if self.record else (self._request_params or {})
+        if params.get("automation_entity") == owner_entity:
+            await self.async_cancel()
+
     @callback
     def _started(self, _: Any) -> None:
         self._startup_wait = False

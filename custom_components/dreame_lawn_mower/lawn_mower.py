@@ -68,6 +68,7 @@ from .georeference import (
 )
 from .managed_mowing import ManagedMowing
 from .managed_mowing_state import MANAGED_FIELDS
+from .mowing_automation import automation_runtime
 from .mowing_command import (
     async_run_mowing_command as _async_run_targeted_mowing_command,
 )
@@ -313,9 +314,15 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             await self._managed_mowing.async_close()
             self._managed_mowing = None
             self.coordinator.managed_mowing = None
+        runtime = automation_runtime(self.coordinator)
+        if runtime is not None:
+            runtime.bind("mower", self)
 
     async def async_will_remove_from_hass(self) -> None:
         """Drain managed automation before the mower entity is removed."""
+        runtime = getattr(self.coordinator, "mowing_automation", None)
+        if runtime is not None:
+            await runtime.async_close()
         if self._managed_mowing:
             await self._managed_mowing.async_close()
         await super().async_will_remove_from_hass()
@@ -449,6 +456,15 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             ),
             "task_resumable": getattr(snapshot, "task_resumable", None),
             "last_scheduled_run": getattr(self.coordinator, "last_scheduled_run", None),
+            "mowing_automation": (
+                automation.summary
+                if (automation := getattr(self.coordinator, "mowing_automation", None))
+                is not None
+                else {
+                    "version": 1, "configured": False,
+                    "entry_id": self.coordinator.entry.entry_id,
+                }
+            ),
             "scheduled_automation": (
                 manager.summary if (manager := getattr(self, "_managed_mowing", None))
                 else None

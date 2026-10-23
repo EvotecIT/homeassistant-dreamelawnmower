@@ -173,6 +173,7 @@ def test_localized_selector_options_match_runtime_values() -> None:
         "video_retention": VIDEO_RETENTION_OPTIONS,
         "video_transport": VIDEO_TRANSPORT_OPTIONS,
         "xp2p_runner_mode": XP2P_RUNNER_MODE_OPTIONS,
+        "mowing_interruption": {"none", "pause", "dock"},
     }
 
     assert selectors.keys() == expected_options.keys()

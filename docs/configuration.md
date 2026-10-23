@@ -15,6 +15,11 @@ account can see the mower in the app.
 Credentials belong in the Home Assistant setup flow, never in repository files,
 automation YAML, or issue attachments.
 
+The entry's **Configure** menu separates **Mower settings** from **Mowing
+automation**. Use Mower settings for the options below, or follow the
+[easy mowing setup](soil-moisture-mowing.md) to schedule around soil moisture
+and irrigation without YAML.
+
 ## Update login details or region
 
 Open **Settings → Devices & services → Dreame Lawn Mower**, open the configured

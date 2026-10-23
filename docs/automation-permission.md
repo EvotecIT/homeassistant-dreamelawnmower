@@ -2,6 +2,10 @@
 
 [Back to automations](notifications.md#guarded-weekly-mowing)
 
+For setup without YAML or templates, start with the
+[step-by-step mowing guide](soil-moisture-mowing.md). The built-in wizard uses
+the same guarded mowing engine as the blueprint and custom actions below.
+
 Use external permission when mowing depends on soil moisture, irrigation,
 garden use, or another HA condition. The integration still checks the mower's
 native eligibility. Existing automations retain their defaults: attempt one
