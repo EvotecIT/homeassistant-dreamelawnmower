@@ -196,6 +196,20 @@ actions:
                  trigger.event.data.get('automation_entity') == owning_automation }}
           - variables:
               scheduled_result: "{{ trigger.event.data }}"
+          # Execute outcomes where the result is in scope on older HA engines.
+          - sequence: &publish_outcome
+              - if: "{{ notify_result }}"
+                then:
+                  - action: persistent_notification.create
+                    data:
+                      title: "Mower schedule: {{ scheduled_result.status }}"
+                      notification_id: "{{ mower_id }}_scheduled_run"
+                      message: >-
+                        {{ state_attr(mower_id, 'friendly_name') or mower_id }}:
+                        {{ scheduled_result.reason | replace('_', ' ') }}.
+                        {{ scheduled_result.get('detail', '') }}
+                        Task: {{ selected_task }}. See the automation trace for details.
+              - sequence: !input outcome_actions
     default:
       - action: dreame_lawn_mower.start_scheduled_mowing
         continue_on_error: true
@@ -221,15 +235,4 @@ actions:
           scheduled_result: >-
             {{ (run_response | default({})).get(mower_id,
                {'status': 'failed', 'reason': 'mower_service_unavailable'}) }}
-  - if: "{{ notify_result }}"
-    then:
-      - action: persistent_notification.create
-        data:
-          title: "Mower schedule: {{ scheduled_result.status }}"
-          notification_id: "{{ mower_id }}_scheduled_run"
-          message: >-
-            {{ state_attr(mower_id, 'friendly_name') or mower_id }}:
-            {{ scheduled_result.reason | replace('_', ' ') }}.
-            {{ scheduled_result.get('detail', '') }}
-            Task: {{ selected_task }}. See the automation trace for details.
-  - sequence: !input outcome_actions
+      - sequence: *publish_outcome

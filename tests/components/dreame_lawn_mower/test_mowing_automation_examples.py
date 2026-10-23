@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from homeassistant.core import CoreState
 from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -100,6 +101,9 @@ async def test_irrigation_example_initializes_persistent_settling_and_blocks_wat
     hass.states.async_set("switch.garden_irrigation", "off")
     assert await async_setup_component(hass, "input_datetime", config)
     assert await async_setup_component(hass, "input_boolean", config)
+    # Exercise initial bootstrap. Older HA treats setup in any later core state
+    # as a reload and deliberately suppresses its homeassistant-start trigger.
+    hass.state = CoreState.not_running
     assert await async_setup_component(hass, "automation", config)
     assert await async_setup_component(hass, "template", config)
     await hass.async_start()
@@ -126,6 +130,17 @@ async def test_irrigation_example_initializes_persistent_settling_and_blocks_wat
     hass.states.async_set("switch.garden_irrigation", "unknown")
     await hass.async_block_till_done()
     assert hass.states.is_state("binary_sensor.irrigation_mowing_permitted", "off")
+    hass.states.async_set("switch.garden_irrigation", "off")
+    await hass.async_block_till_done()
+    assert hass.states.is_state("binary_sensor.irrigation_mowing_permitted", "off")
+    assert hass.states.get(
+        "input_datetime.mower_irrigation_clear_after"
+    ).attributes["timestamp"] > dt_util.utcnow().timestamp() + 800
+    later += timedelta(minutes=16)
+    freezer.move_to(later)
+    async_fire_time_changed(hass, later)
+    await hass.async_block_till_done()
+    assert hass.states.is_state("binary_sensor.irrigation_mowing_permitted", "on")
 
 
 @pytest.mark.asyncio

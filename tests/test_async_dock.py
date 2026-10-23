@@ -268,7 +268,8 @@ def test_managed_dock_revocation_prevents_subsequent_native_commands(
             configure_dock(client)
             client.async_refresh_authoritative_snapshot = AsyncMock(
                 return_value=SimpleNamespace(
-                    mission_task_id=11, online=True, task_resumable=True,
+                    mission_task_id=11, online=True, task_resumable=False,
+                    mowing_session_active=True,
                     returning=False, docked=False,
                 )
             )

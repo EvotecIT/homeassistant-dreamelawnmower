@@ -34,7 +34,12 @@ async def async_control_owned_task(
         type(expected_task_id) is not int
         or snapshot.mission_task_id != expected_task_id
         or snapshot.online is not True
-        or snapshot.task_resumable is not True
+        or (command == "resume" and snapshot.task_resumable is not True)
+        or (
+            command != "resume"
+            and snapshot.mowing_session_active is not True
+            and snapshot.task_resumable is not True
+        )
     ):
         raise DreameLawnMowerCommandRejectedError(
             "The owned mower task is no longer confirmed"

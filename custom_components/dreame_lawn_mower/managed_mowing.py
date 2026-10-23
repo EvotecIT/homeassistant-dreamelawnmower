@@ -249,11 +249,10 @@ class ManagedMowing:
                 return await self._tick_locked()
             except (OSError, ValueError):
                 _LOGGER.exception("Managed mowing cannot persist its intent")
-                self._last_run_id = self.record["run_id"] if self.record else ""
-                self.record = None
-                return self._emit(
-                    "failed", "managed_storage_unavailable", params=params
-                )
+                return await self._fail("managed_storage_unavailable", params=params)
+            except Exception:
+                _LOGGER.exception("Managed mowing request stopped after a failure")
+                return await self._fail("managed_run_failed", params=params)
 
     @callback
     def cancel(self, reason: str = "manual_intervention") -> None:
@@ -284,8 +283,23 @@ class ManagedMowing:
             except Exception:
                 _LOGGER.exception("Managed mowing stopped after an unexpected failure")
                 if self.record:
-                    self._emit("failed", "managed_run_failed")
-                    self.record = None
+                    await self._fail("managed_run_failed")
+
+    async def _fail(
+        self, reason: str, *, params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Retire failed intent durably; retry revocation on close after disk errors."""
+        self._cancel_reason = reason
+        result = self._emit(
+            "failed", reason, params=params if not self.record else None
+        )
+        try:
+            await self._clear()
+        except (OSError, ValueError):
+            # _clear retires the run ID and clears memory before writing. Keep
+            # both, and keep revocation set so unload retries its persistence.
+            _LOGGER.exception("Managed mowing cannot persist its failure")
+        return result
 
     async def _tick_locked(self) -> dict[str, Any]:
         assert self.record is not None
@@ -565,10 +579,11 @@ class ManagedMowing:
         params: dict[str, Any] | None = None,
         detail: str | None = None,
     ) -> dict[str, Any]:
-        record = self.record
+        request_scoped = params is not None
+        record = None if request_scoped else self.record
         params = params or (record["params"] if record else {})
         emission = (record["run_id"] if record else None, status, reason, detail)
-        if emission == self._last_emission:
+        if not request_scoped and emission == self._last_emission:
             return dict(self._last_result)
         targets = params.get(
             {"zone": "zone_ids", "spot": "spot_ids", "edge": "contour_ids"}.get(
@@ -588,7 +603,8 @@ class ManagedMowing:
                 "automation_entity": params.get("automation_entity", ""),
             },
         )
-        self._last_emission, self._last_result = emission, result
+        if not request_scoped:
+            self._last_emission, self._last_result = emission, result
         return result
 
     async def _finish(self, status: str, reason: str) -> dict[str, Any]:

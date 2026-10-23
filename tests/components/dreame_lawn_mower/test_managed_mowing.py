@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from threading import Event as ThreadEvent
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -83,7 +83,7 @@ class MowerTransport:
         self.snapshot.mission_task_id += 1
         self.snapshot.docked = False
         self.snapshot.mowing_session_active = True
-        self.snapshot.task_resumable = True
+        self.snapshot.task_resumable = False
 
     async def async_control_managed_task(self, command, **kwargs):
         assert kwargs["expected_task_id"] == self.snapshot.mission_task_id
@@ -91,6 +91,7 @@ class MowerTransport:
         assert kwargs["admission"]()
         self.commands.append(command)
         self.snapshot.paused = command == "pause"
+        self.snapshot.task_resumable = command == "pause"
         if command == "dock":
             self.snapshot.docked = True
             self.snapshot.mowing_session_active = False
@@ -122,8 +123,10 @@ async def managed_runtime(tmp_path):
     try:
         yield owner, client, hass
     finally:
-        await owner.async_close()
-        await hass.async_stop()
+        try:
+            await owner.async_close()
+        finally:
+            await hass.async_stop()
 
 
 def request(**kwargs):
@@ -504,12 +507,18 @@ async def test_close_drains_older_atomic_writer_before_final_revocation(
             permission_entity="binary_sensor.lawn_permission", defer_minutes=60,
         ))
         entered, release = asyncio.Event(), ThreadEvent()
-        write_prepared = owner._store._write_prepared_data
+        # HA 2025 writes the envelope directly; newer HA prepares JSON first.
+        writer_name = (
+            "_write_prepared_data" if hasattr(owner._store, "_write_prepared_data")
+            else "_write_data"
+        )
+        write_prepared = getattr(owner._store, writer_name)
         blocked_once = False
 
         def hold_waiting_write(mode, data):
             nonlocal blocked_once
-            saved_record = json.loads(data)["data"]["record"]
+            envelope = json.loads(data) if isinstance(data, str | bytes) else data
+            saved_record = envelope["data"]["record"]
             if saved_record and saved_record["phase"] == "waiting" and not blocked_once:
                 blocked_once = True
                 hass.loop.call_soon_threadsafe(entered.set)
@@ -517,7 +526,7 @@ async def test_close_drains_older_atomic_writer_before_final_revocation(
                     raise RuntimeError("Test writer was not released")
             write_prepared(mode, data)
 
-        monkeypatch.setattr(owner._store, "_write_prepared_data", hold_waiting_write)
+        monkeypatch.setattr(owner._store, writer_name, hold_waiting_write)
 
         async def revoke_before_dispatch(**kwargs):
             hass.states.async_set("binary_sensor.lawn_permission", "off")
@@ -595,8 +604,10 @@ async def test_ambiguous_command_is_not_automatically_retried(tmp_path):
 @pytest.mark.asyncio
 async def test_storage_failure_prevents_dispatch(tmp_path):
     async with managed_runtime(tmp_path) as (owner, client, _):
-        owner._store.async_save = AsyncMock(side_effect=OSError("disk unavailable"))
-        result = await owner.async_request(request(defer_minutes=60))
+        with patch.object(
+            owner._store, "async_save", side_effect=OSError("disk unavailable")
+        ):
+            result = await owner.async_request(request(defer_minutes=60))
         assert result["reason"] == "managed_storage_unavailable"
         assert owner.record is None
         assert client.commands == []
