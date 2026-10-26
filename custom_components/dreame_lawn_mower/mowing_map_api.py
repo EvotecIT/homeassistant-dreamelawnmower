@@ -30,7 +30,10 @@ from .dreame_lawn_mower_client.map_inventory import (
 from .dreame_lawn_mower_client.map_projection import MapProjection
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
-from .dreame_lawn_mower_client.zone_mowing_history import reported_charger_for_map
+from .dreame_lawn_mower_client.zone_mowing_history import (
+    lineage_render_matches_history,
+    reported_charger_for_map,
+)
 from .georeference import entry_georeference
 from .map_presentation import map_style
 from .real_scene_cache import real_scene_owner
@@ -105,6 +108,7 @@ class MowingMapAPI:
             # The station is drawn into the background once a summary reports it.
             reported_charger_for_map(
                 getattr(coordinator.client, "_charger_history", None), app_maps, index,
+                getattr(coordinator.client, "_map_lineage", None),
             ),
         )
 
@@ -176,6 +180,7 @@ class MowingMapAPI:
     async def _load(
         self, entry_id: str, coordinator: Any, context: tuple[Any, ...]
     ) -> _SceneEntry:
+        history = getattr(coordinator.client, "_charger_history", None)
         try:
             scene = await coordinator.client.async_get_mowing_map_scene(
                 map_index=context[0],
@@ -192,9 +197,20 @@ class MowingMapAPI:
                 text="The current map could not be loaded.",
                 headers={**_HEADERS, "Retry-After": "15"},
             ) from err
-        if coordinator is not self.coordinator(entry_id) or context != self.context(
-            coordinator
+        if coordinator is not self.coordinator(entry_id):
+            raise web.HTTPConflict(text="The map changed while loading.")
+        current = self.context(coordinator)
+        charger = current[-1]
+        if (
+            context[-1] is None and context[:-1] == current[:-1]
+            and lineage_render_matches_history(
+                history, getattr(coordinator.client, "_charger_history", None),
+                scene.charger, (charger.x, charger.y) if charger is not None else None,
+                scene.bounds,
+            )
         ):
+            context = current
+        if context != current:
             raise web.HTTPConflict(text="The map changed while loading.")
         entry = _SceneEntry(coordinator, context, scene, time.monotonic())
         self._failures.pop(entry_id, None)

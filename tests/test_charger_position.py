@@ -25,6 +25,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_hi
     ZoneMowingHistory,
     async_get_zone_mowing_records,
     charger_position,
+    zone_geometry,
 )
 from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 
@@ -80,6 +81,48 @@ def test_latest_station_prefers_the_current_map_revision() -> None:
     assert history.latest_charger(None) == newer
     assert history.latest_charger("c" * 32) is None
     assert ZoneMowingHistory().latest_charger(HASH) is None
+
+
+SQUARE = [[0, 0], [10, 0], [10, 10], [0, 10]]
+
+
+def _summary(md5: str, *zones: dict, end: int = 100) -> dict:
+    return {"md5": md5, "end": end, "map": list(zones), "dock": [11, 1, 0]}
+
+
+def test_summary_zone_geometry_uses_drawable_units_and_lawn_zones_only() -> None:
+    geometry = zone_geometry(_summary(
+        HASH,
+        {"id": 1, "type": 0, "data": SQUARE},
+        {"id": 201, "type": 1, "data": SQUARE},
+        {"id": 2, "type": 0, "data": [[0, 0], [5, 5]]},
+        {"id": 3, "type": 0, "data": [[0, 0], [5, "x"], [5, 5]]},
+    ))
+    assert geometry is not None
+    assert geometry.map_hash == HASH
+    assert geometry.observed_at == 100
+    assert dict(geometry.zones) == {1: ((0, 0), (100, 0), (100, 100), (0, 100))}
+    lawn = {"id": 1, "type": 0, "data": SQUARE}
+    assert zone_geometry(_summary("not-a-revision", lawn)) is None
+    assert zone_geometry({"md5": HASH, "map": "bad"}) is None
+
+
+def test_lineage_needs_an_unchanged_zone_boundary_not_nearby_coordinates() -> None:
+    square = ((0, 0), (100, 0), (100, 100), (0, 100))
+    lawn = {"id": 1, "type": 0, "data": SQUARE}
+    older = zone_geometry(_summary(HASH, lawn, end=100))
+    newer = zone_geometry(_summary(OTHER_HASH, lawn, end=200))
+    assert older is not None and newer is not None
+    history = ZoneMowingHistory(geometries={MON: older, TUE: newer})
+    # An app re-save keeps the untouched zone: newest summarized ancestor.
+    edited = ((5, 5), (6, 6), (7, 5))
+    assert history.lineage_revision([(1, square), (9, edited)]) == OTHER_HASH
+    # A re-created map draws its zones again: one unit off is another frame.
+    shifted = tuple((x + 10, y) for x, y in square)
+    assert history.lineage_revision([(1, shifted)]) is None
+    # The same boundary under another zone number proves nothing either.
+    assert history.lineage_revision([(2, square)]) is None
+    assert ZoneMowingHistory().lineage_revision([(1, square)]) is None
 
 
 def test_station_is_drawn_inside_the_frame_only() -> None:

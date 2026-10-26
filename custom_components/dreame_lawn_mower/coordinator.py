@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -3446,14 +3447,12 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh zone mowing history: %s", err)
-            self.zone_mowing_sessions = ZoneMowingHistory(
-                self.zone_mowing_sessions.sessions if self.zone_mowing_sessions else {},
-                self.zone_mowing_sessions.pending if self.zone_mowing_sessions else (),
-                history_available=False,
-                chargers=(
-                    self.zone_mowing_sessions.chargers
-                    if self.zone_mowing_sessions else {}
-                ),
+            # Keep every cached field (stations, zone geometry) and only mark
+            # the history unavailable.
+            self.zone_mowing_sessions = (
+                dataclasses.replace(self.zone_mowing_sessions, history_available=False)
+                if self.zone_mowing_sessions is not None
+                else ZoneMowingHistory(history_available=False)
             )
             self.zone_mowing_sessions_refreshed_at = now
             self.client._charger_history = self.zone_mowing_sessions

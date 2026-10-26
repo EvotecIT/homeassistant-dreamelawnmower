@@ -582,6 +582,8 @@ class DreameLawnMowerClient(
         self._runtime_geometry_lock = _threading.RLock()
         # Charging station reported by finished task summaries, in map units.
         self._charger_history: ZoneMowingHistory | None = None
+        # Current revision -> summarized ancestor proven by unchanged geometry.
+        self._map_lineage: dict[str, str] = {}
         self._runtime_geometry_revision = 0
         self._runtime_geometry_map_index: int | None = None
         self._observed_map_geometry: tuple[int, str] | None = None

@@ -8,11 +8,39 @@ from typing import TYPE_CHECKING, Any
 
 from .map_inventory import selected_map_revision
 from .position_tracking import MowerPosition, map_position_identity, snapshot_is_docked
-from .vector_map import position_within_vector_map
+from .vector_map import position_within_vector_map, with_charger
+from .zone_mowing_history import record_map_lineage, reported_charger_for_map
 
 if TYPE_CHECKING:
     from .client_tracking import _DreameLawnMowerClientTrackingMixin
     from .vector_map import DreameLawnMowerVectorMap
+
+
+def current_map_with_charger(
+    client: _DreameLawnMowerClientTrackingMixin,
+    vector_map: DreameLawnMowerVectorMap,
+    *, expected_generation: int | None = None,
+    app_maps: Mapping[str, Any] | None = None,
+    observe_lineage: bool = True,
+) -> DreameLawnMowerVectorMap:
+    """Bind static station evidence only after admitting its source geometry."""
+    with client._runtime_geometry_lock:
+        if not client._runtime_geometry_admitted(
+            vector_map.map_index, map_position_identity(vector_map),
+            expected_generation,
+        ):
+            return with_charger(vector_map, None)
+        if observe_lineage:
+            record_map_lineage(
+                client._map_lineage, client._charger_history, app_maps,
+                vector_map.map_index,
+                ((zone.zone_id, zone.zone_type, zone.points)
+                 for zone in vector_map.zones),
+            )
+        return with_charger(vector_map, reported_charger_for_map(
+            client._charger_history, app_maps, vector_map.map_index,
+            client._map_lineage,
+        ))
 
 
 def vector_map_position(

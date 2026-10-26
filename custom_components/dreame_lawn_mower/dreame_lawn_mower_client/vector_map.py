@@ -148,24 +148,35 @@ def with_charger(
     The bounds are left unchanged: they also identify the geometry that
     retained mower positions are bound to.
     """
-    x, y = getattr(position, "x", None), getattr(position, "y", None)
     boundary = vector_map.boundary
-    if type(x) is not int or type(y) is not int or boundary is None:
+    if boundary is None:
         return vector_map
+    charger = charger_in_bounds(
+        (getattr(position, "x", None), getattr(position, "y", None)),
+        (boundary.x1, boundary.y1, boundary.x2, boundary.y2),
+    )
+    return replace(vector_map, charger=charger) if charger is not None else vector_map
+
+
+def charger_in_bounds(
+    position: tuple[Any, Any] | None,
+    bounds: tuple[int, int, int, int] | None,
+) -> tuple[int, int] | None:
+    """Use the same edge-station attachment policy for pixels and cache identity."""
+    if position is None or bounds is None:
+        return None
+    x, y = position
+    if type(x) is not int or type(y) is not int:
+        return None
+    x1, y1, x2, y2 = bounds
     # The station sits at the lawn's edge; tolerate half a metre past the frame.
     margin = 500
     if not (
-        boundary.x1 - margin <= x <= boundary.x2 + margin
-        and boundary.y1 - margin <= y <= boundary.y2 + margin
+        x1 - margin <= x <= x2 + margin
+        and y1 - margin <= y <= y2 + margin
     ):
-        return vector_map
-    return replace(
-        vector_map,
-        charger=(
-            min(max(x, boundary.x1), boundary.x2),
-            min(max(y, boundary.y1), boundary.y2),
-        ),
-    )
+        return None
+    return min(max(x, x1), x2), min(max(y, y1), y2)
 
 
 def _parse_drawable_batch_vector_map(
@@ -641,6 +652,11 @@ def vector_map_to_details(
         # Same map units as the mower position, so both can share one transform.
         "charger_x": None if vector_map.charger is None else vector_map.charger[0],
         "charger_y": None if vector_map.charger is None else vector_map.charger[1],
+        "bounds": (
+            (vector_map.boundary.x1, vector_map.boundary.y1,
+             vector_map.boundary.x2, vector_map.boundary.y2)
+            if vector_map.boundary is not None else None
+        ),
         "clean_point_count": len(vector_map.clean_points),
         "clean_point_ids": list(vector_map.clean_point_ids),
         "clean_points": [

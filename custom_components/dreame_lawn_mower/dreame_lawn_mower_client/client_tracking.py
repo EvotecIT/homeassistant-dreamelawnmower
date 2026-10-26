@@ -117,6 +117,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
 
     _charger_history: ZoneMowingHistory | None
+    _map_lineage: dict[str, str]
     _position_tracker: MowerPositionTracker
     _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
     _runtime_map_identity_expires_at: datetime | None
@@ -152,12 +153,8 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
         with self._runtime_geometry_lock:
             frame = (map_index, geometry)
             # Judge the captured scope before expiry retires its live fields.
-            if self._runtime_geometry_map_index not in (None, map_index):
-                return None
-            if (
-                expected_generation is not None
-                and expected_generation != self._runtime_geometry_revision
-                and frame != self._observed_map_geometry
+            if not self._runtime_geometry_admitted(
+                map_index, geometry, expected_generation,
             ):
                 return None
             expired = self._expire_runtime_live_tracking()
@@ -188,6 +185,16 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
                 map_index=map_index, geometry=geometry, contains=contains,
                 snapshot=self._latest_snapshot,
             )
+
+    def _runtime_geometry_admitted(
+        self, map_index: int, geometry: str, expected_generation: int | None,
+    ) -> bool:
+        """Fence geometry-derived state under the runtime geometry lock."""
+        return self._runtime_geometry_map_index in (None, map_index) and (
+            expected_generation is None
+            or expected_generation == self._runtime_geometry_revision
+            or (map_index, geometry) == self._observed_map_geometry
+        )
 
     def current_map_position(self) -> MowerPosition | None:
         """Judge the latest telemetry against the last observed map frame.
