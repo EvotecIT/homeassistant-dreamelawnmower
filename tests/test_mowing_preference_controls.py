@@ -290,7 +290,8 @@ def test_number_setup_exposes_height_only_for_electronic_models(
 ) -> None:
     coordinator = _coordinator(model=model, display_model=display_model)
     hass = SimpleNamespace(data={})
-    entry = SimpleNamespace(runtime_data=coordinator, entry_id="test-entry")
+    entry = SimpleNamespace(runtime_data=coordinator, entry_id="test-entry", options={})
+    coordinator.entry = entry
     added: list[object] = []
 
     asyncio.run(async_setup_number_entry(hass, entry, added.extend))

@@ -86,6 +86,36 @@ window is the latest permitted start, not a deadline to finish mowing. The
 outcome notification explains whether a run is waiting, started, skipped or
 expired. The mower's `last_scheduled_run` attribute provides the reason.
 
+## Mow zones in rotation
+
+Once the automation is set up, three controls appear on the mower's device
+page under **Configuration**, and in Lawn Mower Card's Mowing automation panel.
+They apply at once, without reloading the integration, and the next Schedule
+block start reads them.
+
+| Control | Default | Meaning |
+| --- | --- | --- |
+| What to mow | Whole lawn | or **Due zones**, least recently mowed first |
+| Rest days between zone mowings | 1 | 0 means once a day; 1 means every other day |
+| Maximum area per start | 0 | whole zones are added while their total fits; 0 means no limit |
+
+With **Due zones**, the automation reads the same history as the **Least
+recently mowed zone** sensor for the current map. A zone is due when it has no
+confirmed completion, or when its rest days have passed. Zones without a
+completion come first, then the oldest completion. Zones are never split; the
+first due zone is always included, so a zone larger than the limit is not
+starved.
+
+The start is skipped, never widened to the whole lawn, when no zone is due
+(`no_zone_due`) or the history is incomplete or not tied to the current map
+(`zone_history_unavailable`). A zone counts as mowed only when a session
+summary confirms its completion; an interrupted zone stays due.
+
+The mower's `mowing_automation` attribute includes a `plan`: the next block
+start and the zones it would request if it began then. It uses the same
+selection as the start itself; permission, battery and native checks still
+apply at that moment.
+
 ## Optional interruption and recovery
 
 The default **No action** checks conditions before starting and does not

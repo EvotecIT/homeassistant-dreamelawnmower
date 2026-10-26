@@ -251,6 +251,23 @@
         "name": "Обнаружение человека"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Максимальная площадь за запуск"
+      },
+      "rotation_rest_days": {
+        "name": "Дни отдыха между покосами зоны"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Что косить",
+        "state": {
+          "all": "Весь газон",
+          "rotation": "Зоны по очереди"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Давно не скошенная зона"

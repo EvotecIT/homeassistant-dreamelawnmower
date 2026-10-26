@@ -252,6 +252,23 @@
         "name": "Detekce osoby"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Maximální plocha na spuštění"
+      },
+      "rotation_rest_days": {
+        "name": "Dny odpočinku mezi sečeními zóny"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Co sekat",
+        "state": {
+          "all": "Celý trávník",
+          "rotation": "Zóny na řadě"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Nejdéle neposečená zóna"

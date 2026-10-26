@@ -251,6 +251,23 @@
         "name": "Person detection"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Maximum area per start"
+      },
+      "rotation_rest_days": {
+        "name": "Rest days between zone mowings"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "What to mow",
+        "state": {
+          "all": "Whole lawn",
+          "rotation": "Due zones"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Least recently mowed zone"

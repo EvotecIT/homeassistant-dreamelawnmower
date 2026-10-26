@@ -138,7 +138,24 @@
       "person_detection": {
         "name": "Personenerkennung"
       }
-    },"sensor": {
+    },"number": {
+      "rotation_max_area": {
+        "name": "Maximale Fläche pro Start"
+      },
+      "rotation_rest_days": {
+        "name": "Ruhetage zwischen Mähvorgängen einer Zone"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Was gemäht wird",
+        "state": {
+          "all": "Gesamter Rasen",
+          "rotation": "Fällige Zonen"
+        }
+      }
+    },
+    "sensor": {
       "least_recently_mowed_zone": {
         "name": "Am längsten nicht gemähte Zone"
       },"state_name": {"name": "Status", "state": {"unknown": "Unbekannt", "mowing": "Mähen", "idle": "Inaktiv", "paused": "Pausiert", "error": "Fehler", "returning": "Rückkehr zur Ladestation", "charging": "Wird geladen", "building": "Kartierung", "charging_completed": "Ladevorgang abgeschlossen", "upgrading": "Wird aktualisiert", "mow_summon": "Mähen auf Abruf", "station_reset": "Station wird zurückgesetzt", "remote_control": "Fernsteuerung", "smart_charging": "Intelligentes Laden", "second_mowing": "Zweiter Mähdurchgang", "human_following": "Folgt einer Person", "spot_mowing": "Punktuelles Mähen", "waiting_for_task": "Wartet auf Aufgabe", "station_cleaning": "Stationsreinigung", "shortcut": "Verknüpfung", "monitoring": "Überwachung", "monitoring_paused": "Überwachung pausiert", "charging_paused_high_temperature": "Laden pausiert: Batterietemperatur zu hoch", "charging_paused_low_temperature": "Laden pausiert: Batterietemperatur zu niedrig", "repositioning": "Neupositionierung"}}}},

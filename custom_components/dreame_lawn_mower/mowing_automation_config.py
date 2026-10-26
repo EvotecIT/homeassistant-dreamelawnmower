@@ -9,6 +9,10 @@ import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
 
 CONF_MOWING_AUTOMATION = "mowing_automation"
+MOWING_TARGET_OPTIONS = ["all", "rotation"]
+ROTATION_SETTINGS = frozenset(
+    {"mowing_target", "rotation_rest_days", "rotation_max_area"}
+)
 
 AUTOMATION_SCHEMA = vol.Schema(
     {
@@ -47,6 +51,13 @@ AUTOMATION_SCHEMA = vol.Schema(
         vol.Optional("recovery_minutes", default=0): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=1440)
         ),
+        vol.Optional("mowing_target", default="all"): vol.In(MOWING_TARGET_OPTIONS),
+        vol.Optional("rotation_rest_days", default=1): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=30)
+        ),
+        vol.Optional("rotation_max_area", default=0): vol.All(
+            vol.Coerce(float), vol.Range(min=0, max=100000)
+        ),
         vol.Optional("notify_outcome", default=True): cv.boolean,
         vol.Optional("native_plans_disabled", default=False): cv.boolean,
     }
@@ -60,7 +71,8 @@ def automation_config(value: Any) -> dict[str, Any]:
     try:
         result: dict[str, Any] = AUTOMATION_SCHEMA(value)
         if not all(
-            math.isfinite(result[key]) for key in ("dry_threshold", "wet_threshold")
+            math.isfinite(result[key])
+            for key in ("dry_threshold", "wet_threshold", "rotation_max_area")
         ):
             return {}
         if result["dry_threshold"] >= result["wet_threshold"]:

@@ -251,6 +251,23 @@
         "name": "Виявлення людини"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Максимальна площа за запуск"
+      },
+      "rotation_rest_days": {
+        "name": "Дні відпочинку між покосами зони"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Що косити",
+        "state": {
+          "all": "Увесь газон",
+          "rotation": "Зони за чергою"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Найдавніше скошена зона"
