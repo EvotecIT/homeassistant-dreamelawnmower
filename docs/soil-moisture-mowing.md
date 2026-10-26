@@ -119,7 +119,10 @@ data:
 ```
 
 Omit `rest_days` to return the zone to the default. The setting applies at
-once without reloading the integration. The `mowing_automation` attribute
+once without reloading the integration. Each override belongs to the selected
+map: another map with the same zone ID keeps its own setting. An optional
+`map_index` rejects the request if the selected map changes before it arrives.
+The `mowing_automation` attribute
 lists every zone in `rotation_zones` with its rest days and the date it is due
 again (`due_on`; empty means due now).
 

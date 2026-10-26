@@ -135,6 +135,14 @@ set_rotation_zone_rest_days:
       integration: dreame_lawn_mower
       domain: lawn_mower
   fields:
+    map_index:
+      name: Map index
+      description: Optional expected current map. Rejects the request if the map changed before it arrived.
+      selector:
+        number:
+          min: 0
+          max: 65535
+          mode: box
     zone_id:
       name: Zone ID
       description: Saved zone ID on the current map.

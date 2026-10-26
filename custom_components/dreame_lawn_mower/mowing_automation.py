@@ -196,17 +196,26 @@ class MowingAutomation:
         finally:
             self._run_task = None
 
+    def _rotation_map_index(self) -> int | None:
+        """The selected map only while the inventory verifies its revision."""
+        coordinator = self.coordinator
+        map_index = getattr(coordinator, "selected_map_index", None)
+        if type(map_index) is int and selected_map_revision(
+            coordinator.app_maps, map_index,
+        ) is not None:
+            return map_index
+        return None
+
     def _rotation_overview(self) -> tuple[list[dict[str, Any]], int] | str:
         """Zone history of the verified selected map, or why it is unusable."""
         coordinator = self.coordinator
         history = getattr(coordinator, "zone_mowing_sessions", None)
-        map_index = getattr(coordinator, "selected_map_index", None)
+        map_index = self._rotation_map_index()
         if (
             history is None
             or not history.complete
             or not history.attributable
-            or type(map_index) is not int
-            or selected_map_revision(coordinator.app_maps, map_index) is None
+            or map_index is None
         ):
             return "zone_history_unavailable"
         overview = current_zone_overview(coordinator)
@@ -229,7 +238,7 @@ class MowingAutomation:
             rest_days=self.config["rotation_rest_days"],
             max_area=self.config["rotation_max_area"],
             today=today or dt_util.now().date(),
-            zone_rest_days_by_id=zone_rest_days_by_id(self.config),
+            zone_rest_days_by_id=zone_rest_days_by_id(self.config, map_index),
         )
         if not zone_ids:
             return "no_zone_due"
@@ -320,15 +329,26 @@ class MowingAutomation:
         self.coordinator.async_update_listeners()
 
     async def async_set_zone_rest_days(
-        self, zone_id: int, rest_days: int | None
+        self, zone_id: int, rest_days: int | None, *, map_index: int | None = None,
     ) -> None:
         """Give one zone its own rest days, or None to use the default again."""
-        overrides = dict(self.config.get("rotation_zone_rest_days", {}))
+        selected = self._rotation_map_index()
+        if selected is None or (map_index is not None and map_index != selected):
+            raise HomeAssistantError("The selected map changed or is not verified")
+        if rest_days is not None and not any(
+            zone["zone_id"] == zone_id
+            for zone in current_zone_overview(self.coordinator)
+        ):
+            raise HomeAssistantError("The zone does not belong to the selected map")
+        maps = deepcopy(self.config.get("rotation_zone_rest_days", {}))
+        overrides = maps.setdefault(str(selected), {})
         if rest_days is None:
             overrides.pop(str(zone_id), None)
         else:
             overrides[str(zone_id)] = rest_days
-        await self.async_set_rotation(rotation_zone_rest_days=overrides)
+        if not overrides:
+            maps.pop(str(selected), None)
+        await self.async_set_rotation(rotation_zone_rest_days=maps)
 
     def zone_schedule(self) -> list[dict[str, Any]]:
         """Each zone's rest days and next due date, from the start's own rules."""
@@ -338,7 +358,7 @@ class MowingAutomation:
         return rotation_zones(
             usable[0],
             rest_days=self.config["rotation_rest_days"],
-            overrides=zone_rest_days_by_id(self.config),
+            overrides=zone_rest_days_by_id(self.config, usable[1]),
         )
 
     def plan(self) -> dict[str, Any]:
@@ -403,9 +423,12 @@ class MowingAutomation:
             "mowing_target": self.config["mowing_target"],
             "rotation_rest_days": self.config["rotation_rest_days"],
             "rotation_max_area": self.config["rotation_max_area"],
-            "rotation_zone_rest_days": dict(
-                self.config.get("rotation_zone_rest_days", {})
-            ),
+            "rotation_map_index": self._rotation_map_index(),
+            "rotation_zone_rest_days": {
+                str(zone_id): days for zone_id, days in zone_rest_days_by_id(
+                    self.config, self._rotation_map_index(),
+                ).items()
+            },
             "rotation_zones": self.zone_schedule(),
             "target_entity": getattr(self.entities.get("target"), "entity_id", None),
             "rest_days_entity": getattr(

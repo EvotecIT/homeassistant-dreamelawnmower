@@ -18,26 +18,40 @@ ROTATION_SETTINGS = frozenset(
         "rotation_zone_rest_days",
     }
 )
-# Stored with string keys: entry options are JSON.
-ZONE_REST_DAYS_SCHEMA = vol.All(
-    vol.Schema(
-        {
-            vol.Match(r"^[1-9][0-9]{0,4}$"): vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=30)
-            )
-        }
-    ),
-    vol.Length(max=100),
+# Both map and zone IDs are string keys in persisted JSON options.
+_MAP_KEY = vol.All(
+    vol.Match(r"^(0|[1-9][0-9]{0,4})$"),
+    vol.Coerce(int), vol.Range(min=0, max=65535), vol.Coerce(str),
 )
+_ZONE_KEY = vol.All(
+    vol.Match(r"^[1-9][0-9]{0,4}$"),
+    vol.Coerce(int), vol.Range(min=1, max=65535), vol.Coerce(str),
+)
+_ZONE_REST_DAYS_SCHEMA = vol.Schema({
+    _MAP_KEY: vol.Schema({
+        _ZONE_KEY: vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
+    }),
+})
 
 
-def zone_rest_days_by_id(config: dict[str, Any]) -> dict[int, int]:
-    """Per-zone rest days with integer zone IDs."""
+def zone_rest_days_by_map(value: Any) -> dict[str, dict[str, int]]:
+    """Validate at most 100 map-bound zone overrides across the mower."""
+    result: dict[str, dict[str, int]] = _ZONE_REST_DAYS_SCHEMA(value)
+    if sum(len(zones) for zones in result.values()) > 100:
+        raise vol.Invalid("Too many zone rest-day overrides")
+    return result
+
+
+def zone_rest_days_by_id(
+    config: dict[str, Any], map_index: int | None,
+) -> dict[int, int]:
+    """Rest days only for zones belonging to the selected verified map."""
     return {
         int(zone_id): days
-        for zone_id, days in config.get("rotation_zone_rest_days", {}).items()
-        if int(zone_id) <= 65535
+        for zone_id, days in config.get("rotation_zone_rest_days", {})
+        .get(str(map_index), {}).items()
     }
+
 
 AUTOMATION_SCHEMA = vol.Schema(
     {
@@ -83,7 +97,7 @@ AUTOMATION_SCHEMA = vol.Schema(
         vol.Optional("rotation_max_area", default=0): vol.All(
             vol.Coerce(float), vol.Range(min=0, max=100000)
         ),
-        vol.Optional("rotation_zone_rest_days", default={}): ZONE_REST_DAYS_SCHEMA,
+        vol.Optional("rotation_zone_rest_days", default={}): zone_rest_days_by_map,
         vol.Optional("notify_outcome", default=True): cv.boolean,
         vol.Optional("native_plans_disabled", default=False): cv.boolean,
     }

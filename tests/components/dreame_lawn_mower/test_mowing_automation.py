@@ -820,7 +820,10 @@ async def test_rotation_change_keeps_the_switch_state(hass, monkeypatch, enabled
 
 @pytest.mark.parametrize(
     "value",
-    [{"six": 0}, {"0": 1}, {"6": 31}, {"6": -1}, {str(n): 1 for n in range(1, 102)}],
+    [{"0": zones} for zones in (
+        {"six": 0}, {"0": 1}, {"6": 31}, {"6": -1}, {"65536": 1},
+        {str(n): 1 for n in range(1, 102)},
+    )],
 )
 def test_invalid_zone_rest_days_are_rejected(value):
     assert (
@@ -862,7 +865,7 @@ async def test_zone_rest_days_are_set_and_cleared_in_place(hass, monkeypatch):
     await runtime.async_set_zone_rest_days(1, 3)
     await hass.async_block_till_done()
     saved = entry.options[CONF_MOWING_AUTOMATION]["rotation_zone_rest_days"]
-    assert saved == {"6": 0, "1": 3}
+    assert saved == {"0": {"6": 0, "1": 3}}
     assert reloads == [False, False]
     table = {zone["zone_id"]: zone for zone in runtime.summary["rotation_zones"]}
     assert table[6]["rest_days"] == 0 and table[6]["custom_rest_days"]
@@ -872,7 +875,9 @@ async def test_zone_rest_days_are_set_and_cleared_in_place(hass, monkeypatch):
     # Zone 6 was mowed today: even a daily zone waits until tomorrow.
     assert manager.async_request.call_args.args[0]["zone_ids"] == [1]
     await runtime.async_set_zone_rest_days(6, None)
-    assert entry.options[CONF_MOWING_AUTOMATION]["rotation_zone_rest_days"] == {"1": 3}
+    assert entry.options[CONF_MOWING_AUTOMATION]["rotation_zone_rest_days"] == {
+        "0": {"1": 3},
+    }
 
 
 async def test_zone_rest_days_apply_to_the_next_start(hass, monkeypatch):
@@ -891,7 +896,7 @@ async def test_zone_rest_days_apply_to_the_next_start(hass, monkeypatch):
         monkeypatch,
         overview=overview,
         mowing_target="rotation",
-        rotation_zone_rest_days={"6": 0},
+        rotation_zone_rest_days={"0": {"6": 0}},
     )
     await runtime._run({})
     assert manager.async_request.call_args.args[0]["zone_ids"] == [6]
@@ -908,4 +913,51 @@ async def test_zone_rest_days_service_needs_the_automation(hass):
     runtime = SimpleNamespace(async_set_zone_rest_days=AsyncMock())
     mower.coordinator = SimpleNamespace(mowing_automation=runtime)
     await mower.async_set_rotation_zone_rest_days(6)
-    runtime.async_set_zone_rest_days.assert_awaited_once_with(6, None)
+    runtime.async_set_zone_rest_days.assert_awaited_once_with(6, None, map_index=None)
+
+
+async def test_zone_frequency_follows_its_map_and_returns_when_switching_back(
+    hass, monkeypatch,
+):
+    yesterday = (dt_util.now() - timedelta(days=1)).isoformat()
+    overview = [{"zone_id": 6, "label": "Front", "last_completed_at": yesterday}]
+    runtime, _ = _rotation_runtime(
+        hass, monkeypatch, mowing_target="rotation", overview=overview,
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={}, options={CONF_MOWING_AUTOMATION: dict(runtime.config)}
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    await runtime.async_set_zone_rest_days(6, 0)
+    assert runtime._rotation_target()["zone_ids"] == [6]
+    runtime.coordinator.selected_map_index = 1
+    runtime.coordinator.app_maps["current_map_index"] = 1
+    assert runtime._rotation_target() == "no_zone_due"
+    assert runtime.summary["rotation_zones"][0]["rest_days"] == 1
+    await runtime.async_set_zone_rest_days(6, 3)
+    runtime.coordinator.selected_map_index = 0
+    runtime.coordinator.app_maps["current_map_index"] = 0
+    assert runtime.summary["rotation_zones"][0]["rest_days"] == 0
+    overview.clear()
+    await runtime.async_set_zone_rest_days(6, None)
+    assert entry.options[CONF_MOWING_AUTOMATION]["rotation_zone_rest_days"] == {
+        "1": {"6": 3},
+    }
+
+
+async def test_zone_frequency_rejects_an_overtaken_map_request(hass, monkeypatch):
+    runtime, _ = _rotation_runtime(
+        hass, monkeypatch, overview=[{"zone_id": 6, "last_completed_at": None}],
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={}, options={CONF_MOWING_AUTOMATION: dict(runtime.config)}
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    before = dict(entry.options)
+    with pytest.raises(HomeAssistantError):
+        await runtime.async_set_zone_rest_days(6, 0, map_index=1)
+    with pytest.raises(HomeAssistantError):
+        await runtime.async_set_zone_rest_days(77, 0)
+    assert entry.options == before
