@@ -15,6 +15,11 @@ from .dreame_lawn_mower_client.mowing_height_capabilities import (
     mowing_height_adjustment_supported,
 )
 from .entity import DreameLawnMowerEntity
+from .mowing_automation import automation_runtime
+from .mowing_automation_entities import (
+    RotationMaxAreaNumber,
+    RotationRestDaysNumber,
+)
 from .mowing_height import (
     MOWING_HEIGHT_MAX_CM,
     MOWING_HEIGHT_MIN_CM,
@@ -46,6 +51,14 @@ async def async_setup_entry(
 ) -> None:
     """Set up Dreame mower number entities."""
     coordinator: DreameLawnMowerCoordinator = entry.runtime_data
+    runtime = automation_runtime(coordinator)
+    if runtime is not None:
+        async_add_entities(
+            [
+                RotationRestDaysNumber(coordinator, runtime),
+                RotationMaxAreaNumber(coordinator, runtime),
+            ]
+        )
     descriptor = coordinator.client.descriptor
     entities: list[NumberEntity] = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
     if mowing_height_adjustment_supported(

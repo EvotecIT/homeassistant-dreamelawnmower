@@ -68,6 +68,27 @@ def zone_mowing_overview(
     return overview
 
 
+def current_zone_overview(coordinator: Any) -> list[dict[str, Any]]:
+    """Zones of the selected map with their history, least recently mowed first.
+
+    Shared by the sensor and the mowing automation so both read one order.
+    """
+    zones = current_zone_entries(
+        coordinator.batch_device_data,
+        coordinator.app_maps,
+        getattr(coordinator, "vector_map_details", None),
+        selected_map_index=coordinator.selected_map_index,
+    )
+    history = coordinator.zone_mowing_sessions
+    return zone_mowing_overview(
+        zones,
+        history.sessions if history is not None else None,
+        map_hash=selected_map_revision(
+            coordinator.app_maps, coordinator.selected_map_index
+        ),
+    )
+
+
 class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorEntity):
     """Prioritize unknown zones, then the oldest confirmed mowing completion."""
 
@@ -79,21 +100,7 @@ class DreameLawnMowerLeastRecentlyMowedZoneSensor(DreameLawnMowerEntity, SensorE
         self._attr_unique_id = f"{self._descriptor.unique_id}_least_recently_mowed_zone"
 
     def _overview(self) -> list[dict[str, Any]]:
-        coordinator = self.coordinator
-        zones = current_zone_entries(
-            coordinator.batch_device_data,
-            coordinator.app_maps,
-            getattr(coordinator, "vector_map_details", None),
-            selected_map_index=coordinator.selected_map_index,
-        )
-        history = coordinator.zone_mowing_sessions
-        return zone_mowing_overview(
-            zones,
-            history.sessions if history is not None else None,
-            map_hash=selected_map_revision(
-                coordinator.app_maps, coordinator.selected_map_index
-            ),
-        )
+        return current_zone_overview(self.coordinator)
 
     @property
     def available(self) -> bool:

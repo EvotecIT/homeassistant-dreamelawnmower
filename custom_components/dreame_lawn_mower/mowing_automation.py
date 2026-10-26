@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -22,10 +22,19 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .managed_mowing_state import TASK_SCHEMA
-from .mowing_automation_config import CONF_MOWING_AUTOMATION, automation_config
+from .mowing_automation_config import (
+    CONF_MOWING_AUTOMATION,
+    ROTATION_SETTINGS,
+    automation_config,
+)
 from .mowing_conditions import MowingConditions
+from .option_updates import EntryUpdateSnapshot
+from .sensor_zone_history import current_zone_overview
+from .zone_rotation import due_zone_ids
 
 _LOGGER = logging.getLogger(__name__)
+# Settings controls may bind too; only these three gate the schedule trigger.
+REQUIRED_BINDINGS = frozenset({"permission", "enabled", "mower"})
 
 
 def automation_runtime(coordinator: Any) -> MowingAutomation | None:
@@ -69,7 +78,11 @@ class MowingAutomation:
     def bind(self, kind: str, entity: Any) -> None:
         """Wait for actual registered entity IDs before attaching triggers."""
         self.entities[kind] = entity
-        if len(self.entities) == 3 and not self._started and not self._closed:
+        if (
+            REQUIRED_BINDINGS <= self.entities.keys()
+            and not self._started
+            and not self._closed
+        ):
             self._started = True
             self._setup_task = self.hass.async_create_task(self._async_start())
 
@@ -157,23 +170,58 @@ class MowingAutomation:
         try:
             self._evaluate()
             occurrence = dt_util.utcnow().strftime("%Y-%m-%dT%H:%M")
-            params = TASK_SCHEMA(
-                {
-                    "task_type": "all",
-                    "minimum_battery": self.config["minimum_battery"],
-                    "permission_entity": self.entities["permission"].entity_id,
-                    "permission_max_age": 60,
-                    "defer_minutes": self.config["defer_minutes"],
-                    "interruption": self.config["interruption"],
-                    "resume_when_allowed": self.config["resume_when_allowed"],
-                    "recovery_minutes": self.config["recovery_minutes"],
-                    "automation_entity": self.entities["enabled"].entity_id,
-                    "run_id": f"ui:{self.coordinator.entry.entry_id}:{occurrence}",
-                }
-            )
-            await manager.async_request(params)
+            request: dict[str, Any] = {
+                "task_type": "all",
+                "minimum_battery": self.config["minimum_battery"],
+                "permission_entity": self.entities["permission"].entity_id,
+                "permission_max_age": 60,
+                "defer_minutes": self.config["defer_minutes"],
+                "interruption": self.config["interruption"],
+                "resume_when_allowed": self.config["resume_when_allowed"],
+                "recovery_minutes": self.config["recovery_minutes"],
+                "automation_entity": self.entities["enabled"].entity_id,
+                "run_id": f"ui:{self.coordinator.entry.entry_id}:{occurrence}",
+            }
+            if self.config["mowing_target"] == "rotation":
+                selection = self._rotation_target()
+                if isinstance(selection, str):
+                    manager.skip(
+                        dict(request, task_type="zone", zone_ids=[]), selection
+                    )
+                    return
+                request.update(selection)
+            await manager.async_request(TASK_SCHEMA(request))
         finally:
             self._run_task = None
+
+    def _rotation_target(self, today: date | None = None) -> dict[str, Any] | str:
+        """Due whole zones of the selected map, or why none can be chosen.
+
+        The scheduled start and the dashboard preview both call this, so the
+        preview cannot announce zones the start would not choose.
+        """
+        coordinator = self.coordinator
+        history = getattr(coordinator, "zone_mowing_sessions", None)
+        map_index = getattr(coordinator, "selected_map_index", None)
+        if (
+            history is None
+            or not history.complete
+            or not history.attributable
+            or type(map_index) is not int
+        ):
+            return "zone_history_unavailable"
+        overview = current_zone_overview(coordinator)
+        if not overview:
+            return "zone_history_unavailable"
+        zone_ids = due_zone_ids(
+            overview,
+            rest_days=self.config["rotation_rest_days"],
+            max_area=self.config["rotation_max_area"],
+            today=today or dt_util.now().date(),
+        )
+        if not zone_ids:
+            return "no_zone_due"
+        return {"task_type": "zone", "zone_ids": zone_ids, "map_index": map_index}
 
     @callback
     def _outcome(self, event: Event) -> None:
@@ -226,6 +274,72 @@ class MowingAutomation:
         self.enabled = enabled
         self.entities["enabled"].async_write_ha_state()
 
+    async def async_set_rotation(self, **changes: Any) -> None:
+        """Persist rotation choices in place; the next start reads them.
+
+        Unlike the wizard, these settings never need a reload: the runtime
+        applies them at once and records the entry as already applied.
+        """
+        if set(changes) - ROTATION_SETTINGS:
+            raise HomeAssistantError("Only rotation settings change in place")
+        config = automation_config({**self.config, **changes})
+        if not config:
+            raise HomeAssistantError("Invalid mowing automation setting")
+        entry = self.coordinator.entry
+        options = dict(entry.options)
+        options[CONF_MOWING_AUTOMATION] = config
+        self.config = config
+        self.hass.config_entries.async_update_entry(entry, options=options)
+        if isinstance(
+            getattr(self.coordinator, "applied_entry_update", None),
+            EntryUpdateSnapshot,
+        ):
+            self.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+        self.coordinator.async_update_listeners()
+
+    def plan(self) -> dict[str, Any]:
+        """What the next Schedule block start would request, if it began now.
+
+        Native mower checks, permission and battery still apply at the start.
+        """
+        state = self.hass.states.get(self.config["schedule_entity"] or "")
+        next_start = None
+        if state is not None and state.state == "off":
+            next_start = dt_util.parse_datetime(
+                str(state.attributes.get("next_event") or "")
+            )
+        result: dict[str, Any] = {
+            "next_start": next_start.isoformat() if next_start else None,
+            "task_type": "all",
+            "zones": [],
+            "area_m2": None,
+            "reason": None,
+        }
+        if self.config["mowing_target"] != "rotation":
+            return result
+        day = dt_util.as_local(next_start).date() if next_start else None
+        target = self._rotation_target(day)
+        result["task_type"] = "zone"
+        if isinstance(target, str):
+            result["reason"] = target
+            return result
+        overview = {
+            item["zone_id"]: item for item in current_zone_overview(self.coordinator)
+        }
+        zones = [
+            {
+                "zone_id": zone_id,
+                "label": overview.get(zone_id, {}).get("label"),
+                "area_m2": overview.get(zone_id, {}).get("area_m2"),
+            }
+            for zone_id in target["zone_ids"]
+        ]
+        areas = [zone["area_m2"] for zone in zones]
+        result["zones"] = zones
+        if all(isinstance(area, int | float) for area in areas):
+            result["area_m2"] = round(sum(areas), 1)
+        return result
+
     @property
     def summary(self) -> dict[str, Any]:
         """Advertise UI capabilities and actual entity IDs to thin dashboards."""
@@ -242,6 +356,17 @@ class MowingAutomation:
             "enable_entity": getattr(self.entities.get("enabled"), "entity_id", None),
             "entry_id": self.coordinator.entry.entry_id,
             "last_outcome": self.last_outcome,
+            "mowing_target": self.config["mowing_target"],
+            "rotation_rest_days": self.config["rotation_rest_days"],
+            "rotation_max_area": self.config["rotation_max_area"],
+            "target_entity": getattr(self.entities.get("target"), "entity_id", None),
+            "rest_days_entity": getattr(
+                self.entities.get("rest_days"), "entity_id", None
+            ),
+            "max_area_entity": getattr(
+                self.entities.get("max_area"), "entity_id", None
+            ),
+            "plan": self.plan(),
         }
 
     async def async_close(self) -> None:

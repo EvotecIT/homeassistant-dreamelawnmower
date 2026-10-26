@@ -251,6 +251,23 @@
         "name": "Rilevamento di persone"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Superficie massima per avvio"
+      },
+      "rotation_rest_days": {
+        "name": "Giorni di riposo tra i tagli di una zona"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Cosa tagliare",
+        "state": {
+          "all": "Tutto il prato",
+          "rotation": "Zone in scadenza"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Zona tagliata meno di recente"

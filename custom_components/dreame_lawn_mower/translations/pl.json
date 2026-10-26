@@ -251,6 +251,23 @@
         "name": "Wykrycie osoby"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Maksymalna powierzchnia na uruchomienie"
+      },
+      "rotation_rest_days": {
+        "name": "Dni przerwy między koszeniami strefy"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Co kosić",
+        "state": {
+          "all": "Cały trawnik",
+          "rotation": "Strefy do koszenia"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Najdawniej skoszona strefa"

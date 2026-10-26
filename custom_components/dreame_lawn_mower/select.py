@@ -44,6 +44,8 @@ from .dreame_lawn_mower_client.device_settings import (
     RAIN_DELAY_MIN_HOURS,
 )
 from .entity import DreameLawnMowerEntity
+from .mowing_automation import automation_runtime
+from .mowing_automation_entities import MowingTargetSelect
 from .mowing_preference_control import (
     PREFERENCE_MODE_OPTIONS,
     async_update_selected_mowing_preference,
@@ -65,6 +67,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up current-map mower selects."""
     coordinator: DreameLawnMowerCoordinator = entry.runtime_data
+    runtime = automation_runtime(coordinator)
+    if runtime is not None:
+        async_add_entities([MowingTargetSelect(coordinator, runtime)])
     async_add_entities(
         [
             DreameLawnMowerVoiceLanguageSelect(coordinator),

@@ -251,6 +251,23 @@
         "name": "Detección de personas"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Superficie máxima por inicio"
+      },
+      "rotation_rest_days": {
+        "name": "Días de descanso entre cortes de una zona"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Qué cortar",
+        "state": {
+          "all": "Todo el césped",
+          "rotation": "Zonas pendientes"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Zona cortada hace más tiempo"

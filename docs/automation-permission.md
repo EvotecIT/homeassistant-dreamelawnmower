@@ -205,7 +205,8 @@ to the same notification and custom actions as the initial attempt.
 
 External reasons are `external_permission_blocked`,
 `external_permission_unknown`, and `external_permission_stale`; `detail` gives
-readable context. Existing mower-native reasons remain unchanged. Failed
+readable context. The built-in wizard's zone rotation adds `no_zone_due` and
+`zone_history_unavailable`. Existing mower-native reasons remain unchanged. Failed
 observation never permits movement from an old snapshot.
 
 Garage/gate workflows should confirm an open contact before granting start

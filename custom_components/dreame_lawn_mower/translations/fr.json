@@ -251,6 +251,23 @@
         "name": "Détection de personne"
       }
     },
+    "number": {
+      "rotation_max_area": {
+        "name": "Surface maximale par départ"
+      },
+      "rotation_rest_days": {
+        "name": "Jours de repos entre deux tontes d’une zone"
+      }
+    },
+    "select": {
+      "mowing_target": {
+        "name": "Quoi tondre",
+        "state": {
+          "all": "Toute la pelouse",
+          "rotation": "Zones dues"
+        }
+      }
+    },
     "sensor": {
       "least_recently_mowed_zone": {
         "name": "Zone tondue le moins récemment"

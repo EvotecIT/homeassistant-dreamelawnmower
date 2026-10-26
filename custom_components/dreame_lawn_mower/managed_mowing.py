@@ -275,6 +275,12 @@ class ManagedMowing:
                 return await self._fail("managed_run_failed", params=params)
 
     @callback
+    def skip(
+        self, params: dict[str, Any], reason: str, detail: str | None = None
+    ) -> dict[str, Any]:
+        """Report an occurrence its owner declined before requesting a start."""
+        return self._emit("skipped", reason, params=params, detail=detail)
+
     def cancel(self, reason: str = "manual_intervention") -> None:
         """Revoke dispatch permission synchronously, including during preflight."""
         if self.record or self._lock.locked():
