@@ -21,6 +21,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
     MAX_SCENE_POINTS,
     MAX_TRAIL_POINTS,
+    MAX_TRAIL_SEGMENTS,
     build_mowing_map_scene,
     mowing_map_overlay,
 )
@@ -210,6 +211,20 @@ def test_trail_preserves_gaps_and_stays_bounded():
         track_segments=(tuple((n % 500, 100) for n in range(MAX_TRAIL_POINTS + 100)),),
     )
     assert sum(len(part) for part in crowded["trail"]) == MAX_TRAIL_POINTS
+    many = mowing_map_overlay(
+        scene,
+        telemetry(),
+        map_index=2,
+        active=True,
+        now=NOW,
+        track_segments=tuple(((n % 400, 10), (n % 400, 20)) for n in range(300)),
+    )
+    # The card ignores the WHOLE trail above its segment budget: keep the newest.
+    assert len(many["trail"]) == MAX_TRAIL_SEGMENTS
+    assert many["trail"][-1] == [
+        list(scene.projection.point(299 % 400, 10)),
+        list(scene.projection.point(299 % 400, 20)),
+    ]
     ended = mowing_map_overlay(
         scene,
         telemetry(),

@@ -28,6 +28,9 @@ from .vector_map import (
 MAX_SCENE_POINTS = 50_000
 MAX_BACKGROUND_BYTES = 4 * 1024 * 1024
 MAX_TRAIL_POINTS = 4096
+# The Lovelace map card drops the WHOLE trail above this many segments
+# (mowing-map-logic.ts): publish only the newest ones that fit.
+MAX_TRAIL_SEGMENTS = 128
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,7 +298,7 @@ def _project_trail(
             parts.append(part)
         remaining -= sum(len(part) for part in parts)
         retained[0:0] = parts
-    return retained
+    return retained[-MAX_TRAIL_SEGMENTS:]
 
 
 def _position_recently_observed(result: dict[str, Any], now: datetime | None) -> bool:

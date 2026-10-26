@@ -17,6 +17,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals im
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
     MAX_TRAIL_POINTS,
+    MAX_TRAIL_SEGMENTS,
 )
 
 from .test_app_action_live_map import (
@@ -381,6 +382,45 @@ def test_trail_budget_counts_points_not_packets():
         ))
     # The former 64-segment cap kept only the last 64 packets of a session.
     assert len(client.mowing_map_runtime_overlay(scene)["trail"]) > 64
+    assert len(client.mowing_map_runtime_overlay(scene)["trail"]) <= MAX_TRAIL_SEGMENTS
+
+
+def test_repeated_corner_windows_become_one_line():
+    """Packets resend the same corner window until the mower turns (seen on a
+    LiDAX Ultra 1000): 222 segments for 33 distinct points. Kept as-is the
+    map card drops the whole trail above its segment budget."""
+    client = tracked_client()
+    scene = _scene(client)
+    before = len(client.mowing_map_runtime_overlay(scene)["trail"])
+    lanes = [(100 + 20 * n, 100 if n % 2 == 0 else 400) for n in range(12)]
+    index = 0
+    for start in range(len(lanes) - 2):
+        window = tuple(lanes[start:start + 3])
+        for _ in range(20):
+            publish(
+                client,
+                hex=f"window-{index}",
+                candidate_runtime_track_segments=(window,),
+            )
+            index += 1
+    trail = client.mowing_map_runtime_overlay(scene)["trail"]
+    assert len(trail) == before + 1
+    assert [tuple(point) for point in trail[-1]] == [
+        tuple(scene.projection.point(*point)) for point in lanes
+    ]
+
+
+def test_windows_sharing_one_endpoint_stay_separate():
+    client = tracked_client()
+    scene = _scene(client)
+    before = len(client.mowing_map_runtime_overlay(scene)["trail"])
+    publish(
+        client, hex="a", candidate_runtime_track_segments=(((150, 150), (250, 150)),)
+    )
+    publish(
+        client, hex="b", candidate_runtime_track_segments=(((250, 150), (250, 300)),)
+    )
+    assert len(client.mowing_map_runtime_overlay(scene)["trail"]) == before + 2
 
 
 @pytest.mark.parametrize("task_id", [100, None])
@@ -394,7 +434,7 @@ def test_active_mission_replacement_starts_a_new_trail(task_id, same_bytes):
     blob = replace(
         a1_pro_packet(), received_at=datetime.now(UTC).isoformat(), hex=packet_hex,
         candidate_runtime_task_id=task_id,
-        candidate_runtime_track_segments=(((200, 100), (300, 100)),),
+        candidate_runtime_track_segments=(((200, 200), (300, 200)),),
     )
     client.update_runtime_live_tracking(
         blob, active=True, map_index=0, mission_generation=8,
@@ -414,15 +454,19 @@ def test_long_mission_stays_within_point_budget_after_recharge():
     _label_mission(client, 7)
     scene = _scene(client)
     for index in range(MAX_TRAIL_POINTS // 2 + 10):
+        # Distinct windows sharing one endpoint at most: none can be joined.
+        x, y = 100 + index % 400, 100 + index // 400
         publish(client, hex=f"budget-{index}", candidate_runtime_track_segments=(
-            ((100, 100), (200, 100)),
+            ((x, y), (x + 1, y)),
         ))
     _dock_an_hour_ago(client)
     _resume(client, 7)
     details = client._sync_get_vector_map_details()
     assert details["runtime_track_point_count"] == MAX_TRAIL_POINTS
     overlay = client.mowing_map_runtime_overlay(scene)
-    assert sum(map(len, overlay["trail"])) == MAX_TRAIL_POINTS
+    # The card drops the whole trail above MAX_TRAIL_SEGMENTS: newest ones only.
+    assert len(overlay["trail"]) == MAX_TRAIL_SEGMENTS
+    assert sum(map(len, overlay["trail"])) <= MAX_TRAIL_POINTS
 
 
 def _gap(client, gap):
@@ -480,3 +524,18 @@ def test_verification_gap_bridge_stays_within_its_mission_and_window(boundary):
     else:
         client.update_runtime_live_tracking(None, active=False)
     assert client.mowing_map_runtime_overlay(scene)["trail"] == []
+
+
+def test_long_joined_segment_keeps_its_newest_points():
+    """A joined segment over the point budget is trimmed, never dropped whole."""
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        client_tracking,
+    )
+
+    bounded_runtime_trail = client_tracking.bounded_runtime_trail
+
+    line = tuple((n, n % 7) for n in range(MAX_TRAIL_POINTS + 50))
+    windows = tuple(line[n:n + 3] for n in range(len(line) - 2))
+    bounded = bounded_runtime_trail(windows)
+    assert len(bounded) == 1
+    assert bounded[0] == line[-MAX_TRAIL_POINTS:]
