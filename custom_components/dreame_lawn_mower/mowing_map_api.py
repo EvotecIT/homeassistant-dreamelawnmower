@@ -105,6 +105,7 @@ class MowingMapAPI:
             # The station is drawn into the background once a summary reports it.
             reported_charger_for_map(
                 getattr(coordinator.client, "_charger_history", None), app_maps, index,
+                getattr(coordinator.client, "_map_lineage", None),
             ),
         )
 

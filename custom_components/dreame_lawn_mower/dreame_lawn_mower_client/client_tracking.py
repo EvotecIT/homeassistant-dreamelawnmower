@@ -78,6 +78,7 @@ class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
 
     _charger_history: ZoneMowingHistory | None
+    _map_lineage: dict[str, str]
     _position_tracker: MowerPositionTracker
     _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
     _runtime_map_identity_expires_at: datetime | None

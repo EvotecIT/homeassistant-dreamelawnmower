@@ -21,7 +21,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map imp
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.zone_mowing_history import (  # noqa: E501
     ChargerPosition,
+    ZoneGeometry,
     ZoneMowingHistory,
+    reported_charger_for_map,
 )
 
 from .test_vector_map import _batch_payload, _client
@@ -110,10 +112,24 @@ def test_unverified_or_unmatched_revision_has_no_station(revision_state):
     assert view.details["position_x"] is None
 
 
-def test_new_revision_keeps_a_station_that_never_moved():
-    client = docked_client()
+FRONT_YARD = ((0, 0), (100, 0), (100, 100), (0, 100))
+RESAVED = "c" * 32
+
+
+def lineage_history(boundary=FRONT_YARD):
+    """Two summarized revisions; the newest reported this lawn-zone boundary."""
+    return ZoneMowingHistory(
+        chargers={
+            "old": ChargerPosition(20, 40, 0, 1, HASH),
+            "new": ChargerPosition(100, 60, 0, 2, OTHER_HASH),
+        },
+        geometries={"new": ZoneGeometry(OTHER_HASH, {1: boundary}, 2)},
+    )
+
+
+def resaved_view(client):
     maps = _maps()
-    maps["maps"][0].update(md5="c" * 32, info={"hash": "c" * 32})
+    maps["maps"][0].update(md5=RESAVED, info={"hash": RESAVED})
     view = geometry_map_view(
         client,
         parse_batch_vector_map(_batch_payload()),
@@ -121,8 +137,46 @@ def test_new_revision_keeps_a_station_that_never_moved():
         app_maps=maps,
         render_image=False,
     )
+    return maps, view
+
+
+def test_resaved_revision_inherits_the_station_of_its_verified_ancestor():
+    client = docked_client()
+    client._charger_history = lineage_history()
+    maps, view = resaved_view(client)
     assert (view.details["charger_x"], view.details["charger_y"]) == (100, 60)
     assert view.details["position_source"] == "reported_charging_station"
+    assert client._map_lineage == {RESAVED: OTHER_HASH}
+    # Paths without geometry (camera context, background key) read the same answer.
+    assert reported_charger_for_map(
+        client._charger_history, maps, 0, client._map_lineage
+    ) == ChargerPosition(100, 60, 0, 2, OTHER_HASH)
+
+
+def test_recreated_map_with_nearby_station_coordinates_stays_unknown():
+    client = docked_client()
+    # Same station coordinates, but no lawn zone kept its exact boundary.
+    client._charger_history = lineage_history(
+        tuple((x + 10, y) for x, y in FRONT_YARD)
+    )
+    maps, view = resaved_view(client)
+    assert view.details["charger_x"] is None
+    assert view.details["position_x"] is None
+    assert client._map_lineage == {}
+    assert reported_charger_for_map(
+        client._charger_history, maps, 0, client._map_lineage
+    ) is None
+
+
+def test_lineage_is_withdrawn_when_the_geometry_no_longer_matches():
+    client = docked_client()
+    client._charger_history = lineage_history()
+    resaved_view(client)
+    assert client._map_lineage == {RESAVED: OTHER_HASH}
+    client._charger_history = lineage_history(((0, 0), (90, 0), (90, 90)))
+    _, view = resaved_view(client)
+    assert client._map_lineage == {}
+    assert view.details["charger_x"] is None
 
 
 @pytest.mark.parametrize("rejected", ["foreign_map", "overtaken"])

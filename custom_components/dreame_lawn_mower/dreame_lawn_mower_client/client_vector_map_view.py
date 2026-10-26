@@ -26,7 +26,7 @@ from .vector_map import (
     vector_map_to_summary,
     with_charger,
 )
-from .zone_mowing_history import reported_charger_for_map
+from .zone_mowing_history import record_map_lineage, reported_charger_for_map
 
 if TYPE_CHECKING:
     from .client_maps import _DreameLawnMowerClientMapsMixin
@@ -134,8 +134,12 @@ def geometry_map_view(
     geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Share position validation, metrics and rendering across map transports."""
+    record_map_lineage(
+        client._map_lineage, client._charger_history, app_maps, vector_map.map_index,
+        ((zone.zone_id, zone.zone_type, zone.points) for zone in vector_map.zones),
+    )
     vector_map = with_charger(vector_map, reported_charger_for_map(
-        client._charger_history, app_maps, vector_map.map_index,
+        client._charger_history, app_maps, vector_map.map_index, client._map_lineage,
     ))
     history_only = not _vector_map_has_drawable_geometry(
         vector_map, include_history=False,

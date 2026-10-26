@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -59,8 +59,6 @@ class ZoneMowingRecord:
 # Summary coordinates use the coarse MAPD units of the summary's own ``map``
 # polygons (centimetres); drawable geometry uses units ten times finer.
 _SUMMARY_COORDINATE_SCALE = 10
-# Native millimetres: half a metre covers the dock pose noise seen in summaries.
-STABLE_STATION_SPREAD = 500
 
 
 @dataclass(frozen=True)
@@ -95,6 +93,50 @@ def charger_position(summary: Any) -> ChargerPosition | None:
 
 
 @dataclass(frozen=True)
+class ZoneGeometry:
+    """Lawn zone boundaries one summary reported, in drawable map units."""
+
+    map_hash: str
+    zones: Mapping[int, tuple[tuple[int, int], ...]]
+    observed_at: int | None = None
+
+
+def zone_geometry(summary: Any) -> ZoneGeometry | None:
+    """Decode the summary's own lawn-zone polygons (``map`` entries of type 0)."""
+    if not isinstance(summary, Mapping):
+        return None
+    revision = map_revision_hash(summary.get("md5"))
+    entries = summary.get("map")
+    if revision is None or not isinstance(entries, list):
+        return None
+    zones: dict[int, tuple[tuple[int, int], ...]] = {}
+    for entry in entries:
+        if not isinstance(entry, Mapping) or entry.get("type") != 0:
+            continue
+        zone_id, data = entry.get("id"), entry.get("data")
+        if type(zone_id) is not int or not isinstance(data, list) or len(data) < 3:
+            continue
+        points = [
+            (point[0] * _SUMMARY_COORDINATE_SCALE, point[1] * _SUMMARY_COORDINATE_SCALE)
+            for point in data
+            if isinstance(point, list | tuple)
+            and len(point) >= 2
+            and all(
+                type(value) is int and abs(value) <= 1_000_000 for value in point[:2]
+            )
+        ]
+        if len(points) == len(data):
+            zones[zone_id] = tuple(points)
+    if not zones:
+        return None
+    return ZoneGeometry(
+        revision,
+        zones,
+        _timestamp(summary.get("end")) or _timestamp(summary.get("start")),
+    )
+
+
+@dataclass(frozen=True)
 class ZoneMowingHistory:
     """Successful summaries plus the unfinished hydration queue."""
 
@@ -102,6 +144,7 @@ class ZoneMowingHistory:
     pending: tuple[str, ...] = ()
     history_available: bool = True
     chargers: Mapping[str, ChargerPosition] = field(default_factory=dict)
+    geometries: Mapping[str, ZoneGeometry] = field(default_factory=dict)
 
     def latest_charger(self, map_hash: str | None = None) -> ChargerPosition | None:
         """Newest station on the requested revision, without a foreign fallback."""
@@ -114,25 +157,32 @@ class ZoneMowingHistory:
                 return item
         return ordered[0] if revision is None and ordered else None
 
-    def stable_charger(self) -> ChargerPosition | None:
-        """Newest station when every summary reported it at the same place.
+    def lineage_revision(
+        self, zones: Iterable[tuple[int, Sequence[tuple[int, int]]]],
+    ) -> str | None:
+        """Newest summarized revision sharing an unchanged lawn zone with ``zones``.
 
-        The app re-saves the map often (a renamed zone, an edited path), and
-        each save is a new revision without a session summary yet. A station
-        that never moved across at least two summaries is still where it was;
-        one that moved proves nothing until a session runs on the new map.
+        Each app edit saves a new revision, and untouched zones keep their
+        boundary point for point. A re-created map or another slot does not
+        reproduce an exact boundary, whatever its station coordinates, so it
+        has no lineage.
         """
-        known = list(self.chargers.values())
-        if len(known) < 2:
+        current = {
+            zone_id: tuple(tuple(point) for point in points)
+            for zone_id, points in zones
+            if len(points) >= 3
+        }
+        matches = [
+            geometry
+            for geometry in self.geometries.values()
+            if any(
+                current.get(zone_id) == points
+                for zone_id, points in geometry.zones.items()
+            )
+        ]
+        if not matches:
             return None
-        xs = [item.x for item in known]
-        ys = [item.y for item in known]
-        if (
-            max(xs) - min(xs) > STABLE_STATION_SPREAD
-            or max(ys) - min(ys) > STABLE_STATION_SPREAD
-        ):
-            return None
-        return max(known, key=lambda item: item.observed_at or 0)
+        return max(matches, key=lambda geometry: geometry.observed_at or 0).map_hash
 
     @property
     def complete(self) -> bool:
@@ -148,17 +198,52 @@ class ZoneMowingHistory:
 
 
 def reported_charger_for_map(
-    history: ZoneMowingHistory | None, app_maps: Any, map_index: int,
+    history: ZoneMowingHistory | None,
+    app_maps: Any,
+    map_index: int,
+    lineage: Mapping[str, str] | None = None,
 ) -> ChargerPosition | None:
     """Bind summary coordinates to one current, uniquely verified revision.
 
-    Without a summary on that revision, a station that never moved is kept.
+    A revision without its own summary uses its verified ancestor, recorded by
+    ``record_map_lineage`` from the current geometry; nothing else carries over.
     """
     revision = selected_map_revision(app_maps, map_index)
     if history is None or revision is None:
         return None
-    return history.latest_charger(revision) or history.stable_charger()
+    own = history.latest_charger(revision)
+    if own is not None:
+        return own
+    ancestor = (lineage or {}).get(revision)
+    return history.latest_charger(ancestor) if ancestor else None
 
+
+def record_map_lineage(
+    lineage: dict[str, str],
+    history: ZoneMowingHistory | None,
+    app_maps: Any,
+    map_index: int,
+    zones: Iterable[tuple[int, int, Sequence[tuple[int, int]]]],
+) -> None:
+    """Decide once, from accepted current geometry, which revision this one continues.
+
+    ``zones`` are (zone_id, zone_type, points); only lawn zones (type 0) count.
+    Paths without geometry read the decision through ``reported_charger_for_map``.
+    """
+    revision = selected_map_revision(app_maps, map_index)
+    if revision is None:
+        return
+    ancestor = (
+        history.lineage_revision(
+            (zone_id, points) for zone_id, zone_type, points in zones if zone_type == 0
+        )
+        if history is not None
+        else None
+    )
+    if ancestor is None or ancestor == revision:
+        lineage.pop(revision, None)
+    else:
+        lineage[revision] = ancestor
 
 @dataclass(frozen=True)
 class ZoneMowingSummary:
@@ -251,6 +336,9 @@ async def async_get_zone_mowing_records(
         chargers = {
             name: known.chargers[name] for name in names if name in known.chargers
         }
+        geometries = {
+            name: known.geometries[name] for name in names if name in known.geometries
+        }
         resolved = {name for name in result if name not in known.pending}
         missing = [name for name in names if name not in resolved]
         # Untried new summaries first; retain a rotated queue across partial passes.
@@ -275,6 +363,9 @@ async def async_get_zone_mowing_records(
                 charger = charger_position(summary)
                 if charger is not None:
                     chargers[name] = charger
+                geometry = zone_geometry(summary)
+                if geometry is not None:
+                    geometries[name] = geometry
                 decoded = zone_mowing_records(summary, name)
                 result[name] = decoded.records
                 if decoded.understood:
@@ -284,7 +375,9 @@ async def async_get_zone_mowing_records(
         unfinished = [name for name in unfinished if name not in attempted] + [
             name for name in unfinished if name in attempted
         ]
-        return ZoneMowingHistory(result, tuple(unfinished), chargers=chargers)
+        return ZoneMowingHistory(
+            result, tuple(unfinished), chargers=chargers, geometries=geometries
+        )
 
     return await client._async_cloud_read(read)
 

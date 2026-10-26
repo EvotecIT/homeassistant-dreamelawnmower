@@ -630,6 +630,7 @@ class DreameLawnMowerMapCamera(
         charger = reported_charger_for_map(
             getattr(self.coordinator.client, "_charger_history", None),
             self.coordinator.app_maps, index,
+            getattr(self.coordinator.client, "_map_lineage", None),
         ) if index is not None else None
         return (
             self._selected_map_index,
