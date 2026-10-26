@@ -335,6 +335,10 @@
       "name": "Avviare il taglio programmato con verifica delle condizioni",
       "description": "Aggiornare le condizioni di avvio e iniziare un’attività precisa, oppure indicare perché è stata saltata. Per impostazione predefinita non si rinvia, interrompe o riprende. Il consenso esterno, il rinvio limitato e la ripresa dopo pausa riguardano solo questa attività gestita."
     },
+    "set_rotation_zone_rest_days": {
+      "name": "Imposta i giorni di riposo di una zona",
+      "description": "Assegna a una zona salvata i propri giorni di riposo nella rotazione dell’automazione di taglio, oppure omettili per tornare al valore predefinito. Si applica subito senza ricaricare l’integrazione."
+    },
     "start_zone_mowing": {
       "name": "Avviare il taglio per zone",
       "description": "Avvia il taglio delle zone salvate sulla mappa attiva e conferma l’avvio. La conferma esatta delle zone dipende dai dati dell’attività del rasaerba."

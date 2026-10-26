@@ -124,6 +124,44 @@ cancel_scheduled_mowing:
       integration: dreame_lawn_mower
       domain: lawn_mower
 
+set_rotation_zone_rest_days:
+  name: Set a zone's rotation rest days
+  description: >-
+    Give one saved zone its own rest days in the Mowing automation's zone
+    rotation, or omit rest days to use the automation default again. Applies
+    at once without reloading the integration.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    map_index:
+      name: Map index
+      description: Optional expected current map. Rejects the request if the map changed before it arrived.
+      selector:
+        number:
+          min: 0
+          max: 65535
+          mode: box
+    zone_id:
+      name: Zone ID
+      description: Saved zone ID on the current map.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 65535
+          mode: box
+    rest_days:
+      name: Rest days
+      description: Days the zone rests after a completion (0 = once a day). Omit to use the default.
+      selector:
+        number:
+          min: 0
+          max: 30
+          mode: box
+          unit_of_measurement: d
+
 start_zone_mowing:
   name: Start zone mowing
   description: >-

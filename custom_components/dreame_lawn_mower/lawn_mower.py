@@ -191,6 +191,21 @@ async def async_setup_entry(
         "cancel_scheduled_mowing", {}, "async_cancel_scheduled_mowing",
     )
     platform.async_register_entity_service(
+        "set_rotation_zone_rest_days",
+        {
+            vol.Optional("map_index"): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=65535)
+            ),
+            vol.Required("zone_id"): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=65535)
+            ),
+            vol.Optional("rest_days"): vol.Any(
+                None, vol.All(vol.Coerce(int), vol.Range(min=0, max=30))
+            ),
+        },
+        "async_set_rotation_zone_rest_days",
+    )
+    platform.async_register_entity_service(
         "start_zone_mowing",
         {vol.Required("zone_ids"): [vol.Coerce(int)]},
         "async_start_zone_mowing",
@@ -719,6 +734,15 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "automation_entity", "run_id",
         }}
         return await async_start_scheduled_mowing(self, **arguments)
+
+    async def async_set_rotation_zone_rest_days(
+        self, zone_id: int, rest_days: int | None = None, map_index: int | None = None,
+    ) -> None:
+        """Give one zone its own rotation rest days; omit them to use the default."""
+        runtime = getattr(self.coordinator, "mowing_automation", None)
+        if runtime is None:
+            raise HomeAssistantError("Set up Mowing automation first")
+        await runtime.async_set_zone_rest_days(zone_id, rest_days, map_index=map_index)
 
     async def async_cancel_scheduled_mowing(self) -> None:
         """Cancel pending starts and recovery without moving the mower."""

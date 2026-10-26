@@ -27,11 +27,12 @@ from .mowing_automation_config import (
     CONF_MOWING_AUTOMATION,
     ROTATION_SETTINGS,
     automation_config,
+    zone_rest_days_by_id,
 )
 from .mowing_conditions import MowingConditions
 from .option_updates import EntryUpdateSnapshot
 from .sensor_zone_history import current_zone_overview, selected_map_revision
-from .zone_rotation import due_zone_ids
+from .zone_rotation import due_zone_ids, rotation_zones
 
 _LOGGER = logging.getLogger(__name__)
 # Settings controls may bind too; only these three gate the schedule trigger.
@@ -195,31 +196,49 @@ class MowingAutomation:
         finally:
             self._run_task = None
 
+    def _rotation_map_index(self) -> int | None:
+        """The selected map only while the inventory verifies its revision."""
+        coordinator = self.coordinator
+        map_index = getattr(coordinator, "selected_map_index", None)
+        if type(map_index) is int and selected_map_revision(
+            coordinator.app_maps, map_index,
+        ) is not None:
+            return map_index
+        return None
+
+    def _rotation_overview(self) -> tuple[list[dict[str, Any]], int] | str:
+        """Zone history of the verified selected map, or why it is unusable."""
+        coordinator = self.coordinator
+        history = getattr(coordinator, "zone_mowing_sessions", None)
+        map_index = self._rotation_map_index()
+        if (
+            history is None
+            or not history.complete
+            or not history.attributable
+            or map_index is None
+        ):
+            return "zone_history_unavailable"
+        overview = current_zone_overview(coordinator)
+        if not overview:
+            return "zone_history_unavailable"
+        return overview, map_index
+
     def _rotation_target(self, today: date | None = None) -> dict[str, Any] | str:
         """Due whole zones of the selected map, or why none can be chosen.
 
         The scheduled start and the dashboard preview both call this, so the
         preview cannot announce zones the start would not choose.
         """
-        coordinator = self.coordinator
-        history = getattr(coordinator, "zone_mowing_sessions", None)
-        map_index = getattr(coordinator, "selected_map_index", None)
-        if (
-            history is None
-            or not history.complete
-            or not history.attributable
-            or type(map_index) is not int
-            or selected_map_revision(coordinator.app_maps, map_index) is None
-        ):
-            return "zone_history_unavailable"
-        overview = current_zone_overview(coordinator)
-        if not overview:
-            return "zone_history_unavailable"
+        usable = self._rotation_overview()
+        if isinstance(usable, str):
+            return usable
+        overview, map_index = usable
         zone_ids = due_zone_ids(
             overview,
             rest_days=self.config["rotation_rest_days"],
             max_area=self.config["rotation_max_area"],
             today=today or dt_util.now().date(),
+            zone_rest_days_by_id=zone_rest_days_by_id(self.config, map_index),
         )
         if not zone_ids:
             return "no_zone_due"
@@ -309,6 +328,39 @@ class MowingAutomation:
         self.hass.config_entries.async_update_entry(entry, options=options)
         self.coordinator.async_update_listeners()
 
+    async def async_set_zone_rest_days(
+        self, zone_id: int, rest_days: int | None, *, map_index: int | None = None,
+    ) -> None:
+        """Give one zone its own rest days, or None to use the default again."""
+        selected = self._rotation_map_index()
+        if selected is None or (map_index is not None and map_index != selected):
+            raise HomeAssistantError("The selected map changed or is not verified")
+        if rest_days is not None and not any(
+            zone["zone_id"] == zone_id
+            for zone in current_zone_overview(self.coordinator)
+        ):
+            raise HomeAssistantError("The zone does not belong to the selected map")
+        maps = deepcopy(self.config.get("rotation_zone_rest_days", {}))
+        overrides = maps.setdefault(str(selected), {})
+        if rest_days is None:
+            overrides.pop(str(zone_id), None)
+        else:
+            overrides[str(zone_id)] = rest_days
+        if not overrides:
+            maps.pop(str(selected), None)
+        await self.async_set_rotation(rotation_zone_rest_days=maps)
+
+    def zone_schedule(self) -> list[dict[str, Any]]:
+        """Each zone's rest days and next due date, from the start's own rules."""
+        usable = self._rotation_overview()
+        if isinstance(usable, str):
+            return []
+        return rotation_zones(
+            usable[0],
+            rest_days=self.config["rotation_rest_days"],
+            overrides=zone_rest_days_by_id(self.config, usable[1]),
+        )
+
     def plan(self) -> dict[str, Any]:
         """What the next Schedule block start would request, if it began now.
 
@@ -371,6 +423,13 @@ class MowingAutomation:
             "mowing_target": self.config["mowing_target"],
             "rotation_rest_days": self.config["rotation_rest_days"],
             "rotation_max_area": self.config["rotation_max_area"],
+            "rotation_map_index": self._rotation_map_index(),
+            "rotation_zone_rest_days": {
+                str(zone_id): days for zone_id, days in zone_rest_days_by_id(
+                    self.config, self._rotation_map_index(),
+                ).items()
+            },
+            "rotation_zones": self.zone_schedule(),
             "target_entity": getattr(self.entities.get("target"), "entity_id", None),
             "rest_days_entity": getattr(
                 self.entities.get("rest_days"), "entity_id", None

@@ -336,6 +336,10 @@
       "name": "Spustit plánované sečení s kontrolou podmínek",
       "description": "Obnovit podmínky spuštění a zahájit konkrétní úlohu, nebo uvést důvod přeskočení. Ve výchozím stavu bez odkladu, přerušení či obnovení. Volitelné externí povolení, omezený odklad a obnovení po pozastavení platí pouze pro tuto řízenou úlohu."
     },
+    "set_rotation_zone_rest_days": {
+      "name": "Nastavit dny odpočinku zóny",
+      "description": "Přiřadí uložené zóně vlastní dny odpočinku v rotaci automatického sečení, nebo je vynech pro návrat k výchozí hodnotě. Platí ihned bez opětovného načtení integrace."
+    },
     "start_zone_mowing": {
       "name": "Spustit sečení zón",
       "description": "Spustí sečení uložených zón na aktivní mapě a potvrdí zahájení. Přesné potvrzení zón závisí na údajích úlohy od sekačky."
