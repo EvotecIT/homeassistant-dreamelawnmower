@@ -35,6 +35,7 @@ from custom_components.dreame_lawn_mower.mowing_conditions import MowingConditio
 from custom_components.dreame_lawn_mower.option_updates import EntryUpdateSnapshot
 from tests.components.dreame_lawn_mower.test_binary_sensor_state import _coordinator
 from tests.components.dreame_lawn_mower.test_managed_mowing import MowerTransport
+from tests.test_zone_mowing_history import _maps
 
 
 def config(**kwargs):
@@ -418,6 +419,7 @@ def _rotation_runtime(hass, monkeypatch, *, overview, history=True, **settings):
         managed_mowing=manager,
         async_update_listeners=Mock(),
         selected_map_index=0,
+        app_maps=_maps(),
         zone_mowing_sessions=SimpleNamespace(complete=True, attributable=True)
         if history
         else None,
@@ -434,7 +436,9 @@ def _rotation_runtime(hass, monkeypatch, *, overview, history=True, **settings):
         "permission": SimpleNamespace(
             entity_id="binary_sensor.garden_permission", async_write_ha_state=Mock()
         ),
-        "enabled": SimpleNamespace(entity_id="switch.garden_automation"),
+        "enabled": SimpleNamespace(
+            entity_id="switch.garden_automation", async_write_ha_state=Mock()
+        ),
     }
     return runtime, manager
 
@@ -554,6 +558,105 @@ async def test_rotation_settings_change_in_place_without_a_reload(hass, monkeypa
     with pytest.raises(HomeAssistantError):
         await runtime.async_set_rotation(enabled=False)
     assert entry.options[CONF_MOWING_AUTOMATION] == saved
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_rotation_preserves_a_pending_switch_update(hass, monkeypatch, enabled):
+    runtime, manager = _rotation_runtime(hass, monkeypatch, overview=[])
+    runtime.enabled = not enabled
+    runtime.config["enabled"] = not enabled
+    manager.async_cancel_owner = AsyncMock()
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={},
+        options={CONF_MOWING_AUTOMATION: dict(runtime.config)},
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    runtime.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+    await runtime.async_set_enabled(enabled)
+    await runtime.async_set_rotation(rotation_rest_days=2)
+    assert entry.options[CONF_MOWING_AUTOMATION]["enabled"] is enabled
+    assert runtime.enabled is enabled
+    # The queued switch update must still be handled by its own listener.
+    assert runtime.coordinator.applied_entry_update.requires_reload(entry)
+
+
+async def test_rotation_acknowledges_only_its_own_changes_before_dispatch(
+    hass, monkeypatch,
+):
+    runtime, _ = _rotation_runtime(hass, monkeypatch, overview=[])
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={},
+        options={"scan_interval": 45, CONF_MOWING_AUTOMATION: dict(runtime.config)},
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    runtime.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "scan_interval": 90}
+    )
+    update = hass.config_entries.async_update_entry
+    observed = []
+
+    def dispatch(candidate, **kwargs):
+        pending = SimpleNamespace(data=candidate.data, options=kwargs["options"])
+        snapshot = runtime.coordinator.applied_entry_update
+        observed.append(snapshot.changed_options(pending.options))
+        assert not snapshot.requires_reload(pending)
+        return update(candidate, **kwargs)
+
+    monkeypatch.setattr(hass.config_entries, "async_update_entry", dispatch)
+    await runtime.async_set_rotation(rotation_max_area=250)
+    assert observed == [frozenset({"scan_interval"})]
+    assert runtime.coordinator.applied_entry_update.options["scan_interval"] == 45
+    assert entry.options["scan_interval"] == 90
+
+
+async def test_rotation_materializes_defaults_without_swallowing_wizard_changes(
+    hass, monkeypatch,
+):
+    runtime, _ = _rotation_runtime(hass, monkeypatch, overview=[])
+    legacy = {
+        key: value for key, value in runtime.config.items()
+        if key not in {"mowing_target", "rotation_rest_days", "rotation_max_area"}
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={}, options={CONF_MOWING_AUTOMATION: legacy}
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    runtime.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+    await runtime.async_set_rotation(rotation_rest_days=2)
+    assert not runtime.coordinator.applied_entry_update.requires_reload(entry)
+    changed = {**entry.options[CONF_MOWING_AUTOMATION], "soil_entity": "sensor.new"}
+    hass.config_entries.async_update_entry(
+        entry, options={CONF_MOWING_AUTOMATION: changed}
+    )
+    await runtime.async_set_rotation(rotation_max_area=250)
+    assert entry.options[CONF_MOWING_AUTOMATION]["soil_entity"] == "sensor.new"
+    assert runtime.coordinator.applied_entry_update.requires_reload(entry)
+
+
+@pytest.mark.parametrize("revision_state", ["missing", "unverified", "mismatched"])
+async def test_rotation_requires_a_verified_map_revision(
+    hass, monkeypatch, revision_state,
+):
+    runtime, manager = _rotation_runtime(
+        hass, monkeypatch,
+        overview=[{"zone_id": 1, "last_completed_at": None, "area_m2": 100}],
+        mowing_target="rotation",
+    )
+    maps = runtime.coordinator.app_maps
+    if revision_state == "missing":
+        runtime.coordinator.app_maps = None
+    elif revision_state == "unverified":
+        maps["maps"][0]["hash_match"] = False
+    else:
+        maps["maps"][0]["md5"] = "f" * 32
+    await runtime._run({})
+    manager.async_request.assert_not_called()
+    assert manager.skip.call_args.args[1] == "zone_history_unavailable"
+    assert runtime.plan()["reason"] == "zone_history_unavailable"
 
 
 async def test_plan_previews_the_same_zones_as_the_next_start(hass, monkeypatch):

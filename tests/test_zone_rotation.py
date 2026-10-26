@@ -43,6 +43,8 @@ def test_unknown_area_cannot_be_added_under_a_limit():
     overview = [zone(1, area=100), zone(2, area=None), zone(3, area=True)]
     assert due_zone_ids(overview, rest_days=1, max_area=300, today=TODAY) == [1]
     assert due_zone_ids(overview, rest_days=1, max_area=0, today=TODAY) == [1, 2, 3]
+    unknown_first = [zone(1, area=None), zone(2, area=300)]
+    assert due_zone_ids(unknown_first, rest_days=1, max_area=300, today=TODAY) == [1]
 
 
 def test_malformed_entries_are_ignored_and_bad_dates_count_as_unknown():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import date, timedelta
 from typing import Any
 
@@ -29,7 +30,7 @@ from .mowing_automation_config import (
 )
 from .mowing_conditions import MowingConditions
 from .option_updates import EntryUpdateSnapshot
-from .sensor_zone_history import current_zone_overview
+from .sensor_zone_history import current_zone_overview, selected_map_revision
 from .zone_rotation import due_zone_ids
 
 _LOGGER = logging.getLogger(__name__)
@@ -208,6 +209,7 @@ class MowingAutomation:
             or not history.complete
             or not history.attributable
             or type(map_index) is not int
+            or selected_map_revision(coordinator.app_maps, map_index) is None
         ):
             return "zone_history_unavailable"
         overview = current_zone_overview(coordinator)
@@ -282,19 +284,29 @@ class MowingAutomation:
         """
         if set(changes) - ROTATION_SETTINGS:
             raise HomeAssistantError("Only rotation settings change in place")
-        config = automation_config({**self.config, **changes})
+        entry = self.coordinator.entry
+        config = automation_config(
+            {**entry.options[CONF_MOWING_AUTOMATION], **changes}
+        )
         if not config:
             raise HomeAssistantError("Invalid mowing automation setting")
-        entry = self.coordinator.entry
         options = dict(entry.options)
         options[CONF_MOWING_AUTOMATION] = config
-        self.config = config
+        applied_changes = {key: config[key] for key in changes}
+        self.config = {**self.config, **applied_changes, "enabled": self.enabled}
+        applied = getattr(self.coordinator, "applied_entry_update", None)
+        if isinstance(applied, EntryUpdateSnapshot):
+            # Acknowledge only the settings applied here. Pending switch,
+            # connection or polling changes still belong to the entry listener.
+            applied_options = deepcopy(applied.options)
+            applied_options[CONF_MOWING_AUTOMATION] = {
+                **applied_options.get(CONF_MOWING_AUTOMATION, {}),
+                **{key: self.config[key] for key in ROTATION_SETTINGS},
+            }
+            self.coordinator.applied_entry_update = EntryUpdateSnapshot(
+                deepcopy(applied.data), applied_options
+            )
         self.hass.config_entries.async_update_entry(entry, options=options)
-        if isinstance(
-            getattr(self.coordinator, "applied_entry_update", None),
-            EntryUpdateSnapshot,
-        ):
-            self.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
         self.coordinator.async_update_listeners()
 
     def plan(self) -> dict[str, Any]:

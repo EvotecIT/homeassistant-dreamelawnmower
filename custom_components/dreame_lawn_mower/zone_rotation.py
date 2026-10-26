@@ -55,5 +55,7 @@ def due_zone_ids(
         if max_area > 0 and selected and (known is None or total + known > max_area):
             continue
         selected.append(zone_id)
+        if max_area > 0 and known is None:
+            break
         total += known or 0.0
     return selected
