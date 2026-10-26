@@ -60,7 +60,10 @@ from .dreame_lawn_mower_client.map_visuals import (
 )
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 from .dreame_lawn_mower_client.real_scene import RealSceneImage
-from .dreame_lawn_mower_client.zone_mowing_history import reported_charger_for_map
+from .dreame_lawn_mower_client.zone_mowing_history import (
+    lineage_render_matches_history,
+    reported_charger_for_map,
+)
 from .feature_capabilities import coordinator_feature_capabilities
 from .ha_tasks import create_background_task
 from .image import (
@@ -431,6 +434,8 @@ class DreameLawnMowerMapCamera(
         map_index = self._selected_map_index
         rotation = self._map_rotation
         render_context = self._map_render_context
+        client = getattr(getattr(self, "coordinator", None), "client", None)
+        history = getattr(client, "_charger_history", None)
         view = await self._async_refresh_map_view()
         if (
             map_index is not None
@@ -450,7 +455,23 @@ class DreameLawnMowerMapCamera(
             )
             self.async_write_ha_state()
             return None
-        if self._map_render_context != render_context:
+        current = self._map_render_context
+        charger = current[-2]
+        details = view.details or {}
+        if (
+            render_context[-2] is None
+            and (*render_context[:-2], render_context[-1])
+            == (*current[:-2], current[-1])
+            and lineage_render_matches_history(
+                history, getattr(client, "_charger_history", None),
+                (details.get("charger_x"), details.get("charger_y")),
+                charger[:2] if charger is not None else None,
+                details.get("bounds"),
+            )
+        ):
+            render_context = current
+            self._last_refresh_context = self._map_refresh_context
+        if current != render_context:
             self._map_cache.invalidate_view(drop_image=True)
             self._map_refresh_pending = True
             return None

@@ -18,6 +18,7 @@ from .session_photos import (
     _async_read_session_summary,
     task_sessions_from_history,
 )
+from .vector_map import charger_in_bounds
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -244,6 +245,24 @@ def record_map_lineage(
         lineage.pop(revision, None)
     else:
         lineage[revision] = ancestor
+
+
+def lineage_render_matches_history(
+    before: ZoneMowingHistory | None,
+    after: ZoneMowingHistory | None,
+    rendered: tuple[Any, Any] | None,
+    current: tuple[int, int] | None,
+    bounds: tuple[int, int, int, int] | None,
+) -> bool:
+    """Accept a discovered charger only from unchanged history and matching pixels.
+
+    Callers separately require an initially unknown station and unchanged map,
+    presentation and switch context. A real history update must still invalidate.
+    """
+    return before is not None and before is after and current is not None and (
+        rendered == charger_in_bounds(current, bounds)
+    )
+
 
 @dataclass(frozen=True)
 class ZoneMowingSummary:

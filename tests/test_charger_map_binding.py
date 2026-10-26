@@ -1,5 +1,6 @@
 """Station coordinates require the current map and accepted geometry."""
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -177,6 +178,165 @@ def test_lineage_is_withdrawn_when_the_geometry_no_longer_matches():
     _, view = resaved_view(client)
     assert client._map_lineage == {}
     assert view.details["charger_x"] is None
+
+
+@pytest.mark.parametrize("surface", ["view", "scene"])
+@pytest.mark.parametrize("stale_matches", [False, True])
+def test_overtaken_geometry_cannot_change_the_accepted_lineage(
+    surface, stale_matches,
+):
+    client = docked_client()
+    client._charger_history = lineage_history()
+    maps = _maps()
+    maps["maps"][0].update(md5=RESAVED, info={"hash": RESAVED})
+    batch = _batch_payload()
+    matching = parse_batch_vector_map(batch)
+    raw = "".join(batch[f"MAP.{index}"] for index in range(3))
+    payload = json.loads(json.loads(raw[:int(batch["MAP.info"])])[0])
+    for point in payload["mowingAreas"]["value"][0][1]["path"]:
+        point["x"] += 1
+    encoded = json.dumps([json.dumps(payload)])
+    different_batch = {"MAP.0": encoded, "MAP.info": str(len(encoded))}
+    different = parse_batch_vector_map(different_batch)
+    generation = client._runtime_geometry_generation
+    geometry_map_view(
+        client, different if stale_matches else matching,
+        source="batch_vector_map", app_maps=maps, render_image=False,
+    )
+    accepted = dict(client._map_lineage)
+    station = reported_charger_for_map(
+        client._charger_history, maps, 0, client._map_lineage
+    )
+    stale = matching if stale_matches else different
+    if surface == "view":
+        geometry_map_view(
+            client, stale, source="batch_vector_map", app_maps=maps,
+            render_image=False, geometry_generation=generation,
+        )
+    else:
+        client._mowing_map_scene_from_batch(
+            batch if stale_matches else different_batch,
+            map_index=0, style=map_render_style(), label_scale=1,
+            app_maps=maps, geometry_generation=generation,
+        )
+    assert client._map_lineage == accepted
+    assert reported_charger_for_map(
+        client._charger_history, maps, 0, client._map_lineage
+    ) == station
+
+
+@pytest.mark.parametrize("history_changes", [False, True])
+@pytest.mark.parametrize("station_x", [100, -200])
+def test_first_api_scene_accepts_only_its_own_lineage_discovery(
+    history_changes, station_x,
+):
+    import asyncio
+
+    from aiohttp import web
+
+    from .test_mowing_map_api import environment
+
+    async def run():
+        client = docked_client()
+        client._charger_history = lineage_history()
+        client._charger_history.chargers["new"] = ChargerPosition(
+            station_x, 60, 0, 2, OTHER_HASH,
+        )
+        maps = _maps()
+        maps["maps"][0].update(md5=RESAVED, info={"hash": RESAVED, "size": 100})
+        for item in maps["maps"]:
+            item["info"]["size"] = 100
+        calls = 0
+
+        async def load(**kwargs):
+            nonlocal calls
+            calls += 1
+            scene = client._mowing_map_scene_from_batch(
+                _batch_payload(),
+                geometry_generation=client._runtime_geometry_generation,
+                **kwargs,
+            )
+            if history_changes:
+                # Even an unchanged x/y is new evidence, not lineage discovery.
+                client._charger_history = ZoneMowingHistory(chargers={
+                    "current": ChargerPosition(station_x, 60, 0, 3, RESAVED),
+                })
+            return scene
+
+        _, coordinator, api = environment(load)
+        coordinator.app_maps = maps
+        coordinator.client = client
+        client.async_get_mowing_map_scene = load
+        if history_changes:
+            with pytest.raises(web.HTTPConflict):
+                await api.scene("entry")
+            assert not api._cache
+        else:
+            entry = await api.scene("entry")
+            assert entry.scene.charger == (max(-10, station_x), 60)
+            assert await api.scene("entry") is entry
+            assert calls == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("history_changes", [False, True])
+@pytest.mark.parametrize("station_x", [100, -200])
+def test_first_camera_render_accepts_only_its_own_lineage_discovery(
+    monkeypatch, history_changes, station_x,
+):
+    import asyncio
+    from io import BytesIO
+
+    from PIL import Image
+
+    from custom_components.dreame_lawn_mower.camera import DreameLawnMowerMapCamera
+
+    from .test_map_camera_identity import _camera
+
+    client = docked_client()
+    client._charger_history = lineage_history()
+    client._charger_history.chargers["new"] = ChargerPosition(
+        station_x, 60, 0, 2, OTHER_HASH,
+    )
+    maps = _maps()
+    maps["maps"][0].update(md5=RESAVED, info={"hash": RESAVED})
+    entity = _camera()
+    monkeypatch.setattr(type(entity), "_map_refresh_context",
+                        DreameLawnMowerMapCamera._map_refresh_context)
+    entity.coordinator = SimpleNamespace(
+        client=client, app_maps=maps, runtime_status_blob=None,
+        entry=SimpleNamespace(options={}),
+    )
+    entity._last_refresh_context = entity._map_refresh_context
+
+    async def refresh():
+        view = geometry_map_view(
+            client, parse_batch_vector_map(_batch_payload()),
+            source="batch_vector_map", app_maps=maps,
+        )
+        if history_changes:
+            client._charger_history = ZoneMowingHistory(chargers={
+                "current": ChargerPosition(station_x, 60, 0, 3, RESAVED),
+            })
+        return view
+
+    async def executor(func, *args):
+        return func(*args)
+
+    entity._async_refresh_map_view = refresh
+    entity.hass.async_add_executor_job = executor
+    result = asyncio.run(entity._async_refresh_and_render_map_image())
+    if history_changes:
+        assert result is None
+        assert entity._map_cache.last_image is None
+    else:
+        assert result is not None
+        with Image.open(BytesIO(result)) as image:
+            assert image.format == "JPEG"
+        assert entity._map_cache.last_image == result
+        assert not entity._map_refresh_pending
+        assert entity._last_refresh_context == entity._map_refresh_context
 
 
 @pytest.mark.parametrize("rejected", ["foreign_map", "overtaken"])

@@ -13,7 +13,11 @@ from .client_map_helpers import (
     _coordinate_path_length_m,
     _select_app_map_payload,
 )
-from .client_position import apply_position_metadata, vector_map_position
+from .client_position import (
+    apply_position_metadata,
+    current_map_with_charger,
+    vector_map_position,
+)
 from .models import DreameLawnMowerMapView
 from .position_tracking import map_position_identity
 from .vector_map import (
@@ -24,9 +28,7 @@ from .vector_map import (
     render_vector_map_png,
     vector_map_to_details,
     vector_map_to_summary,
-    with_charger,
 )
-from .zone_mowing_history import record_map_lineage, reported_charger_for_map
 
 if TYPE_CHECKING:
     from .client_maps import _DreameLawnMowerClientMapsMixin
@@ -134,19 +136,16 @@ def geometry_map_view(
     geometry_generation: int | None = None,
 ) -> DreameLawnMowerMapView:
     """Share position validation, metrics and rendering across map transports."""
-    record_map_lineage(
-        client._map_lineage, client._charger_history, app_maps, vector_map.map_index,
-        ((zone.zone_id, zone.zone_type, zone.points) for zone in vector_map.zones),
-    )
-    vector_map = with_charger(vector_map, reported_charger_for_map(
-        client._charger_history, app_maps, vector_map.map_index, client._map_lineage,
-    ))
     history_only = not _vector_map_has_drawable_geometry(
         vector_map, include_history=False,
     )
     # Capture one coherent observation; filtering/composition/rendering below
     # must not read mutable runtime publication fields again.
     with client._runtime_geometry_lock:
+        vector_map = current_map_with_charger(
+            client, vector_map, expected_generation=geometry_generation,
+            app_maps=app_maps, observe_lineage=not history_only,
+        )
         if history_only:
             # Saved movement can be displayed without claiming the live frame.
             # An optional app-read failure must not reset its trail or poses.
