@@ -335,6 +335,10 @@
       "name": "Démarrer la tonte programmée avec vérification des conditions",
       "description": "Actualiser les conditions de démarrage et lancer une tâche précise, ou indiquer pourquoi elle a été ignorée. Par défaut, aucun report, arrêt ni reprise automatique. L’autorisation externe, le report limité et la reprise après pause ne concernent que cette tâche gérée."
     },
+    "set_rotation_zone_rest_days": {
+      "name": "Définir les jours de repos d’une zone",
+      "description": "Donne à une zone enregistrée ses propres jours de repos dans la rotation de la tonte automatique, ou omets-les pour revenir à la valeur par défaut. S’applique tout de suite, sans recharger l’intégration."
+    },
     "start_zone_mowing": {
       "name": "Démarrer la tonte par zones",
       "description": "Démarre la tonte des zones enregistrées de la carte active et confirme le démarrage. La confirmation précise des zones dépend des données de tâche de la tondeuse."

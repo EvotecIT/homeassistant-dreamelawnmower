@@ -335,6 +335,10 @@
       "name": "Rozpocznij zaplanowane koszenie po sprawdzeniu warunków",
       "description": "Odśwież warunki uruchomienia kosiarki i rozpocznij wskazane zadanie albo podaj przyczynę pominięcia. Domyślnie bez odraczania, przerywania i wznawiania. Opcjonalna zgoda zewnętrzna, ograniczone odroczenie i wznowienie dotyczą wyłącznie tego zadania automatyzacji."
     },
+    "set_rotation_zone_rest_days": {
+      "name": "Ustaw dni przerwy strefy",
+      "description": "Nadaje zapisanej strefie własne dni przerwy w rotacji automatycznego koszenia lub pomiń je, aby wrócić do wartości domyślnej. Działa od razu, bez przeładowania integracji."
+    },
     "start_zone_mowing": {
       "name": "Rozpocznij koszenie stref",
       "description": "Rozpoczyna koszenie zapisanych stref na aktywnej mapie i potwierdza rozpoczęcie. Dokładne potwierdzenie stref zależy od danych zadania przekazywanych przez kosiarkę."

@@ -816,3 +816,96 @@ async def test_rotation_change_keeps_the_switch_state(hass, monkeypatch, enabled
     saved = entry.options[CONF_MOWING_AUTOMATION]
     assert saved["enabled"] is enabled
     assert saved["rotation_rest_days"] == 3
+
+
+@pytest.mark.parametrize(
+    "value",
+    [{"six": 0}, {"0": 1}, {"6": 31}, {"6": -1}, {str(n): 1 for n in range(1, 102)}],
+)
+def test_invalid_zone_rest_days_are_rejected(value):
+    assert (
+        automation_config(
+            {"schedule_entity": "schedule.garden", "rotation_zone_rest_days": value}
+        )
+        == {}
+    )
+
+
+async def test_zone_rest_days_are_set_and_cleared_in_place(hass, monkeypatch):
+    overview = [
+        {"zone_id": 1, "label": "Back", "last_completed_at": None, "area_m2": 100},
+        {
+            "zone_id": 6,
+            "label": "Front",
+            "last_completed_at": dt_util.utcnow().isoformat(),
+            "area_m2": 140,
+        },
+    ]
+    runtime, manager = _rotation_runtime(
+        hass, monkeypatch, overview=overview, mowing_target="rotation"
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={}, options={CONF_MOWING_AUTOMATION: dict(runtime.config)}
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    runtime.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+    reloads: list[bool] = []
+
+    async def listener(_hass, updated):
+        reloads.append(
+            runtime.coordinator.applied_entry_update.requires_reload(updated)
+        )
+
+    entry.add_update_listener(listener)
+    await runtime.async_set_zone_rest_days(6, 0)
+    await runtime.async_set_zone_rest_days(1, 3)
+    await hass.async_block_till_done()
+    saved = entry.options[CONF_MOWING_AUTOMATION]["rotation_zone_rest_days"]
+    assert saved == {"6": 0, "1": 3}
+    assert reloads == [False, False]
+    table = {zone["zone_id"]: zone for zone in runtime.summary["rotation_zones"]}
+    assert table[6]["rest_days"] == 0 and table[6]["custom_rest_days"]
+    assert table[1]["due_on"] is None
+    assert runtime.summary["rotation_zone_rest_days"] == {"6": 0, "1": 3}
+    await runtime._run({})
+    # Zone 6 was mowed today: even a daily zone waits until tomorrow.
+    assert manager.async_request.call_args.args[0]["zone_ids"] == [1]
+    await runtime.async_set_zone_rest_days(6, None)
+    assert entry.options[CONF_MOWING_AUTOMATION]["rotation_zone_rest_days"] == {"1": 3}
+
+
+async def test_zone_rest_days_apply_to_the_next_start(hass, monkeypatch):
+    yesterday = (dt_util.now() - timedelta(days=1)).isoformat()
+    overview = [
+        {"zone_id": 1, "label": "Back", "last_completed_at": yesterday, "area_m2": 100},
+        {
+            "zone_id": 6,
+            "label": "Front",
+            "last_completed_at": yesterday,
+            "area_m2": 140,
+        },
+    ]
+    runtime, manager = _rotation_runtime(
+        hass,
+        monkeypatch,
+        overview=overview,
+        mowing_target="rotation",
+        rotation_zone_rest_days={"6": 0},
+    )
+    await runtime._run({})
+    assert manager.async_request.call_args.args[0]["zone_ids"] == [6]
+    assert [zone["label"] for zone in runtime.plan()["zones"]] == ["Front"]
+
+
+async def test_zone_rest_days_service_needs_the_automation(hass):
+    from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
+
+    mower = object.__new__(DreameLawnMower)
+    mower.coordinator = SimpleNamespace(mowing_automation=None)
+    with pytest.raises(HomeAssistantError):
+        await mower.async_set_rotation_zone_rest_days(6, 0)
+    runtime = SimpleNamespace(async_set_zone_rest_days=AsyncMock())
+    mower.coordinator = SimpleNamespace(mowing_automation=runtime)
+    await mower.async_set_rotation_zone_rest_days(6)
+    runtime.async_set_zone_rest_days.assert_awaited_once_with(6, None)

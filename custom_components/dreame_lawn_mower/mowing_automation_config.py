@@ -11,8 +11,33 @@ from homeassistant.helpers import config_validation as cv
 CONF_MOWING_AUTOMATION = "mowing_automation"
 MOWING_TARGET_OPTIONS = ["all", "rotation"]
 ROTATION_SETTINGS = frozenset(
-    {"mowing_target", "rotation_rest_days", "rotation_max_area"}
+    {
+        "mowing_target",
+        "rotation_rest_days",
+        "rotation_max_area",
+        "rotation_zone_rest_days",
+    }
 )
+# Stored with string keys: entry options are JSON.
+ZONE_REST_DAYS_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Match(r"^[1-9][0-9]{0,4}$"): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=30)
+            )
+        }
+    ),
+    vol.Length(max=100),
+)
+
+
+def zone_rest_days_by_id(config: dict[str, Any]) -> dict[int, int]:
+    """Per-zone rest days with integer zone IDs."""
+    return {
+        int(zone_id): days
+        for zone_id, days in config.get("rotation_zone_rest_days", {}).items()
+        if int(zone_id) <= 65535
+    }
 
 AUTOMATION_SCHEMA = vol.Schema(
     {
@@ -58,6 +83,7 @@ AUTOMATION_SCHEMA = vol.Schema(
         vol.Optional("rotation_max_area", default=0): vol.All(
             vol.Coerce(float), vol.Range(min=0, max=100000)
         ),
+        vol.Optional("rotation_zone_rest_days", default={}): ZONE_REST_DAYS_SCHEMA,
         vol.Optional("notify_outcome", default=True): cv.boolean,
         vol.Optional("native_plans_disabled", default=False): cv.boolean,
     }

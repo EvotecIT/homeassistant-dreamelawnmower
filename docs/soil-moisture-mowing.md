@@ -102,9 +102,26 @@ block start reads them.
 With **Due zones**, the automation reads the same history as the **Least
 recently mowed zone** sensor for the current map. A zone is due when it has no
 confirmed completion, or when its rest days have passed. Zones without a
-completion come first, then the oldest completion. Zones are never split; the
-first due zone is always included, so a zone larger than the limit is not
-starved.
+completion come first, then the earliest due date; on the same due date the
+zone with fewer rest days leads. Zones are never split; the first due zone is
+always included, so a zone larger than the limit is not starved.
+
+A zone can rest a different number of days than the default — for example a
+front strip mowed every day while the rest of the lawn rests a day:
+
+```yaml
+action: dreame_lawn_mower.set_rotation_zone_rest_days
+target:
+  entity_id: lawn_mower.garden
+data:
+  zone_id: 6
+  rest_days: 0
+```
+
+Omit `rest_days` to return the zone to the default. The setting applies at
+once without reloading the integration. The `mowing_automation` attribute
+lists every zone in `rotation_zones` with its rest days and the date it is due
+again (`due_on`; empty means due now).
 
 The start is skipped, never widened to the whole lawn, when no zone is due
 (`no_zone_due`) or the history is incomplete or not tied to the current map

@@ -27,11 +27,12 @@ from .mowing_automation_config import (
     CONF_MOWING_AUTOMATION,
     ROTATION_SETTINGS,
     automation_config,
+    zone_rest_days_by_id,
 )
 from .mowing_conditions import MowingConditions
 from .option_updates import EntryUpdateSnapshot
 from .sensor_zone_history import current_zone_overview, selected_map_revision
-from .zone_rotation import due_zone_ids
+from .zone_rotation import due_zone_ids, rotation_zones
 
 _LOGGER = logging.getLogger(__name__)
 # Settings controls may bind too; only these three gate the schedule trigger.
@@ -195,12 +196,8 @@ class MowingAutomation:
         finally:
             self._run_task = None
 
-    def _rotation_target(self, today: date | None = None) -> dict[str, Any] | str:
-        """Due whole zones of the selected map, or why none can be chosen.
-
-        The scheduled start and the dashboard preview both call this, so the
-        preview cannot announce zones the start would not choose.
-        """
+    def _rotation_overview(self) -> tuple[list[dict[str, Any]], int] | str:
+        """Zone history of the verified selected map, or why it is unusable."""
         coordinator = self.coordinator
         history = getattr(coordinator, "zone_mowing_sessions", None)
         map_index = getattr(coordinator, "selected_map_index", None)
@@ -215,11 +212,24 @@ class MowingAutomation:
         overview = current_zone_overview(coordinator)
         if not overview:
             return "zone_history_unavailable"
+        return overview, map_index
+
+    def _rotation_target(self, today: date | None = None) -> dict[str, Any] | str:
+        """Due whole zones of the selected map, or why none can be chosen.
+
+        The scheduled start and the dashboard preview both call this, so the
+        preview cannot announce zones the start would not choose.
+        """
+        usable = self._rotation_overview()
+        if isinstance(usable, str):
+            return usable
+        overview, map_index = usable
         zone_ids = due_zone_ids(
             overview,
             rest_days=self.config["rotation_rest_days"],
             max_area=self.config["rotation_max_area"],
             today=today or dt_util.now().date(),
+            zone_rest_days_by_id=zone_rest_days_by_id(self.config),
         )
         if not zone_ids:
             return "no_zone_due"
@@ -309,6 +319,28 @@ class MowingAutomation:
         self.hass.config_entries.async_update_entry(entry, options=options)
         self.coordinator.async_update_listeners()
 
+    async def async_set_zone_rest_days(
+        self, zone_id: int, rest_days: int | None
+    ) -> None:
+        """Give one zone its own rest days, or None to use the default again."""
+        overrides = dict(self.config.get("rotation_zone_rest_days", {}))
+        if rest_days is None:
+            overrides.pop(str(zone_id), None)
+        else:
+            overrides[str(zone_id)] = rest_days
+        await self.async_set_rotation(rotation_zone_rest_days=overrides)
+
+    def zone_schedule(self) -> list[dict[str, Any]]:
+        """Each zone's rest days and next due date, from the start's own rules."""
+        usable = self._rotation_overview()
+        if isinstance(usable, str):
+            return []
+        return rotation_zones(
+            usable[0],
+            rest_days=self.config["rotation_rest_days"],
+            overrides=zone_rest_days_by_id(self.config),
+        )
+
     def plan(self) -> dict[str, Any]:
         """What the next Schedule block start would request, if it began now.
 
@@ -371,6 +403,10 @@ class MowingAutomation:
             "mowing_target": self.config["mowing_target"],
             "rotation_rest_days": self.config["rotation_rest_days"],
             "rotation_max_area": self.config["rotation_max_area"],
+            "rotation_zone_rest_days": dict(
+                self.config.get("rotation_zone_rest_days", {})
+            ),
+            "rotation_zones": self.zone_schedule(),
             "target_entity": getattr(self.entities.get("target"), "entity_id", None),
             "rest_days_entity": getattr(
                 self.entities.get("rest_days"), "entity_id", None

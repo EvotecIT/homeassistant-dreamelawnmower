@@ -54,3 +54,46 @@ def test_malformed_entries_are_ignored_and_bad_dates_count_as_unknown():
         zone(3, "2026-10-20T10:00:00"),
     ]
     assert due_zone_ids(overview, rest_days=1, max_area=0, today=TODAY) == [2, 3]
+
+
+def test_a_zone_can_rest_less_than_the_default():
+    from custom_components.dreame_lawn_mower.zone_rotation import rotation_zones
+
+    yesterday = "2026-10-25T15:00:00+00:00"
+    overview = [zone(1, yesterday), zone(6, yesterday)]
+    assert due_zone_ids(
+        overview, rest_days=1, max_area=0, today=TODAY, zone_rest_days_by_id={6: 0}
+    ) == [6]
+    table = rotation_zones(overview, rest_days=1, overrides={6: 0})
+    assert [
+        (z["zone_id"], z["rest_days"], z["custom_rest_days"], z["due_on"])
+        for z in table
+    ] == [(1, 1, False, "2026-10-27"), (6, 0, True, "2026-10-26")]
+
+
+def test_most_overdue_first_then_the_shorter_rest_on_the_same_due_date():
+    overview = [
+        zone(1, "2026-10-24T15:00:00+00:00", area=200),  # every other day: due today
+        zone(6, "2026-10-25T15:00:00+00:00", area=150),  # daily: due today
+        zone(3, "2026-10-23T15:00:00+00:00", area=100),  # every other day: overdue
+    ]
+    assert due_zone_ids(
+        overview, rest_days=1, max_area=0, today=TODAY, zone_rest_days_by_id={6: 0}
+    ) == [3, 6, 1]
+    # Under an area limit the overdue zone and the daily zone fit first.
+    assert due_zone_ids(
+        overview, rest_days=1, max_area=260, today=TODAY, zone_rest_days_by_id={6: 0}
+    ) == [3, 6]
+
+
+def test_one_rest_value_for_every_zone_keeps_the_overview_order():
+    overview = [
+        zone(4),
+        zone(2, "2026-10-20T08:00:00+00:00"),
+        zone(5, "2026-10-20T19:00:00+00:00"),
+        zone(1, "2026-10-21T10:00:00+00:00"),
+    ]
+    assert due_zone_ids(overview, rest_days=1, max_area=0, today=TODAY) == [4, 2, 5, 1]
+    assert due_zone_ids(
+        overview, rest_days=1, max_area=0, today=TODAY, zone_rest_days_by_id={}
+    ) == [4, 2, 5, 1]

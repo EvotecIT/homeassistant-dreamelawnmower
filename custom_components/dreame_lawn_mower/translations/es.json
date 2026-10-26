@@ -335,6 +335,10 @@
       "name": "Iniciar corte programado con comprobaciones de seguridad",
       "description": "Actualizar las condiciones de inicio y comenzar una tarea concreta, o indicar por qué se omitió. Por defecto no se aplaza, interrumpe ni reanuda. El permiso externo, el aplazamiento limitado y la recuperación tras pausa solo se aplican a esta tarea gestionada."
     },
+    "set_rotation_zone_rest_days": {
+      "name": "Fijar los días de descanso de una zona",
+      "description": "Da a una zona guardada sus propios días de descanso en la rotación de la automatización de corte, u omítelos para volver al valor predeterminado. Se aplica al instante sin recargar la integración."
+    },
     "start_zone_mowing": {
       "name": "Iniciar corte por zonas",
       "description": "Inicia el corte de zonas guardadas del mapa activo y confirma el inicio. La confirmación exacta de las zonas depende de los datos de tarea del cortacésped."

@@ -190,6 +190,10 @@
       "name": "Geplantes Mähen mit Sicherheitsprüfung starten",
       "description": "Mäherbedingungen aktualisieren und eine bestimmte Aufgabe starten oder den Grund für das Überspringen melden. Standardmäßig ohne Aufschub, Unterbrechung oder Fortsetzung. Optionale externe Freigabe, begrenzter Aufschub und Fortsetzung nach Pause gelten nur für diesen verwalteten Lauf."
     },
+    "set_rotation_zone_rest_days": {
+      "name": "Ruhetage einer Zone festlegen",
+      "description": "Gibt einer gespeicherten Zone eigene Ruhetage in der Zonenrotation der Mähautomatik oder lässt sie weg, um wieder den Standard zu verwenden. Wirkt sofort, ohne die Integration neu zu laden."
+    },
     "start_zone_mowing": {
       "name": "Zonenmähen starten",
       "description": "Startet das Mähen gespeicherter Zonen auf der aktiven Karte und bestätigt den Start. Die genaue Zonenbestätigung hängt von den Aufgabendaten des Mähers ab."
