@@ -95,7 +95,7 @@ block start reads them.
 
 | Control | Default | Meaning |
 | --- | --- | --- |
-| What to mow | Whole lawn | or **Due zones**, least recently mowed first |
+| What to mow | Whole lawn | or **Due zones**, zones without a completion first, then earliest due date |
 | Rest days between zone mowings | 1 | 0 means once a day; 1 means every other day |
 | Maximum area per start | 0 | whole zones are added while their total fits; 0 means no limit |
 
