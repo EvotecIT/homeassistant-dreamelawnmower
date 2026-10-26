@@ -668,3 +668,48 @@ async def test_settings_controls_do_not_start_the_schedule_before_its_entities(
     runtime.bind("mower", SimpleNamespace())
     assert runtime._started
     await runtime.async_close()
+
+
+async def test_rotation_change_is_applied_before_update_listeners_run(
+    hass, monkeypatch
+):
+    runtime, _ = _rotation_runtime(hass, monkeypatch, overview=[])
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={}, options={CONF_MOWING_AUTOMATION: dict(runtime.config)}
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    runtime.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+    reloads: list[bool] = []
+
+    async def listener(_hass, updated):
+        # Like the integration's listener: decide before the first await.
+        reloads.append(
+            runtime.coordinator.applied_entry_update.requires_reload(updated)
+        )
+
+    entry.add_update_listener(listener)
+    await runtime.async_set_rotation(mowing_target="rotation")
+    await hass.async_block_till_done()
+    assert reloads == [False]
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_rotation_change_keeps_the_switch_state(hass, monkeypatch, enabled):
+    runtime, manager = _rotation_runtime(hass, monkeypatch, overview=[])
+    manager.async_cancel_owner = AsyncMock()
+    runtime.entities["enabled"].async_write_ha_state = Mock()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={CONF_MOWING_AUTOMATION: dict(runtime.config, enabled=not enabled)},
+    )
+    entry.add_to_hass(hass)
+    runtime.coordinator.entry = entry
+    runtime.config = dict(runtime.config, enabled=not enabled)
+    runtime.enabled = not enabled
+    await runtime.async_set_enabled(enabled)
+    await runtime.async_set_rotation(rotation_rest_days=3)
+    saved = entry.options[CONF_MOWING_AUTOMATION]
+    assert saved["enabled"] is enabled
+    assert saved["rotation_rest_days"] == 3

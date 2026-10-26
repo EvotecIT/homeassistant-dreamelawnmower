@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import date, timedelta
 from typing import Any
 
@@ -282,19 +283,25 @@ class MowingAutomation:
         """
         if set(changes) - ROTATION_SETTINGS:
             raise HomeAssistantError("Only rotation settings change in place")
-        config = automation_config({**self.config, **changes})
+        # The switch persists `enabled` without touching self.config: keep the
+        # live value so a rotation change never restores an old opt-in.
+        config = automation_config({**self.config, "enabled": self.enabled, **changes})
         if not config:
             raise HomeAssistantError("Invalid mowing automation setting")
         entry = self.coordinator.entry
         options = dict(entry.options)
         options[CONF_MOWING_AUTOMATION] = config
         self.config = config
-        self.hass.config_entries.async_update_entry(entry, options=options)
+        # Update listeners start eagerly inside async_update_entry: record the
+        # new options as applied first, or the listener reloads the entry.
         if isinstance(
             getattr(self.coordinator, "applied_entry_update", None),
             EntryUpdateSnapshot,
         ):
-            self.coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+            self.coordinator.applied_entry_update = EntryUpdateSnapshot(
+                deepcopy(dict(entry.data)), deepcopy(options)
+            )
+        self.hass.config_entries.async_update_entry(entry, options=options)
         self.coordinator.async_update_listeners()
 
     def plan(self) -> dict[str, Any]:
