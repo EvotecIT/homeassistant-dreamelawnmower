@@ -169,10 +169,14 @@ under `/config/www` and enter its relative path, such as
 `mower/my-marker.png`. The integration ignores absolute paths, traversal,
 unsupported types, files over 1 MB, and images larger than 512 by 512 pixels.
 Use a top-down image with the mower's nose pointing upward. In locally rendered
-vector maps, the image follows the current reported heading and the selected
-map rotation. An unknown heading or last-known position keeps the image in its
-original orientation. The heading describes where the mower faces; reversing
-can move it in the opposite direction.
+maps, the image keeps its aspect ratio and follows the current reported heading
+and the selected map rotation. In vector maps, an unknown heading or last-known
+position keeps the image in its original orientation. The heading describes
+where the mower faces; reversing can move it in the opposite direction.
+The same picture also appears on the
+[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card)'s interactive
+map without a second image setting (requires a card version with custom-marker
+support).
 
 ### Real-scene background
 
