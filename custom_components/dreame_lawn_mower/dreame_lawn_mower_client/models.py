@@ -1935,10 +1935,10 @@ def map_diagnostics_from_device(
     status = getattr(device, "status", None)
     capability = getattr(device, "capability", None)
     map_manager = getattr(device, "_map_manager", None)
-    current_map = getattr(device, "current_map", None)
-    selected_map = getattr(device, "selected_map", None)
-    map_list = _safe_len(getattr(device, "map_list", None))
-    map_data_list = getattr(device, "map_data_list", None)
+    current_map = getattr(status, "current_map", None)
+    selected_map = getattr(status, "selected_map", None)
+    map_list = _safe_len(getattr(status, "map_list", None))
+    map_data_list = getattr(status, "map_data_list", None)
 
     return DreameLawnMowerMapDiagnostics(
         source=source,

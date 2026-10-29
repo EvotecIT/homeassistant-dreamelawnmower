@@ -181,6 +181,10 @@ def test_map_diagnostics_from_device_reports_fetch_context() -> None:
         status=SimpleNamespace(
             state=SimpleNamespace(name="CHARGING_COMPLETED"),
             state_name="charging_completed",
+            current_map=None,
+            selected_map=object(),
+            map_list=[17],
+            map_data_list={17: object()},
             has_saved_map=False,
             has_temporary_map=False,
             has_new_map=False,
@@ -196,10 +200,6 @@ def test_map_diagnostics_from_device_reports_fetch_context() -> None:
             _map_request_count=2,
             _need_map_request=False,
         ),
-        current_map=None,
-        selected_map=object(),
-        map_list=[17],
-        map_data_list={17: object()},
     )
 
     diagnostics = map_diagnostics_from_device(

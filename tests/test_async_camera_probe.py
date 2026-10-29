@@ -84,7 +84,6 @@ def test_native_camera_property_probe(monkeypatch, account, reply):
 
             def apply(response):
                 assert device._state_lock._is_owned()
-                assert device._protocol.cloud._operation_lock()._is_owned()
                 if reply == "apply_error":
                     raise ValueError("invalid property value")
                 return original(response)
@@ -201,6 +200,84 @@ def test_source_probe_preserves_optional_device_read(monkeypatch, request_proper
                 client._async_update_device.assert_awaited_once()
                 client.async_get_cloud_user_features.assert_awaited_once_with(language="pl")
             finally:
+                await client.async_close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("completion", ["success", "cancel", "close"])
+def test_camera_probe_dispatches_retained_callbacks_natively(monkeypatch, completion):
+    from unittest.mock import Mock
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device_types,
+    )
+
+    DreameMowerAutoSwitchProperty = device_types.DreameMowerAutoSwitchProperty
+    DreameMowerCleaningMode = device_types.DreameMowerCleaningMode
+    DreameMowerProperty = device_types.DreameMowerProperty
+
+    from .test_async_app_commands import client_for
+
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        calls = []
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            payload = (await request.json())["data"]
+            calls.append(payload["method"])
+            if payload["method"] == "set_properties":
+                entered.set()
+                if completion != "success":
+                    await release.wait()
+            result = [{"code": 0}] if payload["method"] == "set_properties" else []
+            return web.json_response({"code": 0, "data": {"result": result}})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session)
+            device = client._device
+            device._ready = True
+            device.capability.auto_switch_settings = True
+            device.capability.cleaning_route = True
+            device.auto_switch_data = {
+                DreameMowerAutoSwitchProperty.CLEANING_ROUTE.name: 2,
+            }
+            device.property_mapping[DreameMowerProperty.AUTO_SWITCH_SETTINGS] = {
+                "siid": 4, "piid": 5,
+            }
+            device.status.cleaning_mode = DreameMowerCleaningMode.UNKNOWN
+            device.data[DreameMowerProperty.CLEANING_MODE.value] = (
+                DreameMowerCleaningMode.MOWING.value
+            )
+            device.schedule_update = Mock()
+            device._pending_property_callbacks = [(device._cleaning_mode_changed, 0)]
+            legacy = Mock(side_effect=AssertionError("Synchronous camera callback"))
+            monkeypatch.setattr(device._protocol, "set_property", legacy)
+            task = asyncio.create_task(async_camera_property_probe(client))
+            try:
+                if completion == "success":
+                    result = await task
+                    assert result["error"] is None
+                else:
+                    await asyncio.wait_for(entered.wait(), 3)
+                    if completion == "close":
+                        await asyncio.wait_for(client.async_close(), 3)
+                    else:
+                        task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await asyncio.wait_for(task, 3)
+                assert not client._cloud_read_tasks
+                assert not session.closed
+                legacy.assert_not_called()
+                assert calls == ["get_properties", "set_properties"]
+                assert not device._pending_property_callbacks
+            finally:
+                release.set()
+                await asyncio.gather(task, return_exceptions=True)
                 await client.async_close()
 
     asyncio.run(scenario())

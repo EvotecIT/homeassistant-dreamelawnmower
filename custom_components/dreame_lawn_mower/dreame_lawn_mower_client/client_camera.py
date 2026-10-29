@@ -814,6 +814,8 @@ class _DreameLawnMowerCameraMixin(_DreameLawnMowerClientTransport):
 
     def _sync_probe_camera_device_properties(self) -> dict[str, Any]:
         from .camera_property_probe import camera_property_probe_plan
+        from .device_action_plan import PropertyResponse
+        from .device_property_read import apply_device_property_response
 
         device = self._ensure_device()
         plan = camera_property_probe_plan(device)
@@ -821,7 +823,13 @@ class _DreameLawnMowerCameraMixin(_DreameLawnMowerClientTransport):
             requested = next(plan)
             while True:
                 try:
-                    response = device._protocol.get_properties(requested)
+                    if isinstance(requested, PropertyResponse):
+                        response = apply_device_property_response(
+                            device, requested.results,
+                            require_fresh_state=requested.require_fresh_state,
+                        )
+                    else:
+                        response = device._protocol.get_properties(requested)
                 except Exception as error:
                     requested = plan.throw(error)
                 else:
