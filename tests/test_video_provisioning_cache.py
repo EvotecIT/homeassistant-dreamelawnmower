@@ -70,6 +70,7 @@ def test_provisioning_cache_save_omits_access_token_and_raw_cloud_payload() -> N
 
         class _Store:
             hass = SimpleNamespace(state=None)
+
             async def async_save(self, payload: dict[str, object]) -> None:
                 saved.update(payload)
 
@@ -128,3 +129,78 @@ def test_provisioning_cache_clear_removes_persisted_and_runtime_state() -> None:
         )
 
     assert asyncio.run(_run()) == (1, None, None, None)
+
+
+def test_real_cache_stages_http_configuration_and_fences_removal(monkeypatch):
+    from aiohttp import ClientSession, web
+
+    from custom_components.dreame_lawn_mower import (
+        video_provisioning_cache as cache_module,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import xp2p_config
+
+    from .test_async_cloud_session import server
+    from .test_xp2p_host_runtime import _inputs
+
+    async def run():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def handler(request):
+            entered.set()
+            await release.wait()
+            return web.json_response(
+                {
+                    "code": 0,
+                    "data": {
+                        "Config": {"StunHost": "stun.example.test", "Protocol": "TCP"}
+                    },
+                }
+            )
+
+        async with server(monkeypatch, handler) as url, ClientSession() as session:
+            monkeypatch.setattr(xp2p_config, "TENCENT_XP2P_APP_API", url)
+            cache = object.__new__(DreameLawnMowerVideoProvisioningCache)
+            cache._hass = object()
+            cache._removed = False
+            cache._runtime_input_config = None
+            cache._write_lock = asyncio.Lock()
+
+            class Store:
+                async def async_remove(self):
+                    pass
+
+            cache._store = Store()
+
+            def get_session(hass):
+                assert hass is cache._hass
+                return session
+
+            monkeypatch.setattr(cache_module, "async_get_clientsession", get_session)
+            inputs = _inputs()
+            release.set()
+            config = await cache.async_stage_fresh_device_config(inputs)
+            assert cache.resolve_for_transport(inputs, auto=False) is config
+            assert cache.resolve_for_transport(inputs, auto=True).protocol_type == 0
+            assert config.server == "stun.example.test"
+            assert config.protocol_type == 2
+            entered.clear()
+            release.clear()
+            pending = asyncio.create_task(
+                cache.async_stage_fresh_device_config(_inputs())
+            )
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                await cache.async_remove()
+                release.set()
+                await pending
+                assert cache._runtime_input_config is None
+                assert cache.inputs is None
+                assert cache.device_config is None
+                assert not session.closed
+            finally:
+                release.set()
+                if not pending.done():
+                    pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(run())
