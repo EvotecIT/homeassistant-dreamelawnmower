@@ -6,12 +6,13 @@ from collections.abc import Generator
 from typing import Any
 
 from .client_camera import _safe_get_device_property
+from .device_action_plan import PropertyResponse
 from .payload_utils import _json_safe, _lower_enum_name
 
 
 def camera_property_probe_plan(
     device: Any,
-) -> Generator[list[dict[str, Any]], Any, dict[str, Any]]:
+) -> Generator[list[dict[str, Any]] | PropertyResponse, Any, dict[str, Any]]:
     """Select camera properties and retain diagnostic/application semantics."""
     try:
         from .device_types import DreameMowerProperty
@@ -52,7 +53,7 @@ def camera_property_probe_plan(
         if raw_response is None:
             error = "Device protocol returned no property response."
         else:
-            handled = bool(device._handle_properties(raw_response))
+            handled = bool((yield PropertyResponse(raw_response)))
     except Exception as err:
         error = str(err)
 

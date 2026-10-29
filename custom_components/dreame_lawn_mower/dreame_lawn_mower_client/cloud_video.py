@@ -20,6 +20,8 @@ def video_read_params(
     """Retain both vendor token spellings and identity-only account fields."""
     if kind == "access_token":
         return {"os": os}
+    if not did:
+        raise ValueError("Device ID is required for device video requests")
     params: dict[str, Any] = {"did": did, "os": os}
     if access_token:
         params["accesstoken"] = access_token

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Generator
 from threading import Event
 from typing import TYPE_CHECKING, Any, cast
 
 from .camera_property_probe import camera_property_probe_plan
+from .client_device_actions import async_run_device_plan
 from .client_refresh import _run_state_worker
 from .client_rpc import async_device_rpc
 from .client_state_reads import async_read_device_state, read_locked_device_state
+from .device_action_plan import PropertyResponse
 from .exceptions import DreameLawnMowerConnectionError
 
 if TYPE_CHECKING:
@@ -45,20 +48,7 @@ async def async_camera_property_probe(client: DreameLawnMowerClient) -> dict[str
                 except StopIteration as completed:
                     return True, completed.value
 
-            if initial or error is not None:
-                return read_locked_device_state(device, advance, active)
-            # Property callbacks can re-enter the legacy protocol. Match refresh:
-            # acquire its operation lock before the state lock on this worker.
-            protocol = device._protocol.cloud
-            lock = protocol._operation_lock()
-            while True:
-                active()
-                if lock.acquire(timeout=0.05):
-                    break
-            try:
-                return read_locked_device_state(device, advance, active)
-            finally:
-                lock.release()
+            return read_locked_device_state(device, advance, active)
 
         try:
             done, requested = await _run_state_worker(
@@ -91,7 +81,42 @@ async def async_camera_property_probe(client: DreameLawnMowerClient) -> dict[str
                 done, result = await _run_state_worker(
                     lambda: step(response), cancelled)
             if not done:
-                raise RuntimeError("Camera property probe requested another response")
+                if not isinstance(result, PropertyResponse):
+                    raise RuntimeError(
+                        "Camera property probe requested another response"
+                    )
+                effect = result
+
+                def apply(current: Any) -> Generator[PropertyResponse, Any, Any]:
+                    active()
+                    if current is not device:
+                        raise DreameLawnMowerConnectionError("Camera device changed")
+                    return (yield effect)
+
+                try:
+                    handled = await async_run_device_plan(
+                        client, apply, deadline=deadline,
+                        require_device=lambda current: active(),
+                    )
+                except Exception as error:
+                    state_deadline = time.monotonic() + _DIAGNOSTIC_TIMEOUT
+
+                    def finish_application_error(
+                        error: Exception = error,
+                    ) -> tuple[bool, Any]:
+                        return step(error=error)
+
+                    done, result = await _run_state_worker(
+                        finish_application_error, cancelled,
+                    )
+                else:
+                    done, result = await _run_state_worker(
+                        lambda: step(handled), cancelled,
+                    )
+                if not done:
+                    raise RuntimeError(
+                        "Camera property probe requested another response"
+                    )
             return cast(dict[str, Any], result)
         finally:
             cancelled.set()
