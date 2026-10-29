@@ -272,7 +272,7 @@ SENSORS = [
         name="Cellular Signal",
         value_fn=lambda snapshot: getattr(snapshot, "cellular_signal_dbm", None),
         exists_fn=lambda snapshot: (
-            getattr(snapshot, "cellular_signal_dbm", None) is not None
+            getattr(snapshot, "cellular_module_installed", None) is not None
         ),
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,

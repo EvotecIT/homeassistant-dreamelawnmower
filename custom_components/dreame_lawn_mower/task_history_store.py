@@ -12,7 +12,11 @@ from .const import DOMAIN
 from .control_options import active_map_index
 from .dreame_lawn_mower_client.map_inventory import selected_map_revision
 from .dreame_lawn_mower_client.session_photos import async_download_session_photo
-from .dreame_lawn_mower_client.task_history import TaskHistory
+from .dreame_lawn_mower_client.task_history import (
+    TaskDetail,
+    TaskHistory,
+    finite_number,
+)
 from .dreame_lawn_mower_client.task_observations import (
     TaskObservations,
     capture_settings,
@@ -49,6 +53,7 @@ class TaskHistoryOwner:
         self.history = TaskHistory(coordinator.client)
         self.observations = TaskObservations()
         self.recorded_battery: dict[str, dict[str, Any] | None] = {}
+        self._recorder_attempts: dict[str, float] = {}
         self.store = history_store(hass, coordinator.entry.entry_id)
         self.summary_store = history_store(
             hass, coordinator.entry.entry_id, "task_summaries"
@@ -116,7 +121,7 @@ class TaskHistoryOwner:
 
     def interrupt(self) -> None:
         """Record explicit unknown/offline intervals even without a sample."""
-        if not self.closed and self.observations.interrupt():
+        if not self.closed and self.observations.interrupt(at=int(time.time())):
             self._revision += 1
             self._schedule_save()
 
@@ -195,12 +200,16 @@ class TaskHistoryOwner:
         async with self._lock:
             if self.closed:
                 raise RuntimeError("History entry is unloaded")
+            if self.observations.prune(int(time.time())):
+                self._revision += 1
+                self._schedule_save()
             try:
                 await self.history.async_refresh()
             except Exception:
                 if not self.history.sessions:
                     raise
                 self.history.stale = True
+                self.history.refreshed_at = time.monotonic()
             if self.history.revision != self._saved_history_revision:
                 self._schedule_save()
             if key == "list":
@@ -208,14 +217,25 @@ class TaskHistoryOwner:
             detail = await self.history.async_detail(key)
             if self.history.revision != self._saved_history_revision:
                 self._schedule_save()
-            if detail is not None and key not in self.recorded_battery:
+            if detail is not None:
                 self.recorded_battery = {
                     task_id: value
                     for task_id, value in self.recorded_battery.items()
                     if task_id in self.history.sessions
                 }
-                self.recorded_battery[key] = None
-                if self.observations.for_task(detail) is None:
+                self._recorder_attempts = {
+                    task_id: attempted
+                    for task_id, attempted in self._recorder_attempts.items()
+                    if task_id in self.history.sessions
+                }
+                observed = self.observations.for_task(detail)
+                now = time.monotonic()
+                if (
+                    not _has_battery_data(observed)
+                    and not _has_battery_data(self.recorded_battery.get(key))
+                    and now - self._recorder_attempts.get(key, float("-inf")) >= 60
+                ):
+                    self._recorder_attempts[key] = now
                     try:
                         self.recorded_battery[key] = await async_recorder_battery(
                             self.hass,
@@ -228,6 +248,18 @@ class TaskHistoryOwner:
                             type(err).__name__,
                         )
             return detail
+
+    def battery_for_task(self, detail: TaskDetail) -> dict[str, Any] | None:
+        """Prefer measured observations without losing separately captured settings."""
+        observed = self.observations.for_task(detail)
+        recorded = self.recorded_battery.get(detail.id)
+        if _has_battery_data(observed) or not _has_battery_data(recorded):
+            return observed or recorded
+        result = dict(recorded or {})
+        if observed and observed.get("settings"):
+            for key in ("settings", "settings_observed_at", "settings_timing"):
+                result[key] = observed[key]
+        return result
 
     async def async_photo(self, key: str, index: int) -> bytes | None:
         """Coalesce private photo reads without keeping large images in memory."""
@@ -278,3 +310,9 @@ async def async_remove_task_history(hass: Any, entry: Any) -> None:
     """Delete this entry's private history when the configuration is removed."""
     await history_store(hass, entry.entry_id).async_remove()
     await history_store(hass, entry.entry_id, "task_summaries").async_remove()
+
+
+def _has_battery_data(value: dict[str, Any] | None) -> bool:
+    return (
+        value is not None and finite_number(value.get("percentage_points")) is not None
+    )

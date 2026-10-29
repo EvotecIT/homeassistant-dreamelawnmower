@@ -4,6 +4,8 @@ import asyncio
 import json
 from dataclasses import replace
 
+import pytest
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.session_photos import (  # noqa: E501
     TaskSession,
     task_sessions_from_history,
@@ -14,8 +16,10 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.task_history i
     decode_task_detail,
     finite_number,
     task_id,
+    task_mode,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.task_observations import (  # noqa: E501
+    MAX_RUN_AGE,
     BatterySample,
     TaskObservations,
     battery_observation,
@@ -203,14 +207,44 @@ def test_summary_cache_round_trip_preserves_private_history_not_signed_urls():
     session = TaskSession(SUMMARY, 102, START * 1000, started_at=START)
     key = task_id("mower", session)
     history.sessions[key] = session
-    expected = history._retain_detail(key, session, summary())
+    raw = summary()
+    raw["map"][0]["track"] = [[index, 0] for index in range(MAX_MAP_POINTS - 3)]
+    raw["pref"] = [None, 1]
+    expected = history._retain_detail(key, session, raw)
     saved = json.loads(json.dumps(history.export()))
     restored = TaskHistory(client)
     restored.restore(saved)
     assert restored.stale
     assert restored.details[key] == expected
+    assert len(restored.details[key].features[0].tracks[0]) == MAX_MAP_POINTS - 3
+    assert restored.details[key].recorded_settings == {"efficient_mode": 1}
     assert restored.photos[key] == history.photos[key]
     assert "https://" not in json.dumps(saved)
+
+
+@pytest.mark.parametrize("raw,expected", [(0, 0), (103, 3), (4, None), (109, None)])
+def test_only_supported_task_modes_are_published(raw, expected):
+    assert task_mode(raw) == expected
+
+
+@pytest.mark.parametrize("operation", ["unknown", "missing_session", "inactive"])
+def test_observations_expire_without_a_known_active_mission(operation):
+    history = TaskObservations()
+    observe(history, START, 80)
+    future = START + MAX_RUN_AGE + 1
+    if operation == "unknown":
+        changed = history.interrupt(at=future)
+    else:
+        changed = observe(
+            history,
+            future,
+            80,
+            key=None if operation == "missing_session" else "idle",
+            active=False,
+        )
+    assert changed
+    assert history.for_task(detail()) is None
+    assert history.export()["runs"] == []
 
 
 def test_settings_capture_uses_only_one_available_map_and_known_fields():

@@ -140,9 +140,7 @@ class TaskHistoryDetailView(HomeAssistantView):
             )
         payload = detail.as_dict()
         payload["stale"] = owner.history.stale
-        payload["battery"] = owner.observations.for_task(
-            detail
-        ) or owner.recorded_battery.get(task_id)
+        payload["battery"] = owner.battery_for_task(detail)
         payload["photo_paths"] = [
             f"{task_history_api_path(entry_id)}/{task_id}/photo/{index}"
             for index in range(detail.photo_count)
@@ -166,15 +164,24 @@ class TaskHistoryPhotoView(HomeAssistantView):
         index: str,
     ) -> web.Response:
         owner = self.api.authorize(request, entry_id)
-        await self.api.read(entry_id, owner, task_id)
-        photos = owner.history.photos.get(task_id, ())
         if not index.isascii() or not index.isdecimal() or len(index) > 3:
             raise web.HTTPNotFound(headers=_HEADERS)
         number = int(index)
+        await self.api.read(entry_id, owner, task_id)
+        photos = owner.history.photos.get(task_id, ())
         if number >= len(photos):
             raise web.HTTPNotFound(headers=_HEADERS)
         # Keep the transfer under the same entry-owned worker lifetime.
-        content = await owner.async_photo(task_id, number)
+        try:
+            content = await owner.async_photo(task_id, number)
+        except (web.HTTPNotFound, web.HTTPGone):
+            raise
+        except Exception as err:
+            self.api.current(entry_id, owner)
+            raise web.HTTPBadGateway(
+                text="Task photo could not be loaded. Try again later.",
+                headers={**_HEADERS, "Retry-After": "30"},
+            ) from err
         self.api.current(entry_id, owner)
         if content is None:
             raise web.HTTPNotFound(headers=_HEADERS)

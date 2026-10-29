@@ -57,7 +57,7 @@ def task_mode(value: Any) -> int | None:
     if type(value) is not int:
         return None
     normalized = value - 100 if value >= 100 else value
-    return normalized if 0 <= normalized <= 9 else None
+    return normalized if 0 <= normalized <= 3 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,10 +393,12 @@ def _summary_for_storage(
         "faults": list(detail.faults),
         "pre_type": 1 if detail.per_zone_settings else 0,
         "pref": [
-            settings.get("mowing_height_cm", 0) * 10,
+            settings["mowing_height_cm"] * 10
+            if "mowing_height_cm" in settings
+            else None,
             settings.get("efficient_mode"),
         ]
-        if "mowing_height_cm" in settings
+        if "mowing_height_cm" in settings or "efficient_mode" in settings
         else [],
         "photo_list": [photo.file_name for photo in photos],
     }

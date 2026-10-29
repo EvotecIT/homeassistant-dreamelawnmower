@@ -10,13 +10,17 @@ from aiohttp import web
 
 from custom_components.dreame_lawn_mower import task_history_api as api_module
 from custom_components.dreame_lawn_mower import task_history_store as store_module
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.session_photos import (  # noqa: E501
+    TaskSession,
+)
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     observe_runtime_session_state,
     runtime_mission_session_started_at,
 )
 from tests.runtime_fixtures import runtime_hass
-from tests.test_task_history import START, detail
+from tests.test_session_photos import SUMMARY
+from tests.test_task_history import START, detail, observe
 
 
 def environment(monkeypatch):
@@ -38,7 +42,13 @@ def environment(monkeypatch):
     coordinator.task_history = owner
     api = api_module.TaskHistoryAPI(hass)
     registry = SimpleNamespace(
-        async_get_entity_id=Mock(return_value="lawn_mower.garden")
+        async_get_entity_id=Mock(
+            side_effect=lambda *args: (
+                "lawn_mower.garden"
+                if args == ("lawn_mower", "dreame_lawn_mower", "mower_mower")
+                else None
+            )
+        )
     )
     monkeypatch.setattr(api_module.er, "async_get", lambda hass: registry)
     permission = Mock(return_value=True)
@@ -89,6 +99,97 @@ def test_cancelled_waiter_shares_one_worker_and_close_drains_it(monkeypatch):
         assert not owner._tasks
         with pytest.raises(web.HTTPNotFound):
             api.current("entry", owner)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("index", ["-1", "1000", "١", "bad"])
+def test_invalid_photo_index_never_starts_cloud_work(monkeypatch, index):
+    async def run():
+        _, _, owner, api, request, _, _ = environment(monkeypatch)
+        owner.async_read = AsyncMock()
+        with pytest.raises(web.HTTPNotFound):
+            await api_module.TaskHistoryPhotoView(api).get(
+                request, "entry", detail().id, index
+            )
+        owner.async_read.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "failure", [TimeoutError, OSError, web.HTTPNotFound, web.HTTPGone]
+)
+def test_photo_errors_are_sanitized_and_missing_photos_keep_their_status(
+    monkeypatch, failure
+):
+    async def run():
+        _, _, owner, api, request, _, _ = environment(monkeypatch)
+        owner.async_read = AsyncMock()
+        owner.history.photos[detail().id] = (object(),)
+        expected = (
+            failure if issubclass(failure, web.HTTPException) else web.HTTPBadGateway
+        )
+        error = failure() if expected is failure else failure("private vendor object")
+        owner.async_photo = AsyncMock(side_effect=error)
+        with pytest.raises(expected) as raised:
+            await api_module.TaskHistoryPhotoView(api).get(
+                request, "entry", detail().id, "0"
+            )
+        if expected is web.HTTPBadGateway:
+            assert raised.value.headers["Retry-After"] == "30"
+            assert raised.value.headers["Cache-Control"] == "private, no-store"
+            assert "private vendor object" not in raised.value.text
+
+    asyncio.run(run())
+
+
+def test_recorder_can_retry_and_fill_battery_without_losing_observed_settings(
+    monkeypatch,
+):
+    async def run():
+        _, _, owner, api, request, _, _ = environment(monkeypatch)
+        clock = [1000]
+        monkeypatch.setattr(store_module.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(store_module.time, "time", lambda: START + 400)
+        task = detail()
+        owner.history.sessions[task.id] = TaskSession(SUMMARY, 102, START * 1000)
+        owner.history.async_refresh = AsyncMock()
+        owner.history.async_detail = AsyncMock(return_value=task)
+        observe(owner.observations, START, None)
+        recorded = {"source": "recorder", "percentage_points": 5, "samples": []}
+        recorder = AsyncMock(side_effect=[None, recorded])
+        monkeypatch.setattr(store_module, "async_recorder_battery", recorder)
+        view = api_module.TaskHistoryDetailView(api)
+        first = json.loads((await view.get(request, "entry", task.id)).body)
+        assert first["battery"]["percentage_points"] is None
+        await view.get(request, "entry", task.id)
+        assert recorder.await_count == 1
+        clock[0] += 61
+        filled = json.loads((await view.get(request, "entry", task.id)).body)
+        assert filled["battery"]["source"] == "recorder"
+        assert filled["battery"]["percentage_points"] == 5
+        assert filled["battery"]["settings"]["map_index"] == 0
+        assert filled["battery"]["settings_timing"] == "at_start"
+        clock[0] += 61
+        await view.get(request, "entry", task.id)
+        assert recorder.await_count == 2
+        await owner.async_close()
+
+    asyncio.run(run())
+
+
+def test_stale_index_refresh_failure_has_a_retry_cooldown(monkeypatch):
+    async def run():
+        _, _, owner, _, _, _, _ = environment(monkeypatch)
+        owner.history.sessions[detail().id] = TaskSession(SUMMARY, 102, START * 1000)
+        cloud = AsyncMock(side_effect=OSError("offline"))
+        owner.history.client._async_cloud_read = cloud
+        await owner.async_read("list")
+        await owner.async_read("list")
+        assert owner.history.stale
+        cloud.assert_awaited_once()
+        await owner.async_close()
 
     asyncio.run(run())
 

@@ -15,7 +15,7 @@ def normalize_byte_array(value: object) -> tuple[int, ...] | None:
             return None
         try:
             raw = json.loads(text)
-        except json.JSONDecodeError:
+        except ValueError:
             return None
 
     if isinstance(raw, bytes | bytearray):

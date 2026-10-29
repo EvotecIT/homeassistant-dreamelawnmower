@@ -28,6 +28,8 @@ the same mower and task interval. This uses Home Assistant's history API and is
 labelled **Home Assistant recorder · Partial coverage**. Recorder data cannot
 reconstruct settings that were never captured. Excluded or purged entities have
 no recorder backfill.
+Home Assistant manages Recorder's optional requirements and load order; backfill
+runs only when Recorder is configured.
 
 Settings come from the task summary or an immutable snapshot of the first
 available decoded preferences during the observed mission. The latter records
@@ -53,8 +55,9 @@ labelled as cached.
 The history API requires authentication and read access to the mower entity.
 Task IDs are opaque and scoped to the device. Vendor object names, signed vendor
 URLs, credentials and raw packets never enter the dashboard payload. Photos use
-separately authorized HA paths and are streamed on demand, with an 8 MiB download
-limit per image. Images are not copied into the history storage files. The card
+separately authorized HA paths. Each on-demand request buffers the complete image
+before returning it, with an 8 MiB download limit per image. Images are not copied
+into the history storage files. The card
 releases its private image URLs when leaving the view.
 
 Deleting the integration entry removes both private history stores. Unloading an

@@ -14,6 +14,10 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.app_protocol i
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.link_signals import (
     decode_link_signals,
+    link_signals_from_properties,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.wire_values import (
+    normalize_byte_array,
 )
 from custom_components.dreame_lawn_mower.sensor import SENSORS, DreameLawnMowerSensor
 from dreame_lawn_mower_client.models import (
@@ -52,9 +56,14 @@ def test_same_sized_runtime_and_unknown_properties_have_no_signal(property_key):
     assert blob.cellular_module_installed is None
 
 
-@pytest.mark.parametrize("raw,installed,valid", [
-    (0, True, False), (127, False, None), (128, True, True),
-])
+@pytest.mark.parametrize(
+    "raw,installed,valid",
+    [
+        (0, True, False),
+        (127, False, None),
+        (128, True, True),
+    ],
+)
 def test_placeholders_and_module_state_never_become_zero_dbm(raw, installed, valid):
     signal = decode_link_signals(heartbeat(wifi=raw, cellular=raw), property_key="1.1")
     assert signal.wifi_signal_dbm is None
@@ -63,11 +72,18 @@ def test_placeholders_and_module_state_never_become_zero_dbm(raw, installed, val
     assert signal.cellular_plan_valid is valid
 
 
-@pytest.mark.parametrize("bad", [
-    None, [], heartbeat(24), [0] * 20,
-    [True, *heartbeat()[1:]], [*heartbeat()[:-1], 255],
-    [*heartbeat()[:17], 256, *heartbeat()[18:]],
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        None,
+        [],
+        heartbeat(24),
+        [0] * 20,
+        [True, *heartbeat()[1:]],
+        [*heartbeat()[:-1], 255],
+        [*heartbeat()[:17], 256, *heartbeat()[18:]],
+    ],
+)
 def test_unvalidated_heartbeat_cannot_publish_link_measurements(bad):
     signal = decode_link_signals(bad, property_key="1.1")
     assert signal.wifi_signal_dbm is None
@@ -79,8 +95,12 @@ def test_unvalidated_heartbeat_cannot_publish_link_measurements(bad):
 @pytest.mark.parametrize("encoded", [False, True])
 def test_wire_readings_reach_snapshot_and_diagnostic_sensor(property_key, encoded):
     descriptor = DreameLawnMowerDescriptor(
-        did="test", name="Garden", model="dreame.mower.g2408",
-        display_model="A2", account_type="dreame", country="eu",
+        did="test",
+        name="Garden",
+        model="dreame.mower.g2408",
+        display_model="A2",
+        account_type="dreame",
+        country="eu",
     )
     device = _FakeDevice()
     device.realtime_properties[property_key] = {
@@ -88,7 +108,8 @@ def test_wire_readings_reach_snapshot_and_diagnostic_sensor(property_key, encode
     }
     snapshot = snapshot_from_device(descriptor, device)
     coordinator = SimpleNamespace(
-        data=snapshot, client=SimpleNamespace(descriptor=descriptor),
+        data=snapshot,
+        client=SimpleNamespace(descriptor=descriptor),
     )
     descriptions = {item.key: item for item in SENSORS}
     for key, expected in (("wifi_signal_dbm", -64), ("cellular_signal_dbm", -76)):
@@ -105,3 +126,20 @@ def test_wire_readings_reach_snapshot_and_diagnostic_sensor(property_key, encode
         else:
             assert not entity.available
             assert entity.native_value is None
+
+
+@pytest.mark.parametrize("code,expected", [(0, -64), (-1, None), (None, None)])
+def test_failed_property_result_cannot_republish_old_signal(code, expected):
+    signal = link_signals_from_properties({"1.1": {"code": code, "value": heartbeat()}})
+    assert signal.wifi_signal_dbm == expected
+
+
+def test_cellular_status_creates_entity_before_first_signal_reading():
+    descriptor = next(item for item in SENSORS if item.key == "cellular_signal_dbm")
+    assert descriptor.exists_fn(SimpleNamespace(cellular_module_installed=True))
+    assert descriptor.exists_fn(SimpleNamespace(cellular_module_installed=False))
+    assert not descriptor.exists_fn(SimpleNamespace(cellular_module_installed=None))
+
+
+def test_oversized_json_integer_is_not_a_byte_array():
+    assert normalize_byte_array("[" + "9" * 5000 + "]") is None

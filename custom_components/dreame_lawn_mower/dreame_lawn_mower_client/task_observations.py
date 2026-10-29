@@ -90,9 +90,9 @@ class TaskObservations:
         self.runs: dict[str, ObservedTask] = {}
         self._current_key: str | None = None
 
-    def interrupt(self) -> bool:
+    def interrupt(self, *, at: int | None = None) -> bool:
         """Preserve a discontinuity even when no valid battery can be sampled."""
-        changed = False
+        changed = self.prune(at) if at is not None else False
         for run in self.runs.values():
             if (not run.samples or run.samples[-1].active) and not run.pending_break:
                 run.pending_break = True
@@ -111,18 +111,20 @@ class TaskObservations:
         settings: dict[str, Any],
     ) -> bool:
         """Save changed readings or a five-minute coverage anchor, never zeros."""
-        if key is None or len(key) > 60 or timestamp(at) is None:
+        if timestamp(at) is None:
             return self.interrupt()
+        changed = self.prune(at)
+        if key is None or len(key) > 60:
+            return self.interrupt() or changed
         revision = map_revision_hash(map_revision)
         storage_key = f"{key}|{revision or 'unverified'}"
-        changed = False
         if storage_key != self._current_key:
-            changed = self.interrupt()
+            changed = self.interrupt() or changed
             self._current_key = storage_key
         run = self.runs.get(storage_key)
         if run is None:
             if not active:
-                return False
+                return changed
             run = self.runs[storage_key] = ObservedTask(
                 storage_key,
                 at,
@@ -140,7 +142,7 @@ class TaskObservations:
             run.settings = deepcopy(settings)
             run.settings_observed_at = at
             changed = True
-        self._prune(at)
+        changed = self.prune(at) or changed
         if type(level) is not int or not 0 <= level <= 100:
             return self.interrupt() or changed
         previous = run.samples[-1] if run.samples else None
@@ -170,7 +172,9 @@ class TaskObservations:
             del run.samples[:-MAX_RUN_SAMPLES]
         return True
 
-    def _prune(self, at: int) -> None:
+    def prune(self, at: int) -> bool:
+        """Expire retained observations even while mission telemetry is unknown."""
+        previous = len(self.runs)
         ordered = sorted(
             self.runs.values(), key=lambda item: item.first_seen, reverse=True
         )
@@ -179,6 +183,7 @@ class TaskObservations:
             for item in ordered[:MAX_OBSERVED_RUNS]
             if at - item.first_seen <= MAX_RUN_AGE
         }
+        return len(self.runs) != previous
 
     def for_task(self, detail: TaskDetail) -> dict[str, Any] | None:
         """Attach disjoint observation segments on the task's verified revision.

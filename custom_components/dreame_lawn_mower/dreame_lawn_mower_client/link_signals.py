@@ -47,6 +47,8 @@ def decode_link_signals(
 def link_signals_from_properties(properties: object) -> MowerLinkSignals:
     """Project the canonical heartbeat cache without reading the device again."""
     entry = properties.get("1.1") if isinstance(properties, Mapping) else None
+    if isinstance(entry, Mapping) and entry.get("code", 0) != 0:
+        return MowerLinkSignals()
     value = entry.get("value") if isinstance(entry, Mapping) else entry
     return decode_link_signals(normalize_byte_array(value), property_key="1.1")
 

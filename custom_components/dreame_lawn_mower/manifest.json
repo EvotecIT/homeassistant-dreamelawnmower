@@ -1,6 +1,9 @@
 {
   "domain": "dreame_lawn_mower",
   "name": "Dreame Lawn Mower",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@EvotecIT",
     "@PrzemyslawKlys"

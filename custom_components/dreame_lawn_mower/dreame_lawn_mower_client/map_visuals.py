@@ -266,6 +266,8 @@ def draw_position_marker(
     draw: ImageDraw.ImageDraw,
     position: tuple[int, int],
     style: MapRenderStyle,
+    *,
+    heading: float | None = None,
 ) -> None:
     """Draw a built-in marker or a validated custom image at a map position."""
     px, py = position
@@ -279,6 +281,10 @@ def draw_position_marker(
                 marker_rgba = marker.convert("RGBA")
                 side = max(18, radius * 4)
                 marker_rgba.thumbnail((side, side), Image.Resampling.LANCZOS)
+                if heading is not None and math.isfinite(heading):
+                    marker_rgba = marker_rgba.rotate(
+                        -heading, resample=Image.Resampling.BICUBIC, expand=True,
+                    )
                 image.alpha_composite(
                     marker_rgba,
                     (px - marker_rgba.width // 2, py - marker_rgba.height // 2),
