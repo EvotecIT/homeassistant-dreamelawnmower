@@ -16,6 +16,7 @@ from .device_code_semantics import (
     mower_operational_human_detection_notice,
     mower_status_notice_code,
 )
+from .link_signals import link_signals_from_properties
 from .map_switch_events import map_switch_event_at
 from .model_families import DREAME_MODEL_FAMILY_NAMES, dreame_model_family
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
@@ -445,6 +446,10 @@ class DreameLawnMowerSnapshot:
     state_name: str
     activity: str
     battery_level: int | None = None
+    wifi_signal_dbm: int | None = None
+    cellular_signal_dbm: int | None = None
+    cellular_module_installed: bool | None = None
+    cellular_plan_valid: bool | None = None
     state_event_at: float | None = field(
         default=None,
         repr=False,
@@ -669,6 +674,10 @@ class DreameLawnMowerStatusBlob:
     payload: tuple[int, ...] = field(default_factory=tuple)
     bytes_by_index: Mapping[str, int] = field(default_factory=dict)
     candidate_battery_level: int | None = None
+    wifi_signal_dbm: int | None = None
+    cellular_signal_dbm: int | None = None
+    cellular_module_installed: bool | None = None
+    cellular_plan_valid: bool | None = None
     heartbeat_charging: bool | None = None
     heartbeat_docking_state: int | None = None
     heartbeat_docking_state_name: str | None = None
@@ -1451,6 +1460,10 @@ def snapshot_from_device(
         # A retransmitted MQTT message updates last_seen, but is not a new notice.
         notice_event_at = notice_events[-1].received_at
 
+    signals = link_signals_from_properties(
+        getattr(device, "realtime_properties", None)
+    )
+
     return DreameLawnMowerSnapshot(
         descriptor=descriptor,
         map_switch_event_at=map_switch_event_at(
@@ -1461,6 +1474,10 @@ def snapshot_from_device(
         state_name=state_name,
         activity=activity,
         battery_level=getattr(device.status, "battery_level", None),
+        wifi_signal_dbm=signals.wifi_signal_dbm,
+        cellular_signal_dbm=signals.cellular_signal_dbm,
+        cellular_module_installed=signals.cellular_module_installed,
+        cellular_plan_valid=signals.cellular_plan_valid,
         state_event_at=_realtime_property_last_seen(
             device,
             REALTIME_STATE_PROPERTY_KEY,

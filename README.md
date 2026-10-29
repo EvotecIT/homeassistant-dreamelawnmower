@@ -16,11 +16,15 @@ dashboard.
 - Mower state, battery, faults, rain protection, charging, and maintenance.
 - Map selection and targeted zone, spot, or edge mowing.
 - Native schedule switches, notifications, and automation helpers.
+- Task history with historical maps, photos, and recorded battery/settings data.
+- Wi-Fi and cellular signal diagnostics when the mower reports real readings.
 - Optional live video and on-demand 3D maps on supported mowers and hosts.
 
 Check the [supported mower list](docs/supported-mowers.md) before installing.
 Model, firmware, account region, and vendor provisioning affect advanced
 features. Map routes show observed movement, not verified cut-area coverage.
+See [task history and diagnostics](docs/task-history.md) for retention, privacy,
+and the limits of historical observations.
 
 ## Sponsor
 

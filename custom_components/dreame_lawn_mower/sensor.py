@@ -10,8 +10,12 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
-from homeassistant.const import EntityCategory
+from homeassistant.const import (
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -250,6 +254,32 @@ MOWER_STATE_OPTIONS = list(
 
 
 SENSORS = [
+    DreameSensorDescription(
+        key="wifi_signal_dbm",
+        name="Wi-Fi Signal",
+        value_fn=lambda snapshot: getattr(snapshot, "wifi_signal_dbm", None),
+        exists_fn=lambda snapshot: (
+            getattr(snapshot, "wifi_signal_dbm", None) is not None
+        ),
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:wifi",
+    ),
+    DreameSensorDescription(
+        key="cellular_signal_dbm",
+        name="Cellular Signal",
+        value_fn=lambda snapshot: getattr(snapshot, "cellular_signal_dbm", None),
+        exists_fn=lambda snapshot: (
+            getattr(snapshot, "cellular_signal_dbm", None) is not None
+        ),
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:signal-cellular-3",
+    ),
     DreameSensorDescription(
         key="activity",
         name="Activity",
@@ -574,6 +604,7 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{self._descriptor.unique_id}_{description.key}"
         self._attr_device_class = description.device_class
+        self._attr_state_class = description.state_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_translation_key = description.translation_key
         self._attr_translation_placeholders = description.translation_placeholders or {}
@@ -593,6 +624,17 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         if not self.available:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Distinguish absent/expired cellular service from an unknown RSSI."""
+        snapshot = self.coordinator.data
+        if self.entity_description.key != "cellular_signal_dbm" or snapshot is None:
+            return None
+        return {
+            "module_installed": getattr(snapshot, "cellular_module_installed", None),
+            "plan_valid": getattr(snapshot, "cellular_plan_valid", None),
+        }
 
     @property
     def available(self) -> bool:

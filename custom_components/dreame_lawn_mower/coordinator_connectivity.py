@@ -107,6 +107,9 @@ class DreameLawnMowerConnectivityMixin:
         timer = getattr(self, "observed_mowing_timer", None)
         if timer is not None:
             timer.interrupt()
+        history = getattr(self, "task_history", None)
+        if history is not None:
+            history.interrupt()
         now = datetime.now(UTC)
         if not self.connection_degraded:
             self._connectivity_degraded_since = now

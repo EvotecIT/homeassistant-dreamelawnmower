@@ -249,7 +249,9 @@ def test_invalid_property_ids_do_not_hide_valid_session_history() -> None:
     values = json.loads(record["history"])
     values.extend([{"piid": [], "value": 1}, {"piid": {}, "value": 2}])
     record["history"] = json.dumps(values)
-    assert task_sessions_from_history([record]) == [TaskSession(SUMMARY, 107, 2000)]
+    assert task_sessions_from_history([record]) == [
+        TaskSession(SUMMARY, 107, 2000, started_at=1792026016)
+    ]
 
 
 def test_unusable_newest_summary_does_not_hide_older_photos() -> None:

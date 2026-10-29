@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .mowing_automation import MowingAutomation
     from .observation_checkpoint import ObservationCheckpoint
     from .option_updates import EntryUpdateSnapshot
+    from .task_history_store import TaskHistoryOwner
     from .video_lan_cache import DreameLawnMowerVideoLanCache
     from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 
@@ -434,6 +435,7 @@ class DreameLawnMowerCoordinator(
     # Setup and the map camera attach these resources to this lifecycle owner.
     applied_entry_update: EntryUpdateSnapshot
     observation_checkpoint: ObservationCheckpoint
+    task_history: TaskHistoryOwner
     managed_mowing: ManagedMowing | None = None
     mowing_automation: MowingAutomation | None = None
     video_lan_cache: DreameLawnMowerVideoLanCache
@@ -702,6 +704,9 @@ class DreameLawnMowerCoordinator(
                 self._schedule_zone_history_refresh()
         else:
             observe_mowing_time(self, data, None)
+            task_history = getattr(self, "task_history", None)
+            if task_history is not None:
+                task_history.observe(data, None)
         history = getattr(self, "mower_condition_history", None)
         if history is not None:
             changed = history.observe(data)
@@ -777,6 +782,9 @@ class DreameLawnMowerCoordinator(
             ),
         )
         observe_mowing_time(self, snapshot, mission_active)
+        history = getattr(self, "task_history", None)
+        if history is not None:
+            history.observe(snapshot, mission_active)
         return mission_active
 
     def _retain_feature_capability_evidence(
@@ -3618,6 +3626,9 @@ class DreameLawnMowerCoordinator(
             checkpoint = getattr(self, "observation_checkpoint", None)
             if checkpoint is not None:
                 await checkpoint.async_close()
+            history = getattr(self, "task_history", None)
+            if history is not None:
+                await history.async_close()
 
     async def async_shutdown_for_home_assistant_stop(self) -> None:
         """Stop owned work and close the client without draining metadata."""
