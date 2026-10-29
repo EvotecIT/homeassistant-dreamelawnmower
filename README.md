@@ -7,55 +7,34 @@
 [![License](https://img.shields.io/github/license/EvotecIT/homeassistant-dreamelawnmower?style=for-the-badge)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/EvotecIT/homeassistant-dreamelawnmower?style=for-the-badge)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/stargazers)
 
-Requires **Home Assistant 2025.1.0 or newer**.
 
-## Overview
+Bring your Dreame or MOVA robotic mower into Home Assistant. Start, pause, and
+send it home, mow just the zone you pick, see where it is on your garden map,
+and look back at recent runs, all without opening the vendor app.
 
-Control and monitor Dreame and MOVA robotic lawn mowers through Home Assistant's
-`lawn_mower` entity. Start, pause, and dock the mower, manage supported schedules
-and mowing preferences, and add maps, mission progress, and camera views to your
-dashboard.
+![Dreame A2 in Home Assistant with the Lawn Mower Card](https://raw.githubusercontent.com/EvotecIT/lovelace-lawn-mower-card/main/assets/lawn-mower-card-dashboard-preview-light.png)
 
-- Mower state, battery, faults, rain protection, charging, and maintenance.
-- Map selection and targeted zone, spot, or edge mowing.
-- Native schedule switches, notifications, and automation helpers.
-- Task history with historical maps, photos, and recorded battery/settings data.
-- Wi-Fi and cellular signal diagnostics when the mower reports real readings.
-- Optional live video and on-demand 3D maps on supported mowers and hosts.
+*Shown with the separately installed [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card).
+The integration also works with standard Home Assistant cards.*
 
-Check the [supported mower list](docs/supported-mowers.md) before installing.
-Model, firmware, account region, and vendor provisioning affect advanced
-features. Map routes show observed movement, not verified cut-area coverage.
-See [task history and diagnostics](docs/task-history.md) for retention, privacy,
-and the limits of historical observations.
+## What you get
 
-## Sponsor
+- **Everyday control:** start, pause, and dock, plus mowing of a chosen zone,
+  spot, or edge.
+- **Know what it's doing:** state, battery, charging, rain protection, faults,
+  and maintenance.
+- **Your garden map** with the mower's live position, and an on-demand 3D view
+  on supported mowers.
+- **Schedules** you can switch on and off, plus notifications and ready-made
+  automations, such as skipping a run when the lawn is wet.
+- **History** of recent runs with their maps and, where available, photos and
+  battery use.
+- **Live camera** on supported mowers.
 
-Support development and maintenance through
-[GitHub Sponsors](https://github.com/sponsors/PrzemyslawKlys).
-Sponsorship is optional; these projects remain open source.
-
-## More for your Home Assistant home
-
-Other integrations and dashboards we maintain:
-
-- [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) — A dashboard for mower state, maps, and controls.
-  The [custom mower picture](docs/maps.md#appearance-and-rotation) also appears
-  on its interactive map and turns with the mower, using the integration's setting.
-- [KEF](https://github.com/EvotecIT/homeassistant-kef) — Local control for modern and legacy speaker families.
-- [Devialet](https://github.com/EvotecIT/homeassistant-devialet) — Local speaker control, with Dione support.
-- [Siegenia](https://github.com/EvotecIT/homeassistant-siegenia) — Local control for supported window controllers.
-- [EasyControlX](https://github.com/EvotecIT/homeassistant-easycontrolx) — Connect supported Windows and macOS hosts.
-- [Waste Pickup Planner](https://github.com/EvotecIT/lovelace-waste-pickup-planner) — Waste collection dates, bin overviews, cards, and badges.
-
-For a native app connected to the same Home Assistant setup:
-
-- [CasaRay](https://casaray.dev/) — rooms, devices, cameras, and home activity on
-  iPhone, iPad, and Mac.
-- [Tactra Remote](https://tactra.dev/) — media players, speakers, and TV controls
-  on iPhone, iPad, Apple Watch, and Mac.
-
-Neither app is required to use this project.
+Works with the same account you use in the Dreamehome or MOVAhome app. Check
+the [supported mower list](docs/supported-mowers.md) first: model, firmware,
+and account region decide which extras your mower gets. Requires
+**Home Assistant 2025.1.0 or newer**.
 
 ## Installation
 
@@ -152,9 +131,11 @@ See [live video setup](docs/live-video.md) before troubleshooting playback.
 | Schedule mowing around wet soil or irrigation without YAML | [Easy mowing setup](docs/soil-moisture-mowing.md) |
 | See the dashboard and device page | [Screenshots](docs/screenshots.md) |
 | Diagnose a problem | [Troubleshooting](docs/troubleshooting.md) |
+| Understand what task history keeps, and its limits | [Task history and diagnostics](docs/task-history.md) |
 | Check qualification evidence and remaining quality work | [Quality qualification](docs/quality.md) |
 
-Map display and selection are supported; editing no-go areas, virtual walls,
+Map routes show observed movement, not verified cut-area coverage. Map display
+and selection are supported; editing no-go areas, virtual walls,
 or garden geometry is not. Confirm the map and target before any mowing action,
 and keep movement and maintenance operations supervised.
 
@@ -172,3 +153,31 @@ Use the [development guide](docs/development.md) for checks and safe probes,
 the [Python library guide](docs/python-library.md) for scripts, and the
 [roadmap](docs/roadmap.md) for planned work. Protocol and video research belong
 in the contributor docs, not in normal setup.
+
+## Sponsor
+
+Support development and maintenance through
+[GitHub Sponsors](https://github.com/sponsors/PrzemyslawKlys).
+Sponsorship is optional; these projects remain open source.
+
+## More for your Home Assistant home
+
+Other integrations and dashboards we maintain:
+
+- [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) — A dashboard for mower state, maps, and controls.
+  The [custom mower picture](docs/maps.md#appearance-and-rotation) also appears
+  on its interactive map and turns with the mower, using the integration's setting.
+- [KEF](https://github.com/EvotecIT/homeassistant-kef) — Local control for modern and legacy speaker families.
+- [Devialet](https://github.com/EvotecIT/homeassistant-devialet) — Local speaker control, with Dione support.
+- [Siegenia](https://github.com/EvotecIT/homeassistant-siegenia) — Local control for supported window controllers.
+- [EasyControlX](https://github.com/EvotecIT/homeassistant-easycontrolx) — Connect supported Windows and macOS hosts.
+- [Waste Pickup Planner](https://github.com/EvotecIT/lovelace-waste-pickup-planner) — Waste collection dates, bin overviews, cards, and badges.
+
+For a native app connected to the same Home Assistant setup:
+
+- [CasaRay](https://casaray.dev/) — rooms, devices, cameras, and home activity on
+  iPhone, iPad, and Mac.
+- [Tactra Remote](https://tactra.dev/) — media players, speakers, and TV controls
+  on iPhone, iPad, Apple Watch, and Mac.
+
+Neither app is required to use this project.
