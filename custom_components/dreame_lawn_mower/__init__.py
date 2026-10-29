@@ -38,6 +38,8 @@ from .point_cloud_api import (
 )
 from .runtime_data import DreameLawnMowerConfigEntry, get_coordinator
 from .services import async_setup_services
+from .task_history_api import async_setup_task_history_api
+from .task_history_store import TaskHistoryOwner, async_remove_task_history
 from .video_lan_cache import DreameLawnMowerVideoLanCache, async_remove_video_lan_cache
 from .video_provisioning_cache import (
     DreameLawnMowerVideoProvisioningCache,
@@ -125,6 +127,8 @@ async def async_setup_entry(
             hass, entry.entry_id, coordinator
         )
         await coordinator.observation_checkpoint.async_load()
+        coordinator.task_history = TaskHistoryOwner(hass, coordinator)
+        await coordinator.task_history.async_load()
         try:
             await setup_cycle.measure("lan_video_cache", lan_cache.async_load)
         except Exception as err:  # noqa: BLE001 - cloud setup remains available.
@@ -159,6 +163,7 @@ async def async_setup_entry(
         entry.runtime_data = coordinator
         async_setup_point_cloud_api(hass)
         async_setup_mowing_map_api(hass)
+        async_setup_task_history_api(hass)
         coordinator.loaded_platforms = platforms
         await setup_cycle.measure(
             "platforms",
@@ -298,6 +303,7 @@ async def async_remove_entry(
     """Remove private cached evidence when its entry is deleted."""
     await async_remove_restart_preview(hass, entry)
     await async_remove_observation_checkpoint(hass, entry)
+    await async_remove_task_history(hass, entry)
     await async_remove_managed_mowing(hass, entry)
     await async_remove_video_lan_cache(hass, entry)
     await async_remove_video_provisioning_cache(hass, entry)

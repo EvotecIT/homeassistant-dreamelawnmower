@@ -8,8 +8,10 @@ from typing import Final, TypedDict
 
 from .device_code_semantics import mower_device_code, mower_device_code_name
 from .device_types import DreameMowerState
+from .link_signals import decode_link_signals
 from .models import DreameLawnMowerStatusBlob
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
+from .wire_values import normalize_byte_array as _normalize_byte_array
 
 MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
 MOWER_RUNTIME_STATUS_PROPERTY_KEY: Final[str] = "1.4"
@@ -395,6 +397,8 @@ def decode_mower_status_blob(
     runtime_telemetry = _decode_runtime_blob_candidates(raw, frame_valid=frame_valid)
     notes.extend(runtime_telemetry.pop("notes", ()))
 
+    signals = decode_link_signals(raw, property_key=property_key)
+
     return DreameLawnMowerStatusBlob(
         supported=True,
         source=source,
@@ -407,6 +411,10 @@ def decode_mower_status_blob(
         payload=raw[1:-1] if len(raw) >= 2 else (),
         bytes_by_index={str(index): item for index, item in enumerate(raw)},
         candidate_battery_level=candidate_battery_level,
+        wifi_signal_dbm=signals.wifi_signal_dbm,
+        cellular_signal_dbm=signals.cellular_signal_dbm,
+        cellular_module_installed=signals.cellular_module_installed,
+        cellular_plan_valid=signals.cellular_plan_valid,
         heartbeat_charging=heartbeat_charging,
         heartbeat_docking_state=heartbeat_docking_state,
         heartbeat_docking_state_name=heartbeat_docking_state_name,
@@ -694,28 +702,3 @@ def _signed_int16(low: int, high: int) -> int:
     if value & 0x8000:
         value -= 0x10000
     return value
-
-
-def _normalize_byte_array(value: object) -> tuple[int, ...] | None:
-    raw = value
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not (text.startswith("[") and text.endswith("]")):
-            return None
-        try:
-            raw = json.loads(text)
-        except json.JSONDecodeError:
-            return None
-
-    if isinstance(raw, bytes | bytearray):
-        return tuple(raw)
-
-    if not isinstance(raw, Sequence) or isinstance(raw, str | bytes | bytearray):
-        return None
-    if not raw:
-        return None
-    if not all(isinstance(item, int) and not isinstance(item, bool) for item in raw):
-        return None
-    if not all(0 <= item <= 255 for item in raw):
-        return None
-    return tuple(raw)

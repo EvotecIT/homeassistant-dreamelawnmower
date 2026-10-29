@@ -319,6 +319,7 @@ def render_vector_map_png(
     label_scale: float = 1.0,
     runtime_track_segments: Sequence[Sequence[tuple[int, int]]] | None = None,
     runtime_position: tuple[int, int] | None = None,
+    runtime_heading: float | None = None,
     position_status: str = "current",
     style: MapRenderStyle | None = None,
     zone_labels: bool = True,
@@ -442,7 +443,12 @@ def render_vector_map_png(
             if position_status == "last_known"
             else style
         )
-        draw_position_marker(image, draw, (px, py), marker_style)
+        draw_position_marker(
+            image, draw, (px, py), marker_style,
+            heading=(projection.heading(runtime_heading)
+                     if runtime_heading is not None and position_status == "current"
+                     else None),
+        )
         label = {
             "last_known": "Last known mower position",
             "known_dock": "Mower at observed dock",

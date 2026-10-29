@@ -3383,6 +3383,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             patch.object(
                 integration_module, "ObservationCheckpoint", return_value=cache
             ),
+            patch.object(integration_module, "TaskHistoryOwner", return_value=cache),
             patch.object(
                 integration_module, "async_remove_restart_preview", AsyncMock()
             ),
@@ -3403,6 +3404,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
             patch.object(integration_module, "async_setup_mowing_map_api"),
+            patch.object(integration_module, "async_setup_task_history_api"),
         ):
             try:
                 await async_setup_entry(hass, entry)
@@ -3467,6 +3469,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
             patch.object(
                 integration_module, "ObservationCheckpoint", return_value=cache
             ),
+            patch.object(integration_module, "TaskHistoryOwner", return_value=cache),
             patch.object(
                 integration_module, "async_remove_restart_preview", AsyncMock()
             ),
@@ -3487,6 +3490,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
             patch.object(integration_module, "async_setup_mowing_map_api"),
+            patch.object(integration_module, "async_setup_task_history_api"),
             patch.object(
                 integration_module,
                 "DreameLawnMowerNotificationManager",
@@ -3541,6 +3545,7 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
             patch.object(
                 integration_module, "ObservationCheckpoint", return_value=cache
             ),
+            patch.object(integration_module, "TaskHistoryOwner", return_value=cache),
             patch.object(
                 integration_module, "async_remove_restart_preview", AsyncMock()
             ),

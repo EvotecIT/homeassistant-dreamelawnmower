@@ -224,7 +224,7 @@ def _mowing_map_marker(
             "x": px,
             "y": py,
             "heading": (
-                (270 - retained_position.heading + scene.projection.rotation) % 360
+                scene.projection.heading(retained_position.heading)
             )
             if retained_position.heading is not None
             else None,
@@ -264,7 +264,7 @@ def _mowing_map_marker(
             "y": py,
             # The native X mirror reverses yaw. Screen angles are clockwise
             # from up, matching an upright SVG marker's rotation convention.
-            "heading": ((270 - cast(float, heading) + scene.projection.rotation) % 360)
+            "heading": scene.projection.heading(cast(float, heading))
             if _finite(heading)
             else None,
         }

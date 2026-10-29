@@ -91,6 +91,7 @@ from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
 from .real_scene_cache import real_scene_owner
 from .runtime_data import DreameLawnMowerConfigEntry
+from .task_history_api import task_history_api_path
 from .video_camera import DreameLawnMowerVideoCamera
 
 # Capture and stream owners manage concurrency; turn-off must reach their
@@ -291,6 +292,9 @@ class DreameLawnMowerMapCamera(
             self.coordinator
         )
         attributes["restart_preview"] = self._preview_saved_at is not None
+        attributes["task_history_api_path"] = task_history_api_path(
+            self.coordinator.entry.entry_id
+        )
         if self._supports_mowing_scene:
             attributes["mowing_map_api_path"] = mowing_map_api_path(
                 self.coordinator.entry.entry_id

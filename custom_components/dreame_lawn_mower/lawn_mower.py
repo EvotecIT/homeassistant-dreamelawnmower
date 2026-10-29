@@ -90,6 +90,7 @@ from .services import (
     preference_change_request,
 )
 from .session_timing import observed_mowing_time_attributes
+from .task_history_api import task_history_api_path
 
 # Vendor fault table: 27 FAULT_HUMAN_DETECTED.
 HUMAN_DETECTED_CODE = 27
@@ -431,6 +432,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             ),
             "connection_failure_count": (
                 getattr(self.coordinator, "connection_failure_count", 0)
+            ),
+            "task_history_api_path": task_history_api_path(
+                self.coordinator.entry.entry_id
             ),
             "connection_last_success_at": (
                 connection_last_success_at.isoformat()

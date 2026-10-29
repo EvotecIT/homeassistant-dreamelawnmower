@@ -39,6 +39,10 @@ class MapProjection:
         px, py = self.point_exact(x, y)
         return round(px), round(py)
 
+    def heading(self, native_heading: float) -> float:
+        """Convert native yaw to clockwise degrees from an upright marker."""
+        return (270 - native_heading + self.rotation) % 360
+
     def point_exact(self, x: float, y: float) -> tuple[float, float]:
         """Project a native point without pixel rounding, for raster layers."""
         return rotate_canvas_point_exact(

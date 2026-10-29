@@ -10,6 +10,7 @@ MOVA LiDAX Ultra 1000 (mova.mower.g2529c) for point patrol photos.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from collections.abc import Mapping
@@ -49,7 +50,8 @@ def is_session_photo_name(name: str) -> bool:
 def _summary_parts(object_name: str) -> tuple[str, str, str] | None:
     parts = object_name.split("/")
     if (
-        len(parts) < 3
+        len(object_name) > 2048
+        or len(parts) < 3
         or parts[0] != "ali_dreame"
         or any(not part or part in (".", "..") or "\\" in part for part in parts)
         or not parts[-1].endswith(".json")
@@ -68,6 +70,11 @@ class TaskSession:
     object_name: str
     task: int | None
     created_at_ms: int | None
+    started_at: int | None = None
+    duration_minutes: int | float | None = None
+    area_sqm: int | float | None = None
+    result: int | None = None
+    start_mode: int | None = None
 
 
 @dataclass(frozen=True)
@@ -100,15 +107,35 @@ def task_sessions_from_history(records: Any) -> list[TaskSession]:
             continue
         task = props.get(SESSION_TASK_PIID)
         created = record.get("createTime")
+        area = _event_number(props.get(3))
+        if area is not None and type(task) is int and task >= 100:
+            area /= 100
+        result = props.get(7)
+        if (type(task) is int and task < 100
+                and type(result) is int and result in (0, 3)):
+            result = 3 - result
         sessions.append(
             TaskSession(
                 object_name=object_name,
-                task=task if isinstance(task, int) else None,
-                created_at_ms=created if isinstance(created, int) else None,
+                task=task if type(task) is int and 0 <= task <= 1000 else None,
+                created_at_ms=created if type(created) is int
+                and 0 <= created <= 253402300799000 else None,
+                started_at=props.get(8) if type(props.get(8)) is int else None,
+                duration_minutes=_event_number(props.get(2)),
+                area_sqm=area,
+                result=result if type(result) is int else None,
+                start_mode=props.get(11) if type(props.get(11)) is int else None,
             )
         )
     sessions.sort(key=lambda item: item.created_at_ms or 0, reverse=True)
     return sessions
+
+
+def _event_number(value: Any) -> int | float | None:
+    if (type(value) in (int, float) and 0 <= value <= 1_000_000_000
+            and math.isfinite(value)):
+        return float(value)
+    return None
 
 
 def session_photo_object_name(session_object_name: str, file_name: str) -> str | None:

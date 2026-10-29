@@ -248,6 +248,7 @@ def geometry_map_view(
             label_scale=label_scale,
             runtime_track_segments=runtime_track_segments,
             runtime_position=runtime_position,
+            runtime_heading=(position.heading if position is not None else None),
             position_status=(
                 position.status if position is not None else "unavailable"
             ),
