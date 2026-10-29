@@ -101,6 +101,9 @@ def test_schedule_plan_entries_flatten_stable_switch_metadata() -> None:
             "weekdays": ["mon"],
             "start_times": ["08:15"],
             "task_count": 1,
+            "tasks": [
+                {"weekday": "mon", "start_time": "08:15", "end_time": "09:00"}
+            ],
         }
     ]
 

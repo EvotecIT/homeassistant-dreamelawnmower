@@ -496,7 +496,7 @@ class DreameLawnMowerSchedulePlanSwitch(DreameLawnMowerEntity, SwitchEntity):
 
 
 def schedule_plan_entries(value: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """Flatten decoded schedules into stable, user-facing plan controls."""
+    """Expose plan controls with both legacy summaries and per-day tasks."""
     if not isinstance(value, Mapping):
         return []
     result: list[dict[str, Any]] = []
@@ -517,6 +517,7 @@ def schedule_plan_entries(value: Mapping[str, Any] | None) -> list[dict[str, Any
                 continue
             starts: list[str] = []
             days: list[str] = []
+            plan_tasks: list[dict[str, Any]] = []
             task_count = 0
             for week in plan.get("weeks") or ():
                 if not isinstance(week, Mapping):
@@ -536,6 +537,21 @@ def schedule_plan_entries(value: Mapping[str, Any] | None) -> list[dict[str, Any
                     for task in tasks
                     if isinstance(task.get("start_time"), str)
                 )
+                day = week.get("week_day_name")
+                if isinstance(day, str):
+                    for task in tasks:
+                        start_time = task.get("start_time")
+                        if not isinstance(start_time, str):
+                            continue
+                        entry: dict[str, Any] = {
+                            "weekday": day, "start_time": start_time
+                        }
+                        if isinstance(task.get("end_time"), str):
+                            entry["end_time"] = task["end_time"]
+                        task_id = task.get("task_id")
+                        if isinstance(task_id, int) and not isinstance(task_id, bool):
+                            entry["task_id"] = task_id
+                        plan_tasks.append(entry)
             name = plan.get("name")
             result.append(
                 {
@@ -549,6 +565,7 @@ def schedule_plan_entries(value: Mapping[str, Any] | None) -> list[dict[str, Any
                     "weekdays": days,
                     "start_times": starts,
                     "task_count": task_count,
+                    "tasks": plan_tasks,
                 }
             )
     return result
