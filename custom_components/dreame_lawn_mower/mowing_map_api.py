@@ -7,6 +7,7 @@ import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -18,6 +19,7 @@ from homeassistant.helpers.http import HomeAssistantView
 from .const import (
     CONF_MAP_BACKGROUND,
     CONF_MAP_LABEL_SCALE,
+    CONF_MAP_MARKER_IMAGE,
     DEFAULT_MAP_BACKGROUND,
     DEFAULT_MAP_LABEL_SCALE,
     DOMAIN,
@@ -28,6 +30,7 @@ from .dreame_lawn_mower_client.map_inventory import (
     selected_map_revision,
 )
 from .dreame_lawn_mower_client.map_projection import MapProjection
+from .dreame_lawn_mower_client.map_visuals import map_marker_image_path
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .dreame_lawn_mower_client.real_scene import RealSceneImage, paint_real_scene
 from .dreame_lawn_mower_client.zone_mowing_history import (
@@ -316,6 +319,14 @@ class MowingMapView(HomeAssistantView):
         self._api.authorize(request, entry_id)
         entry = await self._api.scene(entry_id)
         scene = entry.scene
+        marker_image_path = None
+        configured_marker = entry.coordinator.entry.options.get(CONF_MAP_MARKER_IMAGE)
+        if configured_marker:
+            marker_image_path = await self._api.hass.async_add_executor_job(
+                map_marker_image_path,
+                Path(self._api.hass.config.path("www")),
+                configured_marker,
+            )
         return web.json_response(
             {
                 "schema_version": 1,
@@ -326,6 +337,7 @@ class MowingMapView(HomeAssistantView):
                 ),
                 "map_id": scene.map_id,
                 "name": scene.name,
+                "marker_image_path": marker_image_path,
                 "width": scene.projection.width,
                 "height": scene.projection.height,
                 "background_path": (

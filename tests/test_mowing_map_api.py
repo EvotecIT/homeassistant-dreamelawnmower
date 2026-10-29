@@ -10,7 +10,10 @@ from aiohttp import web
 
 from custom_components.dreame_lawn_mower import mowing_map_api as module
 from custom_components.dreame_lawn_mower import real_scene_cache
-from custom_components.dreame_lawn_mower.const import CONF_GEOREFERENCE
+from custom_components.dreame_lawn_mower.const import (
+    CONF_GEOREFERENCE,
+    CONF_MAP_MARKER_IMAGE,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_projection
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
     MowingMapScene,
@@ -450,3 +453,52 @@ def test_scene_json_without_zones_publishes_an_empty_list(monkeypatch):
         return json.loads((await module.MowingMapView(api).get({}, "entry")).body)
 
     assert asyncio.run(run())["zones"] == []
+
+
+@pytest.mark.parametrize(
+    "configured,expected",
+    [
+        (None, None),
+        ("mower/marker.png", "/local/mower/marker.png"),
+        (" /local/mower/marker.png ", "/local/mower/marker.png"),
+        ("mower/my mower.webp", "/local/mower/my%20mower.webp"),
+        ("mower/limit.JPG", "/local/mower/limit.JPG"),
+        ("../secret.png", None),
+        ("mower/../secret.png", None),
+        ("/tmp/secret.png", None),
+        ("https://example.com/mower.png", None),
+        ("//example.com/mower.png", None),
+        ("mower/missing.png", None),
+        ("mower/marker.svg", None),
+        ("mower/oversized.png", None),
+        ("mower/directory.png", None),
+    ],
+)
+def test_scene_json_shares_only_validated_local_marker(
+    monkeypatch, tmp_path, configured, expected,
+):
+    www = tmp_path / "www"
+    mower = www / "mower"
+    mower.mkdir(parents=True)
+    (mower / "marker.png").write_bytes(b"marker")
+    (mower / "my mower.webp").write_bytes(b"marker")
+    (mower / "limit.JPG").write_bytes(b"x" * (1024 * 1024))
+    (mower / "marker.svg").write_text("<svg/>")
+    (mower / "oversized.png").write_bytes(b"x" * (1024 * 1024 + 1))
+    (mower / "directory.png").mkdir()
+    (www / "secret.png").write_bytes(b"private")
+    (tmp_path / "secret.png").write_bytes(b"private")
+
+    async def run():
+        hass, coordinator, api = environment(AsyncMock(return_value=scene()))
+        hass.config = SimpleNamespace(path=lambda name: str(tmp_path / name))
+        hass.async_add_executor_job = AsyncMock(side_effect=asyncio.to_thread)
+        coordinator.entry.options[CONF_MAP_MARKER_IMAGE] = configured
+        coordinator.client.mowing_map_runtime_overlay = Mock(return_value={})
+        monkeypatch.setattr(api, "authorize", lambda request, entry: coordinator)
+        payload = json.loads((await module.MowingMapView(api).get({}, "entry")).body)
+        assert payload["marker_image_path"] == expected
+        if configured:
+            hass.async_add_executor_job.assert_awaited_once()
+
+    asyncio.run(run())

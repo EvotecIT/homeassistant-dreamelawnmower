@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from .map_drawing import render_legacy_mowing_path, render_legacy_navigation_paths
+from .map_visuals import render_custom_marker
 import io
 import math
 import time
@@ -3057,8 +3058,6 @@ class DreameMowerMapRenderer:
             if self.icon_set == 2 or (self._robot_type == RobotType.VSLAM and self.icon_set == 3)
             else icon_size
         )
-        if self.presentation_marker_image is not None:
-            self._robot_icon = self.presentation_marker_image
         if self._robot_icon is None:
             if self.icon_set == 2:
                 if self._robot_type == RobotType.VSLAM:
@@ -3089,10 +3088,19 @@ class DreameMowerMapRenderer:
                 else:
                     self._robot_icon = enhancer.enhance(0.9)
 
-        icon = self._robot_icon.resize(
-            (robot_icon_size, robot_icon_size),
-            resample=Image.Resampling.NEAREST,
-        ).rotate(robot_position.a if robot_position.a is not None else 0, expand=1)
+        if self.presentation_marker_image is not None:
+            # Custom artwork points up; bundled artwork uses its own baseline.
+            icon = render_custom_marker(
+                self.presentation_marker_image,
+                robot_icon_size,
+                heading=(270 - robot_position.a) % 360
+                if robot_position.a is not None else None,
+            )
+        else:
+            icon = self._robot_icon.resize(
+                (robot_icon_size, robot_icon_size),
+                resample=Image.Resampling.NEAREST,
+            ).rotate(robot_position.a if robot_position.a is not None else 0, expand=1)
         point = robot_position.to_img(dimensions)
 
         if not self._low_memory:
