@@ -7,6 +7,8 @@
 [![License](https://img.shields.io/github/license/EvotecIT/homeassistant-dreamelawnmower?style=for-the-badge)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/EvotecIT/homeassistant-dreamelawnmower?style=for-the-badge)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/stargazers)
 
+Requires **Home Assistant 2025.1.0 or newer**.
+
 ## Overview
 
 Control and monitor Dreame and MOVA robotic lawn mowers through Home Assistant's
@@ -103,8 +105,9 @@ to find the package installer error and check DNS connectivity.
 2. Open **Settings → Devices & services → Dreame Lawn Mower**. Open the menu
    for the mower's integration entry and choose **Delete**. Repeat for each
    mower you want to remove.
-3. To uninstall the integration completely, remove **Dreame Lawn Mower** in
-   HACS after deleting all its entries. For a manual installation, remove
+3. After deleting all its entries, uninstall **Dreame Lawn Mower** through
+   **Settings → Marketplace** on HA 2026.11 or newer, or through HACS on older HA
+   versions. For a manual installation, remove
    `config/custom_components/dreame_lawn_mower`. Restart Home Assistant.
 
 Deleting an entry removes its saved map preview, observation history, video
