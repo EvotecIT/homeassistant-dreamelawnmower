@@ -534,7 +534,9 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
                 debug_ota_catalog = {
                     "source": "debug_ota_catalog",
                     "available": False,
-                    "errors": [{"stage": "fetch", "error": str(err)}],
+                    "status": "disabled",
+                    "reason": "source_no_longer_trusted",
+                    "errors": [{"stage": "disabled", "error": str(err)}],
                 }
 
         return firmware_update_support_from_device(

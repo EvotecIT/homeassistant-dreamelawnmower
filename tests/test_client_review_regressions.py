@@ -537,6 +537,8 @@ def test_get_firmware_update_support_reports_retired_catalog_when_requested(
     assert result.evidence["debug_ota_catalog"] == {
         "source": "debug_ota_catalog",
         "available": False,
+        "status": "disabled",
+        "reason": "source_no_longer_trusted",
         "errors": {"type": "array", "count": 1},
     }
 

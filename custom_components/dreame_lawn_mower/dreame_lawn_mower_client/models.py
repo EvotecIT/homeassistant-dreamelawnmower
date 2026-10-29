@@ -1673,6 +1673,8 @@ def firmware_update_support_from_device(
             for key in (
                 "source",
                 "available",
+                "status",
+                "reason",
                 "model_name",
                 "current_version",
                 "current_version_present",

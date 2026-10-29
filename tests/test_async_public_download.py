@@ -134,6 +134,8 @@ def test_retired_catalog_rejects_reads_before_network_or_device_access(
             monkeypatch.setattr(client, "_sync_update_device", refresh)
             async_refresh = AsyncMock(side_effect=AssertionError("unexpected refresh"))
             monkeypatch.setattr(client, "_async_update_device", async_refresh)
+            ensure_device = Mock(side_effect=AssertionError("unexpected device access"))
+            monkeypatch.setattr(client, "_ensure_device", ensure_device)
             try:
                 with pytest.raises(DreameLawnMowerConnectionError,
                                    match="disabled.*no longer trusted"):
@@ -147,6 +149,7 @@ def test_retired_catalog_rejects_reads_before_network_or_device_access(
                         )
                 refresh.assert_not_called()
                 async_refresh.assert_not_awaited()
+                ensure_device.assert_not_called()
                 download.assert_not_awaited()
                 sync_download.assert_not_called()
                 assert not client._cloud_read_tasks
@@ -171,8 +174,11 @@ def test_firmware_support_retains_approved_evidence_when_retired_catalog_request
                 )
                 assert result.current_version == "1.0"
                 assert result.debug_catalog_available is False
+                assert result.update_available is False
                 catalog = result.evidence["debug_ota_catalog"]
                 assert catalog["available"] is False
+                assert catalog["status"] == "disabled"
+                assert catalog["reason"] == "source_no_longer_trusted"
                 assert catalog["errors"] == {"type": "array", "count": 1}
                 assert not result.debug_catalog_latest_release_candidates
                 client.async_get_batch_ota_info.assert_awaited_once()
