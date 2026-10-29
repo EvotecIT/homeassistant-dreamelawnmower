@@ -65,7 +65,6 @@ EXPECTED_HISTORICAL_CLIENT_EXPORTS = frozenset(
     build_camera_probe_payload
     build_cloud_property_summary
     build_cms_set_request
-    build_debug_ota_catalog_url
     build_edge_mowing_request
     build_map_probe_payload
     build_operation_stage_diagnostics

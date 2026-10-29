@@ -3,7 +3,6 @@
 import dreame_lawn_mower_client.client as client_module
 from dreame_lawn_mower_client import (
     CAMERA_PROBE_PROPERTY_KEYS,
-    DEBUG_OTA_LIST_URL,
     DEBUG_OTA_TRACKS,
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
@@ -53,7 +52,6 @@ from dreame_lawn_mower_client import (
     build_cloud_property_history_summary,
     build_cloud_property_summary,
     build_cms_set_request,
-    build_debug_ota_catalog_url,
     build_jadx_command,
     build_map_probe_payload,
     build_schedule_enable_status_request,
@@ -169,7 +167,6 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(analyze_dreamehome_assets)
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
-    assert callable(build_debug_ota_catalog_url)
     assert callable(build_cloud_key_definition_summary)
     assert callable(build_cloud_property_history_summary)
     assert callable(build_cloud_property_summary)
@@ -193,7 +190,6 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(summarize_mowing_preference_info)
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
     assert "BUILD" in DEBUG_OTA_TRACKS
-    assert "https://ota.tsingting.tech/api/version/" in DEBUG_OTA_LIST_URL
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert "object_name" in DEFAULT_DREAMEHOME_ASSET_TERMS

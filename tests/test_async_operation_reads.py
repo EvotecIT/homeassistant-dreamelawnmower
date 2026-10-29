@@ -88,7 +88,7 @@ def test_operation_snapshot_refreshes_once_and_retains_partial_sections(
                     assert result["firmware_update"] == firmware
                     client.async_get_firmware_update_support.assert_awaited_once_with(
                         refresh=False, include_cloud=True,
-                        include_debug_ota_catalog=True, language="en",
+                        include_debug_ota_catalog=False, language="en",
                     )
                     assert len(property_reads) == 1
                 else:

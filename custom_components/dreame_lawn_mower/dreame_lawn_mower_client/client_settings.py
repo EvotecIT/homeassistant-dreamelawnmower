@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -25,16 +21,11 @@ from .client_map_helpers import (
 from .client_settings_helpers import (
     _batch_ota_keys,
     _batch_settings_keys,
-    _debug_ota_model_name,
 )
 from .client_shared_helpers import (
     _positive_int,
 )
 from .client_transport import _DreameLawnMowerClientTransport
-from .debug_ota_catalog import (
-    build_debug_ota_catalog_url,
-    normalize_debug_ota_catalog_payload,
-)
 from .device_settings_read_plan import read_maintenance, read_voice
 from .exceptions import (
     DreameLawnMowerConnectionError,
@@ -46,9 +37,6 @@ from .maintenance_reset_plan import plan_maintenance_reset, run_maintenance_rese
 from .mowing_preferences_read_plan import (
     read_mowing_preferences,
     read_preference_map_indices,
-)
-from .payload_utils import (
-    _as_optional_text,
 )
 from .preference_write_plan import plan_preference_update
 from .preference_write_transport import run_preference_write
@@ -177,41 +165,10 @@ class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
         current_version: str | None = None,
         include_raw: bool = False,
     ) -> dict[str, Any]:
-        """Fetch the public debug/manual OTA catalog for the mower model."""
-        short_model = _debug_ota_model_name(model_name or self._descriptor.model)
-        if not short_model:
-            raise DreameLawnMowerConnectionError(
-                "Could not determine a short model name for the debug OTA catalog."
-            )
-
-        resolved_current_version = current_version
-        if resolved_current_version is None:
-            try:
-                device = self._sync_update_device()
-            except DreameLawnMowerConnectionError:
-                device = None
-            if device is not None:
-                resolved_current_version = _as_optional_text(
-                    getattr(getattr(device, "info", None), "firmware_version", None)
-                )
-
-        url = build_debug_ota_catalog_url(short_model)
-        try:
-            with urllib.request.urlopen(url, timeout=20) as response:
-                payload = json.load(response)
-        except Exception as err:  # noqa: BLE001 - network/protocol errors vary here
-            raise DreameLawnMowerConnectionError(
-                f"Debug OTA catalog fetch failed: {err}"
-            ) from err
-
-        result = normalize_debug_ota_catalog_payload(
-            payload,
-            model_name=short_model,
-            current_version=resolved_current_version,
-            include_raw=include_raw,
+        """Reject the retired catalog without accessing the device or network."""
+        raise DreameLawnMowerConnectionError(
+            "Debug OTA catalog disabled: the source is no longer trusted."
         )
-        result["url"] = url
-        return result
 
     def _sync_get_maintenance_status(
         self,

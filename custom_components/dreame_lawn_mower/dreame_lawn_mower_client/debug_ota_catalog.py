@@ -1,11 +1,10 @@
-"""Helpers for Dreame's debug/manual OTA catalog endpoint."""
+"""Offline helpers for historical debug/manual OTA catalog captures."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-DEBUG_OTA_LIST_URL = "https://ota.tsingting.tech/api/version/{model_name}/?name={model_name}"
 DEBUG_OTA_TRACKS = ("BUILD", "FEATURE", "PREBUILD")
 _CHANGELOG_FIELDS = (
     "changelog",
@@ -16,11 +15,6 @@ _CHANGELOG_FIELDS = (
 )
 
 
-def build_debug_ota_catalog_url(model_name: str) -> str:
-    """Return the public debug OTA catalog URL for a short model name."""
-    return DEBUG_OTA_LIST_URL.format(model_name=model_name)
-
-
 def normalize_debug_ota_catalog_payload(
     payload: Mapping[str, Any],
     *,
@@ -28,7 +22,7 @@ def normalize_debug_ota_catalog_payload(
     current_version: str | None = None,
     include_raw: bool = False,
 ) -> dict[str, Any]:
-    """Summarize the public debug OTA catalog without treating it as approved OTA."""
+    """Summarize a historical capture; never use it to approve firmware."""
     result: dict[str, Any] = {
         "source": "debug_ota_catalog",
         "available": False,

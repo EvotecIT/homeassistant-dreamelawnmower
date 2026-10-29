@@ -73,8 +73,9 @@ operations behind clear boundaries:
   supported AWD families use electronic 3–10 cm adjustment. Unknown models keep
   the conservative 3–7 cm range until their identity is confirmed.
 - Firmware updates use the app-approved target and confirmation flow. Release
-  notes remain best-effort, and debug catalog candidates stay diagnostic rather
-  than being presented as approved updates.
+  notes remain best-effort. The former public debug/manual OTA catalog is
+  disabled because its source is no longer trusted; diagnostics use authenticated
+  vendor firmware checks and mower-reported OTA state.
 - Manual driving remains a supervised diagnostic action with strict mower-state
   and battery guards.
 

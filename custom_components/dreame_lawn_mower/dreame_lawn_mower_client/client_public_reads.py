@@ -12,64 +12,11 @@ from .client_map_helpers import (
     _key_define_from_device_list_page,
     _key_define_from_mapping,
 )
-from .client_settings_helpers import _debug_ota_model_name
-from .client_state_reads import async_read_device_state
-from .debug_ota_catalog import (
-    build_debug_ota_catalog_url,
-    normalize_debug_ota_catalog_payload,
-)
 from .exceptions import DreameLawnMowerConnectionError
-from .payload_utils import _as_optional_text
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
     from .cloud_session import DreameCloudSession
-
-
-async def async_read_debug_catalog(
-    client: DreameLawnMowerClient, *, model_name: str | None,
-    current_version: str | None, include_raw: bool,
-) -> dict[str, Any]:
-    """Preserve catalog evidence with native refresh and anonymous download."""
-    short_model = _debug_ota_model_name(model_name or client._descriptor.model)
-    if not short_model:
-        raise DreameLawnMowerConnectionError(
-            "Could not determine a short model name for the debug OTA catalog.",
-        )
-
-    async def read(cloud: DreameCloudSession) -> dict[str, Any]:
-        version = current_version
-        if version is None:
-            try:
-                version = await async_read_device_state(
-                    client,
-                    lambda device: _as_optional_text(
-                        getattr(
-                            getattr(device, "info", None), "firmware_version", None,
-                        ),
-                    ),
-                    refresh=True,
-                )
-            except DreameLawnMowerConnectionError:
-                pass
-        url = build_debug_ota_catalog_url(short_model)
-        content = await cloud.async_get_public_file(url, deadline=time.monotonic() + 20)
-        try:
-            payload = json.loads(content)
-        except (ValueError, UnicodeError):
-            raise DreameLawnMowerConnectionError(
-                "Debug OTA catalog is not valid JSON",
-            ) from None
-        if not isinstance(payload, Mapping):
-            raise DreameLawnMowerConnectionError("Debug OTA catalog is not an object")
-        result = normalize_debug_ota_catalog_payload(
-            payload, model_name=short_model, current_version=version,
-            include_raw=include_raw,
-        )
-        result["url"] = url
-        return result
-
-    return await client._async_cloud_read(read)
 
 
 async def async_read_key_definition(

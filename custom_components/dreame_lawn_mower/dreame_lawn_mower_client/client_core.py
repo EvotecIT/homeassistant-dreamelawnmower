@@ -719,7 +719,7 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
                 payload["firmware_update"] = self._sync_get_firmware_update_support(
                     refresh=False,
                     include_cloud=True,
-                    include_debug_ota_catalog=True,
+                    include_debug_ota_catalog=False,
                     language=language,
                 ).as_dict()
             except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
