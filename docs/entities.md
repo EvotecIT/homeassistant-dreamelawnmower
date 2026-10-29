@@ -93,6 +93,40 @@ reporting success.
 **Find My Mower** makes the mower play its locator sound, like the app's
 Find my mower control. It does not move the mower or change its task.
 
+## Schedule plan switches
+
+Each mower-native schedule plan switch exposes `schedule_control: true`,
+`map_index`, `map_label`, `plan_id`, `name`, `enabled`, and `version`.
+Its `tasks` attribute preserves the weekday and start time for every decoded
+task, including multiple tasks on the same day:
+
+```yaml
+tasks:
+  - weekday: mon
+    start_time: "08:00"
+    end_time: "09:00"
+  - weekday: mon
+    start_time: "12:30"
+    end_time: "13:30"
+  - weekday: wed
+    start_time: "17:00"
+    task_id: 7
+```
+
+`weekday` uses `sun`, `mon`, `tue`, `wed`, `thu`, `fri`, or `sat`.
+Times use the mower's local weekly schedule in `HH:MM` format. `end_time` is
+included only when reported; start-only schedules do not have an inferred end.
+`task_id` is included only when supplied by the schedule protocol. Tasks retain
+the decoded day/task order. Disabled plans keep their tasks so cards can show
+their configured schedule without treating it as active. Empty plans expose
+`tasks: []`; unused, unnamed, disabled plan slots still have no switch.
+
+The existing `weekdays`, `start_times`, and `task_count` attributes retain their
+values and ordering for compatibility. `weekdays` lists days containing tasks,
+while `start_times` lists task starts across the whole plan; those lists do not
+encode a day/time pairing. Cards should use `tasks` for exact per-day times and
+can fall back to the older summaries when `tasks` is absent.
+
 ## Mowing time
 
 **Current Mowing Time** is reported by the mower. It remains unavailable when
