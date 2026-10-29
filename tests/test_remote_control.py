@@ -284,9 +284,17 @@ def test_remote_control_step_validation_rejects_unsafe_values() -> None:
         client._sync_remote_control_move_step(rotation=0, velocity=1001, prompt=False)
 
 
-def test_operation_snapshot_combines_safe_field_test_evidence() -> None:
+@pytest.mark.parametrize("include_firmware", [False, True])
+def test_operation_snapshot_combines_safe_field_test_evidence(
+    monkeypatch, include_firmware,
+) -> None:
+    from unittest.mock import Mock
+
     device = _FakeRemoteControlDevice()
     client = _client_with_device(device)
+    firmware = {"available": True}
+    firmware_read = Mock(return_value=SimpleNamespace(as_dict=lambda: firmware))
+    monkeypatch.setattr(client, "_sync_get_firmware_update_support", firmware_read)
 
     payload = client._sync_capture_operation_snapshot(
         "before_drive",
@@ -294,11 +302,21 @@ def test_operation_snapshot_combines_safe_field_test_evidence() -> None:
         False,
         True,
         False,
-        False,
+        include_firmware,
         1.0,
         0.1,
         "en",
     )
+
+    if include_firmware:
+        assert payload["firmware_update"] == firmware
+        firmware_read.assert_called_once_with(
+            refresh=False, include_cloud=True,
+            include_debug_ota_catalog=False, language="en",
+        )
+    else:
+        firmware_read.assert_not_called()
+        assert "firmware_update" not in payload
 
     assert payload["label"] == "before_drive"
     assert payload["errors"] == []

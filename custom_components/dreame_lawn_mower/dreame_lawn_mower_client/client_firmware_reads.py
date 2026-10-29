@@ -98,7 +98,9 @@ async def async_read_firmware_support(
                 debug_ota_catalog = {
                     "source": "debug_ota_catalog",
                     "available": False,
-                    "errors": [{"stage": "fetch", "error": str(err)}],
+                    "status": "disabled",
+                    "reason": "source_no_longer_trusted",
+                    "errors": [{"stage": "disabled", "error": str(err)}],
                 }
 
         def build() -> DreameLawnMowerFirmwareUpdateSupport:

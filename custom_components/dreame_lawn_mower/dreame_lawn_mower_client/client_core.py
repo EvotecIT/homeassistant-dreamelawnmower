@@ -534,7 +534,9 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
                 debug_ota_catalog = {
                     "source": "debug_ota_catalog",
                     "available": False,
-                    "errors": [{"stage": "fetch", "error": str(err)}],
+                    "status": "disabled",
+                    "reason": "source_no_longer_trusted",
+                    "errors": [{"stage": "disabled", "error": str(err)}],
                 }
 
         return firmware_update_support_from_device(
@@ -719,7 +721,7 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
                 payload["firmware_update"] = self._sync_get_firmware_update_support(
                     refresh=False,
                     include_cloud=True,
-                    include_debug_ota_catalog=True,
+                    include_debug_ota_catalog=False,
                     language=language,
                 ).as_dict()
             except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence

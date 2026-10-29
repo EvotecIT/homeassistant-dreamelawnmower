@@ -502,7 +502,7 @@ def test_get_firmware_update_support_skips_debug_catalog_by_default(
     assert "debug_ota_catalog" not in result.evidence
 
 
-def test_get_firmware_update_support_fetches_debug_catalog_when_requested(
+def test_get_firmware_update_support_reports_retired_catalog_when_requested(
     monkeypatch,
 ) -> None:
     client = _client()
@@ -530,21 +530,16 @@ def test_get_firmware_update_support_fetches_debug_catalog_when_requested(
             "update_available": False,
         },
     )
-    monkeypatch.setattr(
-        client,
-        "_sync_get_debug_ota_catalog",
-        lambda **kwargs: {
-            "source": "debug_ota_catalog",
-            "available": True,
-        },
-    )
-
     result = client._sync_get_firmware_update_support(include_debug_ota_catalog=True)
 
-    assert result.debug_catalog_available is True
+    assert result.debug_catalog_available is False
+    assert not result.debug_catalog_latest_release_candidates
     assert result.evidence["debug_ota_catalog"] == {
         "source": "debug_ota_catalog",
-        "available": True,
+        "available": False,
+        "status": "disabled",
+        "reason": "source_no_longer_trusted",
+        "errors": {"type": "array", "count": 1},
     }
 
 

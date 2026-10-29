@@ -11,7 +11,6 @@ import pytest
 from aiohttp import BasicAuth, ClientSession, web
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
-    client_public_reads,
     public_download,
 )
 
@@ -111,72 +110,80 @@ def test_download_limits_deadlines_retry_and_redirect_credentials(monkeypatch, m
     asyncio.run(scenario())
 
 
-def test_public_catalog_preserves_summary_without_vendor_login(monkeypatch):
-    calls = []
-    payload = {"data": {"BUILD": [{"version": "1.0"}], "FEATURE": [], "PREBUILD": []}}
+@pytest.mark.parametrize("api", ["async", "sync"])
+@pytest.mark.parametrize("version", [None, "1.0"])
+def test_retired_catalog_rejects_reads_before_network_or_device_access(
+    monkeypatch, api, version,
+):
+    from unittest.mock import Mock
 
-    async def handler(request):
-        calls.append(request.path)
-        assert "Authorization" not in request.headers
-        return web.json_response(payload)
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        cloud_session,
+    )
+
+    download = AsyncMock(side_effect=AssertionError("unexpected public download"))
+    sync_download = Mock(side_effect=AssertionError("unexpected sync download"))
+    monkeypatch.setattr(cloud_session.DreameCloudSession, "async_get_public_file",
+                        download)
+    monkeypatch.setattr("urllib.request.urlopen", sync_download)
 
     async def scenario():
-        async with server(monkeypatch, handler) as url, ClientSession() as session:
-            monkeypatch.setattr(client_public_reads, "build_debug_ota_catalog_url",
-                                lambda model: url + "/" + model)
+        async with ClientSession() as session:
             client = make_client(session)
+            refresh = Mock(side_effect=AssertionError("unexpected device refresh"))
+            monkeypatch.setattr(client, "_sync_update_device", refresh)
+            async_refresh = AsyncMock(side_effect=AssertionError("unexpected refresh"))
+            monkeypatch.setattr(client, "_async_update_device", async_refresh)
+            ensure_device = Mock(side_effect=AssertionError("unexpected device access"))
+            monkeypatch.setattr(client, "_ensure_device", ensure_device)
             try:
-                result = await client.async_get_debug_ota_catalog(
-                    current_version="1.0", include_raw=True,
-                )
-                assert result["model_name"] == "g2408"
-                assert result["current_version_present"] is True
-                assert result["raw"] == payload
-                assert result["warnings"] == [
-                    "debug_catalog_unverified", "debug_catalog_not_device_approved",
-                    "debug_catalog_has_no_changelog",
-                ]
-                assert calls == ["/g2408"]
+                with pytest.raises(DreameLawnMowerConnectionError,
+                                   match="disabled.*no longer trusted"):
+                    if api == "async":
+                        await client.async_get_debug_ota_catalog(
+                            current_version=version, include_raw=True,
+                        )
+                    else:
+                        client._sync_get_debug_ota_catalog(
+                            current_version=version, include_raw=True,
+                        )
+                refresh.assert_not_called()
+                async_refresh.assert_not_awaited()
+                ensure_device.assert_not_called()
+                download.assert_not_awaited()
+                sync_download.assert_not_called()
+                assert not client._cloud_read_tasks
+                assert not session.closed
             finally:
                 await client.async_close()
-            assert not session.closed
 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("stop", ["cancel", "close"])
-def test_firmware_catalog_download_cancels_without_retained_workers(monkeypatch, stop):
+def test_firmware_support_retains_approved_evidence_when_retired_catalog_requested():
     async def scenario():
-        entered = asyncio.Event()
-        release = asyncio.Event()
-
-        async def handler(request):
-            entered.set()
-            await release.wait()
-            return web.json_response({"data": {}})
-
-        async with server(monkeypatch, handler) as url, ClientSession() as session:
-            monkeypatch.setattr(client_public_reads, "build_debug_ota_catalog_url",
-                                lambda model: url)
+        async with ClientSession() as session:
             client = make_client(session)
-            client.async_get_batch_ota_info = AsyncMock(return_value={})
+            client.async_get_batch_ota_info = AsyncMock(return_value={
+                "available": True, "update_available": False,
+            })
             client._device.info = type("Info", (), {"firmware_version": "1.0"})()
-            task = asyncio.create_task(client.async_get_firmware_update_support(
-                include_cloud=False, include_debug_ota_catalog=True,
-            ))
             try:
-                await asyncio.wait_for(entered.wait(), 2)
-                if stop == "close":
-                    await asyncio.wait_for(client.async_close(), 2)
-                else:
-                    task.cancel()
-                with pytest.raises(asyncio.CancelledError):
-                    await asyncio.wait_for(task, 2)
+                result = await client.async_get_firmware_update_support(
+                    include_cloud=False, include_debug_ota_catalog=True,
+                )
+                assert result.current_version == "1.0"
+                assert result.debug_catalog_available is False
+                assert result.update_available is False
+                catalog = result.evidence["debug_ota_catalog"]
+                assert catalog["available"] is False
+                assert catalog["status"] == "disabled"
+                assert catalog["reason"] == "source_no_longer_trusted"
+                assert catalog["errors"] == {"type": "array", "count": 1}
+                assert not result.debug_catalog_latest_release_candidates
+                client.async_get_batch_ota_info.assert_awaited_once()
                 assert not client._cloud_read_tasks
-                assert not session.closed
             finally:
-                release.set()
-                await asyncio.gather(task, return_exceptions=True)
                 await client.async_close()
 
     asyncio.run(scenario())

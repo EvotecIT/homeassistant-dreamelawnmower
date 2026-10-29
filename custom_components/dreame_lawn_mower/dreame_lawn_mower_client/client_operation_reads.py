@@ -62,7 +62,7 @@ async def async_capture_operation_snapshot(
         if include_firmware:
             try:
                 firmware = await client.async_get_firmware_update_support(
-                    refresh=False, include_cloud=True, include_debug_ota_catalog=True,
+                    refresh=False, include_cloud=True, include_debug_ota_catalog=False,
                     language=language,
                 )
                 payload["firmware_update"] = firmware.as_dict()

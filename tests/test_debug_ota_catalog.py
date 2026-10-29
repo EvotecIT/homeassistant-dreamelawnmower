@@ -1,16 +1,8 @@
 """Tests for the debug/manual OTA catalog summary helpers."""
 
 from dreame_lawn_mower_client.debug_ota_catalog import (
-    build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
-
-
-def test_build_debug_ota_catalog_url() -> None:
-    assert (
-        build_debug_ota_catalog_url("g2408")
-        == "https://ota.tsingting.tech/api/version/g2408/?name=g2408"
-    )
 
 
 def test_normalize_debug_ota_catalog_payload_summarizes_tracks() -> None:

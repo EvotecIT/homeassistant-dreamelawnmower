@@ -101,9 +101,6 @@ from .cloud_session import DreameCloudSession as _DreameCloudSession
 from .deadline import DeadlineExceededError as DeadlineExceededError
 from .deadline import run_with_deadline as run_with_deadline
 from .debug_ota_catalog import (
-    build_debug_ota_catalog_url as build_debug_ota_catalog_url,
-)
-from .debug_ota_catalog import (
     normalize_debug_ota_catalog_payload as normalize_debug_ota_catalog_payload,
 )
 from .docking import SESSION_STATES_TO_END as _SESSION_STATES_TO_END
@@ -2403,12 +2400,13 @@ class DreameLawnMowerClient(
         current_version: str | None = None,
         include_raw: bool = False,
     ) -> dict[str, Any]:
-        """Fetch the public debug/manual OTA catalog for the mower model."""
-        from .client_public_reads import async_read_debug_catalog
+        """Reject retired catalog reads without accessing the device or network.
 
-        return await async_read_debug_catalog(
-            self, model_name=model_name, current_version=current_version,
-            include_raw=include_raw,
+        The former catalog source is no longer trusted. The method remains
+        callable so existing diagnostic callers receive an explicit error.
+        """
+        raise DreameLawnMowerConnectionError(
+            "Debug OTA catalog disabled: the source is no longer trusted."
         )
 
     async def async_get_app_map_objects(

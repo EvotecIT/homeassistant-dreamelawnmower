@@ -49,9 +49,7 @@ from .client import (
     render_app_map_payload_png,
 )
 from .debug_ota_catalog import (
-    DEBUG_OTA_LIST_URL,
     DEBUG_OTA_TRACKS,
-    build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
 from .device_code_guidance import mower_device_code_context
@@ -260,7 +258,6 @@ __all__ = [
     "MODEL_FEATURE_CAPABILITIES",
     "MODEL_NAME_MAP",
     "CAMERA_PROBE_PROPERTY_KEYS",
-    "DEBUG_OTA_LIST_URL",
     "DEBUG_OTA_TRACKS",
     "DEFAULT_COMMAND_TIMEOUT_US",
     "DEFAULT_LAN_FLV_PATH_TEMPLATE",
@@ -314,7 +311,6 @@ __all__ = [
     "build_jadx_command",
     "build_lan_video_probe_packet",
     "build_camera_probe_payload",
-    "build_debug_ota_catalog_url",
     "build_cloud_key_definition_summary",
     "build_cloud_property_history_summary",
     "build_cloud_property_summary",
