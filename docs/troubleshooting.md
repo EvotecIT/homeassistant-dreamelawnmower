@@ -15,8 +15,8 @@ the missing package but does not explain why installation failed.
 An error containing `failed to lookup address information` or `Name has no
 usable address` means the installer could not resolve the download hostname.
 For Python packages, check access to both `pypi.org` and `files.pythonhosted.org`.
-Downloading the integration through HACS only confirms access to its repository;
-Python dependencies are downloaded separately.
+Downloading the integration through Marketplace or HACS only confirms access to
+its repository; Python dependencies are downloaded separately.
 
 On Home Assistant OS, inspect DNS and network health from its terminal or VM
 console:
@@ -43,7 +43,8 @@ changes to a timeout, certificate error, or missing compatible package,
 include the new installer error so that failure can be investigated separately.
 
 If the missing requirement is `py-mini-racer`, update the integration through
-HACS and restart Home Assistant. Integration v0.2.108 and later use QuickJS-NG.
+Marketplace or HACS and follow Home Assistant's restart prompt. Integration
+v0.2.108 and later use QuickJS-NG.
 A download error for QuickJS-NG still needs the installer cause above.
 
 ## Collect integration diagnostics
