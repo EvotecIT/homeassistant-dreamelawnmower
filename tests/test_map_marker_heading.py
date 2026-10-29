@@ -1,5 +1,6 @@
 """Custom image markers follow verified mower yaw through the map projection."""
 
+import math
 from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
@@ -7,7 +8,18 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image, ImageDraw
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.legacy_map_visuals import (  # noqa: E501
+    _legacy_renderer,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_projection import (  # noqa: E501
+    vector_map_projection,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapImageDimensions,
+    Point,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
+    draw_position_marker,
     map_render_style,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
@@ -116,3 +128,61 @@ def test_client_map_view_passes_validated_heading_to_custom_marker():
         )
     dx, dy = nose_direction(view.image_png, position)
     assert abs(dx) < 1 and dy > 5
+
+
+@pytest.mark.parametrize("heading", [0, 30, 45, 90, 135, 180, 200, 270, 315, None])
+def test_legacy_custom_marker_matches_vector_heading(heading):
+    style = map_render_style(marker_image=marker_image())
+    renderer = _legacy_renderer(style=style, label_scale=1)
+    legacy = renderer.render_mower(
+        Point(100, 99, heading), 0, (200, 200),
+        MapImageDimensions(0, 0, 200, 200, 1), 28, 0, 1,
+    )
+    vector = Image.new("RGBA", (200, 200))
+    projected = vector_map_projection(0, 0, 200, 200)
+    draw_position_marker(
+        vector, ImageDraw.Draw(vector), (100, 100), style,
+        heading=projected.heading(heading) if heading is not None else None,
+    )
+    directions = []
+    for image in (legacy, vector):
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        dx, dy = nose_direction(buffer.getvalue())
+        length = math.hypot(dx, dy)
+        directions.append((dx / length, dy / length))
+    assert directions[0] == pytest.approx(directions[1], abs=0.04)
+    clockwise = projected.heading(heading) if heading is not None else 0
+    expected = (math.sin(math.radians(clockwise)), -math.cos(math.radians(clockwise)))
+    assert directions[0] == pytest.approx(expected, abs=0.04)
+
+
+@pytest.mark.parametrize("renderer_kind", ["legacy", "vector"])
+@pytest.mark.parametrize("heading", [270, 225])
+def test_custom_marker_keeps_aspect_ratio_and_smooth_edges(renderer_kind, heading):
+    # An opaque 1:2 body makes square distortion and NEAREST jaggies observable.
+    buffer = BytesIO()
+    Image.new("RGBA", (200, 400), "red").save(buffer, format="PNG")
+    style = map_render_style(marker_image=buffer.getvalue())
+    if renderer_kind == "legacy":
+        image = _legacy_renderer(style=style, label_scale=1).render_mower(
+            Point(100, 99, heading), 0, (200, 200),
+            MapImageDimensions(0, 0, 200, 200, 1), 28, 0, 1,
+        )
+    else:
+        image = Image.new("RGBA", (200, 200))
+        draw_position_marker(
+            image, ImageDraw.Draw(image), (100, 100), style,
+            heading=(270 - heading) % 360,
+        )
+    alpha = image.getchannel("A")
+    box = alpha.point(lambda value: 255 if value > 128 else 0).getbbox()
+    assert box is not None
+    if heading == 270:
+        assert (box[2] - box[0], box[3] - box[1]) == (14, 28)
+    else:
+        histogram = alpha.histogram()
+        assert sum(histogram[1:255]) > 0
+        # Rotating the canvas must not shrink the mower's physical footprint.
+        area = sum(value * count for value, count in enumerate(histogram)) / 255
+        assert area == pytest.approx(14 * 28, rel=0.08)

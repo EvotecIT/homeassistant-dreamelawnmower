@@ -38,6 +38,8 @@ Sponsorship is optional; these projects remain open source.
 Other integrations and dashboards we maintain:
 
 - [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) — A dashboard for mower state, maps, and controls.
+  The [custom mower picture](docs/maps.md#appearance-and-rotation) also appears
+  on its interactive map and turns with the mower, using the integration's setting.
 - [KEF](https://github.com/EvotecIT/homeassistant-kef) — Local control for modern and legacy speaker families.
 - [Devialet](https://github.com/EvotecIT/homeassistant-devialet) — Local speaker control, with Dione support.
 - [Siegenia](https://github.com/EvotecIT/homeassistant-siegenia) — Local control for supported window controllers.

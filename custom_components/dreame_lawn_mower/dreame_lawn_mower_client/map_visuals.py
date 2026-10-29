@@ -10,6 +10,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -278,13 +279,10 @@ def draw_position_marker(
                 if marker.width > 512 or marker.height > 512:
                     raise ValueError("Custom map marker dimensions exceed 512 pixels.")
                 marker.load()
-                marker_rgba = marker.convert("RGBA")
                 side = max(18, radius * 4)
-                marker_rgba.thumbnail((side, side), Image.Resampling.LANCZOS)
-                if heading is not None and math.isfinite(heading):
-                    marker_rgba = marker_rgba.rotate(
-                        -heading, resample=Image.Resampling.BICUBIC, expand=True,
-                    )
+                marker_rgba = render_custom_marker(
+                    marker, min(side, max(marker.size)), heading=heading,
+                )
                 image.alpha_composite(
                     marker_rgba,
                     (px - marker_rgba.width // 2, py - marker_rgba.height // 2),
@@ -305,8 +303,28 @@ def draw_position_marker(
     )
 
 
-def load_map_marker(www_root: Path, configured: Any) -> bytes | None:
-    """Load a constrained custom marker from Home Assistant's www directory."""
+def render_custom_marker(
+    marker: Image.Image, side: int, *, heading: float | None = None,
+) -> Image.Image:
+    """Fit nose-up artwork without distortion, rotating before downsampling.
+
+    Heading is clockwise from up. Scale from the unrotated dimensions so the
+    mower keeps its footprint when the expanded diagonal canvas grows.
+    """
+    ratio = side / max(marker.size)
+    result = marker.convert("RGBA")
+    if heading is not None and math.isfinite(heading):
+        result = result.rotate(
+            -heading, resample=Image.Resampling.BICUBIC, expand=True,
+        )
+    return result.resize(
+        (max(1, round(result.width * ratio)), max(1, round(result.height * ratio))),
+        resample=Image.Resampling.LANCZOS,
+    )
+
+
+def _map_marker_path(www_root: Path, configured: Any) -> Path | None:
+    """Resolve an allowed, bounded marker file inside Home Assistant's www."""
     if not isinstance(configured, str) or not configured.strip():
         return None
     relative = configured.strip()
@@ -315,19 +333,42 @@ def load_map_marker(www_root: Path, configured: Any) -> bytes | None:
     relative_path = Path(relative)
     if relative_path.is_absolute() or ".." in relative_path.parts:
         return None
-    root = www_root.resolve()
-    candidate = (root / relative_path).resolve()
-    if root not in candidate.parents or candidate.suffix.lower() not in {
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-    }:
-        return None
     try:
+        root = www_root.resolve()
+        candidate = (root / relative_path).resolve()
+        if root not in candidate.parents or candidate.suffix.lower() not in {
+            ".png", ".jpg", ".jpeg", ".webp",
+        }:
+            return None
         if not candidate.is_file() or candidate.stat().st_size > 1024 * 1024:
             return None
-        return candidate.read_bytes()
+        return candidate
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def load_map_marker(www_root: Path, configured: Any) -> bytes | None:
+    """Load a constrained custom marker from Home Assistant's www directory."""
+    candidate = _map_marker_path(www_root, configured)
+    if candidate is not None:
+        try:
+            return candidate.read_bytes()
+        except OSError:
+            pass
+    return None
+
+
+def map_marker_image_path(www_root: Path, configured: Any) -> str | None:
+    """Publish the same validated file as a same-origin Home Assistant URL."""
+    candidate = _map_marker_path(www_root, configured)
+    if candidate is None:
+        return None
+    try:
+        # Match the loader's read permission without loading the image on every
+        # overlay request. The URL never exposes the absolute filesystem path.
+        with candidate.open("rb"):
+            relative = candidate.relative_to(www_root.resolve()).as_posix()
+            return "/local/" + quote(relative)
     except OSError:
         return None
 
