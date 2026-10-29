@@ -10,7 +10,7 @@
 
 Bring your Dreame or MOVA robotic mower into Home Assistant. Start, pause, and
 send it home, mow just the zone you pick, see where it is on your garden map,
-and look back at every run, all without opening the vendor app.
+and look back at recent runs, all without opening the vendor app.
 
 ![Dreame A2 in Home Assistant with the Lawn Mower Card](https://raw.githubusercontent.com/EvotecIT/lovelace-lawn-mower-card/main/assets/lawn-mower-card-dashboard-preview-light.png)
 
@@ -27,7 +27,8 @@ The integration also works with standard Home Assistant cards.*
   on supported mowers.
 - **Schedules** you can switch on and off, plus notifications and ready-made
   automations, such as skipping a run when the lawn is wet.
-- **History** of recent runs with their maps, photos, and battery use.
+- **History** of recent runs with their maps and, where available, photos and
+  battery use.
 - **Live camera** on supported mowers.
 
 Works with the same account you use in the Dreamehome or MOVAhome app. Check
