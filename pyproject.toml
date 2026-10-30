@@ -15,7 +15,7 @@ dependencies = [
   "numpy",
   "paho-mqtt",
   "pillow",
-  "quickjs-ng==0.17.0.1",
+  "quickjs-ng==0.17.0.2",
   "pybase64",
   "pycryptodome",
   "python-miio",
