@@ -62,7 +62,8 @@ def map_camera_attributes(
         "map_cached": image_cached and not image_placeholder,
         "map_placeholder": not image_cached or image_placeholder,
         "map_source": None if view is None else view.source,
-        "map_has_image": False if view is None else view.has_image,
+        "map_has_image": (image_cached and not image_placeholder)
+        or (view is not None and view.has_image),
         "map_error": last_error or (None if view is None else view.error),
         "map_available": None if summary is None else summary["available"],
         "last_map_refresh": None if refreshed_at is None else refreshed_at.isoformat(),
