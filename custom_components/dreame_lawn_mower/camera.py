@@ -911,10 +911,10 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 self._map_cache.invalidate_view(drop_image=True)
                 self._map_refresh_pending = True
                 return None
-            self._map_cache.store_error(
-                safe_error,
-                source="app_maps_contact_sheet",
+            view = self._map_cache.last_view or DreameLawnMowerMapView(
+                source="app_maps_contact_sheet"
             )
+            self._map_cache.store_view(replace(view, error=safe_error))
             fallback_image = self._map_cache.last_image
             if fallback_image is None:
                 fallback_image = await self.hass.async_add_executor_job(

@@ -1,4 +1,4 @@
-"""Successful contact-sheet publication through the map camera boundary."""
+"""Contact-sheet publication and retention through the map camera boundary."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from custom_components.dreame_lawn_mower.map_attributes import map_camera_attrib
 from custom_components.dreame_lawn_mower.map_cache import DreameLawnMowerMapCameraCache
 
 
-def test_completed_contact_sheet_publishes_image_and_map_inventory(tmp_path) -> None:
-    """A rendered JPEG must not still advertise no image or unknown map count."""
+def test_contact_sheet_retains_image_and_inventory_after_refresh_failure(
+    tmp_path,
+) -> None:
+    """A later cloud failure keeps the last JPEG's inventory and exposes its error."""
     app_maps = {
         "map_count": 2,
         "current_map_index": 0,
@@ -79,3 +81,30 @@ def test_completed_contact_sheet_publishes_image_and_map_inventory(tmp_path) -> 
     assert attributes["app_available_map_count"] == 2
     assert [item["idx"] for item in attributes["app_maps"]] == [0, 1]
     assert all("payload" not in item for item in attributes["app_maps"])
+
+    async def fail_get_app_maps(**_kwargs):
+        raise TimeoutError("cloud timeout")
+
+    camera.coordinator.client.async_get_app_maps = fail_get_app_maps
+    fallback = asyncio.run(camera._async_refresh_and_render_map_image())
+    assert fallback == rendered
+    assert cache.last_image == rendered
+    failed_attributes = map_camera_attributes(
+        cache.last_view,
+        image_cached=cache.last_image is not None,
+        image_placeholder=cache.last_image_is_placeholder,
+        refreshed_at=cache.last_refresh_at,
+        last_error=cache.last_error,
+    )
+    assert failed_attributes["map_error"] == "cloud timeout"
+    for key in (
+        "map_cached",
+        "map_placeholder",
+        "map_has_image",
+        "app_map_count",
+        "app_current_map_index",
+        "app_available_map_count",
+        "app_created_map_count",
+        "app_maps",
+    ):
+        assert failed_attributes[key] == attributes[key], key
