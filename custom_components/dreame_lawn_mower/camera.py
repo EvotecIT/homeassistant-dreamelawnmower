@@ -48,6 +48,7 @@ from .coordinator_refresh import runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
+from .dreame_lawn_mower_client.client_map_helpers import _app_maps_view_metadata
 from .dreame_lawn_mower_client.feature_capabilities import (
     CAPABILITY_UNSUPPORTED,
     FEATURE_LIVE_VIDEO,
@@ -887,7 +888,10 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 self._map_refresh_pending = True
                 return None
             self._map_cache.store_view(
-                DreameLawnMowerMapView(source="app_maps_contact_sheet")
+                DreameLawnMowerMapView(
+                    source="app_maps_contact_sheet",
+                    app_maps=_app_maps_view_metadata(app_maps),
+                )
             )
             self._map_cache.store_image(image)
             self.async_write_ha_state()
