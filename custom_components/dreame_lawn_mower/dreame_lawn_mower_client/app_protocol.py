@@ -303,6 +303,7 @@ def _first_mapping_value(
 
 
 _STANDARD_HEARTBEAT_LENGTH: Final[int] = 20
+_MOVA_MOWING_HEARTBEAT_LENGTH: Final[int] = 21
 _A3_IDLE_HEARTBEAT_LENGTH: Final[int] = 22
 _A3_IDLE_HEARTBEAT_MAIN_STATE_NIBBLE: Final[int] = 1
 _A3_IDLE_HEARTBEAT_SUBSTATE: Final[int] = 0xFF
@@ -320,6 +321,17 @@ def _is_supported_heartbeat_frame(
         return False
     if len(raw) == _STANDARD_HEARTBEAT_LENGTH:
         return True
+    # LiDAX Ultra 1000 also reports a 21-byte native heartbeat. A supervised
+    # capture confirms the existing field offsets while mowing outside the
+    # station. Keep other states unclassified until their layouts are proven;
+    # in particular, never reinterpret runtime property 1.4 as a heartbeat.
+    if len(raw) == _MOVA_MOWING_HEARTBEAT_LENGTH:
+        return bool(
+            property_key == MOWER_RAW_STATUS_PROPERTY_KEY
+            and raw[12] & 0x0F == 5
+            and raw[13] == 35
+            and (raw[14] & 0x1C) >> 2 == 1
+        )
     # A3 firmware appends two tail bytes to raw status property 1.1. Only its
     # observed idle-in-station fields are decoded until supervised captures
     # prove other 22-byte states. The upper nibble at index 12 carries flags
