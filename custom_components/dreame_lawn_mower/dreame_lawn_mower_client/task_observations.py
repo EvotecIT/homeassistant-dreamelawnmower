@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
+from statistics import median
 from typing import Any
 
 from .map_inventory import map_revision_hash
@@ -185,6 +186,53 @@ class TaskObservations:
         }
         return len(self.runs) != previous
 
+    def battery_comparison(
+        self, detail: TaskDetail, previous: Iterable[TaskDetail]
+    ) -> dict[str, int | float] | None:
+        """Compare complete observations from recent runs on the same targets."""
+        signature = _battery_comparison_signature(detail)
+        start, area = detail.started_at, detail.area_sqm
+        if signature is None or start is None or area is None or area < 10:
+            return None
+        current = self._observed_battery_rate(detail)
+        if current is None:
+            return None
+        comparable: list[tuple[int, float]] = []
+        for candidate in previous:
+            when, candidate_area = candidate.started_at, candidate.area_sqm
+            if (
+                when is None
+                or candidate.ended_at is None
+                or candidate.ended_at > start
+                or not start - 60 * 86400 <= when < start
+                or candidate_area is None
+                or candidate_area < 10
+                or abs(candidate_area - area) > area * 0.25
+                or _battery_comparison_signature(candidate) != signature
+            ):
+                continue
+            rate = self._observed_battery_rate(candidate)
+            if rate is not None:
+                comparable.append((when, rate))
+        if len(comparable) < 5:
+            return None
+        baseline = [rate for _, rate in sorted(comparable, reverse=True)[:15]]
+        usual = median(baseline)
+        if current < usual * 1.2:
+            return None
+        return {
+            "baseline_count": len(baseline),
+            "usual_percentage_points_per_sqm": usual,
+            "increase_percent": round((current / usual - 1) * 100),
+        }
+
+    def _observed_battery_rate(self, detail: TaskDetail) -> float | None:
+        battery = self.for_task(detail)
+        if battery is None or battery["coverage"] != "complete":
+            return None
+        rate = finite_number(battery["percentage_points_per_sqm"])
+        return rate if rate and rate > 0 else None
+
     def for_task(self, detail: TaskDetail) -> dict[str, Any] | None:
         """Attach disjoint observation segments on the task's verified revision.
 
@@ -328,6 +376,25 @@ class TaskObservations:
                 )
         self.runs = restored
         self._current_key = None
+
+
+def _battery_comparison_signature(
+    detail: TaskDetail,
+) -> tuple[str, int, frozenset[int]] | None:
+    """Require an authoritative map and target identity for targeted runs."""
+    if detail.result != 1 or detail.map_revision is None or detail.mode is None:
+        return None
+    # Compare whole-map and zone tasks. History zone IDs alone do not identify
+    # an edge contour or a spot rectangle.
+    if detail.mode == 0:
+        return detail.map_revision, detail.mode, frozenset()
+    if detail.mode == 2 and detail.zone_results:
+        return (
+            detail.map_revision,
+            detail.mode,
+            frozenset(zone for zone, _ in detail.zone_results),
+        )
+    return None
 
 
 def battery_observation(

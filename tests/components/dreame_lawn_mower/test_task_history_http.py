@@ -1,5 +1,6 @@
 """Task history and photos through Home Assistant's real read-only auth stack."""
 
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -39,7 +40,7 @@ async def test_read_only_user_history_and_photo_signatures_are_path_scoped(
     owner = TaskHistoryOwner(hass, coordinator)
     coordinator.task_history = owner
     entry.runtime_data = coordinator
-    task = detail()
+    task = replace(detail(), obstacle_photo_pins=((0, 200, 300),))
     owner.async_read = AsyncMock(return_value=task)
     owner.history.photos[task.id] = (object(),)
     photo_bytes = b"\x89PNG\r\n\x1a\nprivate-photo"
@@ -62,6 +63,7 @@ async def test_read_only_user_history_and_photo_signatures_are_path_scoped(
     payload = await response.json()
     assert payload["schema_version"] == 1
     assert "ali_dreame" not in str(payload)
+    assert payload["obstacle_photo_pins"] == [[0, 200, 300]]
     photo_path = payload["photo_paths"][0]
     assert (await http.get(photo_path)).status == 401
     assert (await http.get(photo_path + "?" + signed.split("?", 1)[1])).status == 401

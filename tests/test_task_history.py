@@ -84,6 +84,25 @@ def test_historical_geometry_breaks_faults_and_settings_are_normalized():
     assert task_id("another-device", TaskSession(SUMMARY, 102, None)) != task.id
 
 
+def test_obstacle_photo_pins_require_a_verified_map_and_an_exact_photo_match():
+    raw = summary()
+    raw["photo_list"] = ["a.jpg", "b.jpg", "c.jpg"]
+    raw["ai_obstacle"] = [
+        [[10, 30], [20, 40], 80, 1, "b.jpg", False, 7],
+        [12, 22, 80, 1, "missing.jpg"],
+        [12, 22, 80, 1, "a.jpg"],
+        [30, 40, 80, 1, "a.jpg"],
+        [50, 60, 80, 1, "c.jpg", True, 8],
+    ]
+    session = TaskSession(SUMMARY, 102, START * 1000)
+    task = decode_task_detail("device", session, raw)
+    assert task.obstacle_photo_pins == ((1, 200, 300),)
+    assert "b.jpg" not in json.dumps(task.as_dict())
+    assert not decode_task_detail(
+        "device", session, {**raw, "md5": None}
+    ).obstacle_photo_pins
+
+
 def test_malformed_large_geometry_and_nonfinite_metrics_stay_unavailable():
     raw = summary()
     raw.update(areas=float("nan"), end=START - 1, time=True)
@@ -132,6 +151,54 @@ def test_history_downloads_only_discovered_sessions_and_reuses_valid_detail():
     asyncio.run(run())
 
 
+def test_legacy_cached_history_recovers_pins_without_losing_offline_details():
+    async def run():
+        raw = summary()
+        raw["photo_list"] = ["first.jpg", "task.jpg"]
+        cloud = _Cloud(
+            {SUMMARY: json.dumps(raw).encode()},
+            [_record(102, SUMMARY, START * 1000)],
+        )
+        client = _client(cloud)
+        client.descriptor = client._descriptor
+        client.descriptor.unique_id = "mower"
+        history = TaskHistory(client)
+        await history.async_refresh()
+        key = next(iter(history.sessions))
+        await history.async_detail(key)
+        record = history.export()
+        del record["tasks"][0]["summary"]["ai_obstacle"]
+
+        restored = TaskHistory(client)
+        restored.restore(record)
+        cloud.files[SUMMARY] = json.dumps(
+            {
+                "md5": HASH,
+                "ai_obstacle": [[12, 22, 80, 1, "task.jpg"]],
+                "photo_list": ["task.jpg", "first.jpg"],
+            }
+        ).encode()
+        offline = await restored.async_detail(key)
+        assert offline.photo_count == 2
+        assert not offline.obstacle_photo_pins
+        await restored.async_refresh()
+        updated = await restored.async_detail(key)
+        assert updated == replace(offline, obstacle_photo_pins=((1, 120, 220),))
+        assert [photo.file_name for photo in restored.photos[key]] == [
+            "first.jpg",
+            "task.jpg",
+        ]
+
+        cloud.files.clear()
+        round_trip = TaskHistory(client)
+        round_trip.restore(restored.export())
+        assert (await round_trip.async_detail(key)).obstacle_photo_pins == (
+            (1, 120, 220),
+        )
+
+    asyncio.run(run())
+
+
 def test_battery_excludes_charging_rises_offline_gaps_and_unknown_zero():
     samples = [
         BatterySample(START, 80, False, True),
@@ -161,6 +228,38 @@ def observe(history, at, level, **changes):
     )
     args.update(changes)
     return history.observe(**args)
+
+
+def test_battery_comparison_uses_only_earlier_complete_runs_for_the_same_zones():
+    history = TaskObservations()
+    current = detail()
+
+    def add_run(days_ago, drop, *, complete=True):
+        start = START - days_ago * 86400
+        run = replace(
+            current, id=str(days_ago), started_at=start, ended_at=start + 300
+        )
+        observe(history, start + (0 if complete else 30), 80, key=str(days_ago))
+        observe(history, start + 300, 80 - drop, key=str(days_ago))
+        return run
+
+    runs = [add_run(day, 12) for day in range(8, 3, -1)]
+    partial = add_run(3, 29, complete=False)
+    different_zone = replace(add_run(2, 29), zone_results=((9, 2),))
+    different_map = replace(add_run(1, 29), map_revision="b" * 32)
+    current = add_run(0, 18)
+
+    assert history.battery_comparison(
+        current, [*runs[:4], partial, different_zone, different_map, current]
+    ) is None
+    assert history.battery_comparison(
+        current, [*runs, partial, different_zone, different_map, current]
+    ) == {
+        "baseline_count": 5,
+        "usual_percentage_points_per_sqm": 0.0996,
+        "increase_percent": 50,
+    }
+    assert history.battery_comparison(replace(current, result=3), runs) is None
 
 
 def test_observations_survive_restart_without_replacing_first_settings():

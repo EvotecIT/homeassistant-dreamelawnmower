@@ -141,6 +141,11 @@ class TaskHistoryDetailView(HomeAssistantView):
         payload = detail.as_dict()
         payload["stale"] = owner.history.stale
         payload["battery"] = owner.battery_for_task(detail)
+        comparison = owner.observations.battery_comparison(
+            detail, owner.history.details.values()
+        )
+        if comparison is not None:
+            payload["battery_comparison"] = comparison
         payload["photo_paths"] = [
             f"{task_history_api_path(entry_id)}/{task_id}/photo/{index}"
             for index in range(detail.photo_count)
