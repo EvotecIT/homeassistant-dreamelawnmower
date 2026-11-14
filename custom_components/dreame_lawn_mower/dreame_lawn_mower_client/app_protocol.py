@@ -303,6 +303,7 @@ def _first_mapping_value(
 
 
 _STANDARD_HEARTBEAT_LENGTH: Final[int] = 20
+_MOVA_HEARTBEAT_LENGTH: Final[int] = 21
 _A3_IDLE_HEARTBEAT_LENGTH: Final[int] = 22
 _A3_IDLE_HEARTBEAT_MAIN_STATE_NIBBLE: Final[int] = 1
 _A3_IDLE_HEARTBEAT_SUBSTATE: Final[int] = 0xFF
@@ -320,6 +321,25 @@ def _is_supported_heartbeat_frame(
         return False
     if len(raw) == _STANDARD_HEARTBEAT_LENGTH:
         return True
+    # LiDAX Ultra 1000 captures confirm mowing outside the station and a
+    # paused-to-idle station transition after the owner ends the task in the
+    # app. Keep other states unclassified; never reinterpret runtime property
+    # 1.4 as a heartbeat. Docking alone must not erase a resumable session.
+    if len(raw) == _MOVA_HEARTBEAT_LENGTH:
+        return bool(
+            property_key == MOWER_RAW_STATUS_PROPERTY_KEY
+            and (
+                (
+                    raw[12] & 0x0F == 5
+                    and raw[13] == 35
+                    and (raw[14] & 0x1C) >> 2 == 1
+                )
+                or (
+                    raw[14] == 0
+                    and (raw[12] & 0x0F, raw[13]) in {(5, 36), (1, 0xFF)}
+                )
+            )
+        )
     # A3 firmware appends two tail bytes to raw status property 1.1. Only its
     # observed idle-in-station fields are decoded until supervised captures
     # prove other 22-byte states. The upper nibble at index 12 carries flags
