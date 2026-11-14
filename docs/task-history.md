@@ -43,6 +43,22 @@ verified map revision. Disjoint segments from a restart can belong to the same
 task while preserving the break between them. Competing, overlapping intervals
 remain ambiguous. A later map revision never labels earlier unverified evidence.
 
+## Higher than usual battery use
+
+Task History can flag battery use per square metre that is at least 20% above
+the median of five or more earlier runs. The comparison uses completed
+whole-map or zone runs with complete observations, the same verified map
+revision and mowing mode, and a similar cut area. Zone runs must match the
+reported zone set. It uses up to 15 already-loaded task summaries from the
+preceding 60 days. Open past runs in History to load their summaries if needed.
+
+## Obstacle photos on recorded maps
+
+A pin opens the matching photo when the task summary ties a specific obstacle
+position to a photo in its own album and identifies the map revision. The card
+uses the existing authenticated History viewer. Photos without a confirmed
+position remain available in the album.
+
 ## Storage and privacy
 
 The integration keeps the private task index and downloaded, normalized summaries

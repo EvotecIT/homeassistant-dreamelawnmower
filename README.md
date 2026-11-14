@@ -78,6 +78,17 @@ to find the package installer error and check DNS connectivity.
 2. Restart Home Assistant.
 3. Add **Dreame Lawn Mower** from **Settings → Devices & services**.
 
+### Add the optional dashboard card
+
+After the integration discovers your mower, install **Lawn Mower Card** from
+[Marketplace](https://my.home-assistant.io/redirect/marketplace_repository/?owner=EvotecIT&repository=lovelace-lawn-mower-card&category=plugin)
+on Home Assistant 2026.11 or newer, or from
+[HACS → Dashboard](https://my.home-assistant.io/redirect/hacs_repository/?owner=EvotecIT&repository=lovelace-lawn-mower-card&category=plugin)
+on earlier versions. Reload the dashboard, choose **Edit dashboard → Add card →
+Lawn Mower Card**, and select your mower. The card detects the map, history, and
+camera when the integration provides them. Standard Home Assistant cards can
+also control the mower.
+
 ## Removal
 
 1. Disable or update automations and dashboard cards that use this mower.
@@ -109,10 +120,7 @@ separate from entry storage and are not deleted by this integration.
    battery, and the available controls.
 4. Open **Configure** to adjust polling, maps, notifications, or live video.
 
-For a dashboard, install
-[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) separately
-and select your mower in its visual editor. It is optional: the integration
-also works with standard Home Assistant cards.
+For a dashboard with maps and history, [add Lawn Mower Card](#add-the-optional-dashboard-card).
 
 Live video requires a supported mower, a provisioned account, and a Linux
 x86_64 or aarch64 Home Assistant host. Opening the camera never starts the mower.

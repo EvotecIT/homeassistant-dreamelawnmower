@@ -8,9 +8,10 @@ import math
 import time
 from collections import OrderedDict
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any
 
+from .exceptions import DeviceException, DreameLawnMowerError
 from .map_inventory import map_revision_hash
 from .session_photos import (
     SESSION_EVENT_KEY,
@@ -88,6 +89,7 @@ class TaskDetail:
     photo_count: int
     recorded_settings: Mapping[str, int | float]
     per_zone_settings: bool
+    obstacle_photo_pins: tuple[tuple[int, int, int], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         """Serialize only the stable, vendor-independent history contract."""
@@ -136,6 +138,40 @@ def _tracks(value: Any, budget: list[int]) -> tuple[tuple[tuple[int, int], ...],
     if run:
         runs.append(_points(run, budget))
     return tuple(points for points in runs if points)
+
+
+def _obstacle_photo_pins(
+    entries: Any, photo_names: list[str]
+) -> tuple[tuple[int, int, int], ...]:
+    """Bind explicit obstacle filenames to the same summary's photo list."""
+    indices = {name: index for index, name in enumerate(photo_names)}
+    points: dict[int, set[tuple[int, int]]] = {}
+    if isinstance(entries, list):
+        for entry in entries[:MAX_MAP_FEATURES]:
+            if not isinstance(entry, list) or len(entry) < 5 or (
+                len(entry) > 5 and entry[5]
+            ):
+                continue
+            x, y, _, _, photo = entry[:5]
+            if not isinstance(photo, str) or photo not in indices:
+                continue
+            if not isinstance(x, list) and not isinstance(y, list):
+                x, y = [x], [y]
+            if (
+                not isinstance(x, list)
+                or not isinstance(y, list)
+                or not 0 < len(x) == len(y) <= 64
+                or any(_integer(value) is None for value in (*x, *y))
+            ):
+                continue
+            points.setdefault(indices[photo], set()).add(
+                (round(sum(x) / len(x)) * 10, round(sum(y) / len(y)) * 10)
+            )
+    return tuple(
+        (index, *next(iter(matches)))
+        for index, matches in points.items()
+        if len(matches) == 1
+    )
 
 
 def decode_task_detail(
@@ -198,6 +234,11 @@ def decode_task_detail(
             settings["mowing_height_cm"] = height / 10
         if efficiency is not None:
             settings["efficient_mode"] = efficiency
+    revision = map_revision_hash(summary.get("md5"))
+    photo_names = [
+        name for name in session_photo_names(summary)
+        if session_photo_object_name(session.object_name, name) is not None
+    ]
     return TaskDetail(
         task_id(device_id, session),
         start,
@@ -206,13 +247,15 @@ def decode_task_detail(
         finite_number(summary.get("areas")),
         task_mode(summary.get("mode", session.task)),
         _integer(summary.get("result")),
-        map_revision_hash(summary.get("md5")),
+        revision,
         tuple(features),
         zone_results,
         decoded_faults,
-        len(session_photo_names(summary)),
+        len(photo_names),
         settings,
         summary.get("pre_type") == 1,
+        _obstacle_photo_pins(summary.get("ai_obstacle"), photo_names)
+        if revision and features else (),
     )
 
 
@@ -224,6 +267,7 @@ class TaskHistory:
         self.sessions: OrderedDict[str, TaskSession] = OrderedDict()
         self.details: dict[str, TaskDetail] = {}
         self.photos: dict[str, tuple[SessionPhoto, ...]] = {}
+        self._legacy_photo_details: dict[str, float] = {}
         self.refreshed_at: float | None = None
         self.stale = False
         self.revision = 0
@@ -258,6 +302,10 @@ class TaskHistory:
         self.photos = {
             key: value for key, value in self.photos.items() if key in sessions
         }
+        self._legacy_photo_details = {
+            key: retry_at for key, retry_at in self._legacy_photo_details.items()
+            if key in sessions
+        }
         self.refreshed_at = time.monotonic()
         self.stale = False
         self.revision += 1
@@ -271,6 +319,8 @@ class TaskHistory:
             detail = self.details.get(key)
             if detail is not None:
                 summary = _summary_for_storage(detail, self.photos.get(key, ()))
+                if key in self._legacy_photo_details:
+                    del summary["ai_obstacle"]
                 size = len(json.dumps(summary, allow_nan=False).encode())
                 if size <= remaining:
                     row["summary"] = summary
@@ -316,18 +366,30 @@ class TaskHistory:
             self.sessions[key] = session
             summary = row.get("summary")
             if isinstance(summary, Mapping):
-                self._retain_detail(key, session, summary)
+                detail = self._retain_detail(key, session, summary)
+                if (
+                    "ai_obstacle" not in summary
+                    and detail.photo_count
+                    and detail.map_revision
+                    and detail.features
+                ):
+                    self._legacy_photo_details[key] = 0
         self.stale = bool(self.sessions)
         self.revision = 0
 
     async def async_detail(self, key: str) -> TaskDetail | None:
         """Download only a session already discovered for this mower."""
-        if key in self.details:
-            return self.details[key]
+        cached = self.details.get(key)
+        now = time.monotonic()
+        retry_at = self._legacy_photo_details.get(key)
+        if cached is not None and (retry_at is None or now < retry_at or self.stale):
+            return cached
         session = self.sessions.get(key)
         if session is None:
             return None
-        deadline = time.monotonic() + 30
+        deadline = now + 30
+        if retry_at is not None:
+            self._legacy_photo_details[key] = now + 300
 
         async def read(cloud: DreameCloudSession) -> Mapping[str, Any] | None:
             return await _async_read_session_summary(
@@ -337,10 +399,31 @@ class TaskHistory:
                 deadline=deadline,
             )
 
-        summary = await self.client._async_cloud_read(read)
+        try:
+            summary = await self.client._async_cloud_read(read)
+        except (DreameLawnMowerError, DeviceException, TimeoutError):
+            if cached is None:
+                raise
+            return cached
         if summary is None:
-            return None
-        return self._retain_detail(key, session, summary)
+            return cached
+        if cached is None:
+            return self._retain_detail(key, session, summary)
+        if (
+            self.details.get(key) is not cached
+            or map_revision_hash(summary.get("md5")) != cached.map_revision
+        ):
+            return cached
+
+        # Keep existing album indices stable for clients holding signed URLs.
+        pins = _obstacle_photo_pins(
+            summary.get("ai_obstacle"), [photo.file_name for photo in self.photos[key]]
+        )
+        enriched = replace(cached, obstacle_photo_pins=pins)
+        self.details[key] = enriched
+        self._legacy_photo_details.pop(key, None)
+        self.revision += 1
+        return enriched
 
     def _retain_detail(
         self,
@@ -401,4 +484,9 @@ def _summary_for_storage(
         if "mowing_height_cm" in settings or "efficient_mode" in settings
         else [],
         "photo_list": [photo.file_name for photo in photos],
+        "ai_obstacle": [
+            [x // 10, y // 10, None, None, photos[index].file_name]
+            for index, x, y in detail.obstacle_photo_pins
+            if 0 <= index < len(photos)
+        ],
     }
