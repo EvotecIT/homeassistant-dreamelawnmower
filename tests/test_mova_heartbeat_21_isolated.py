@@ -108,3 +108,40 @@ def test_existing_standard_and_a3_station_shapes_keep_working():
     a3[12:15] = [1, 255, 0]
     assert decode(a3).task_status == "idle"
     assert decode(a3).heartbeat_docked is True
+
+
+@pytest.mark.parametrize(
+    "status_bytes,status,active,resumable",
+    [([5, 36, 0], "paused", True, True), ([1, 255, 0], "idle", False, False)],
+)
+def test_observed_finish_transition_preserves_session_evidence(
+    status_bytes, status, active, resumable
+):
+    raw = frame()
+    raw[12:15] = status_bytes
+    result = decode(raw)
+    assert result.task_status == status
+    assert result.mowing_session_active is active
+    assert result.task_resumable is resumable
+    assert result.heartbeat_docked is True
+
+
+@pytest.mark.parametrize("status_bytes", [[5, 36, 0], [1, 255, 0]])
+def test_station_frames_can_supply_fresh_task_evidence(status_bytes):
+    raw = frame()
+    raw[12:15] = status_bytes
+    rows = [
+        {"siid": 2, "piid": 1, "code": 0, "value": 13},
+        {"siid": 1, "piid": 1, "code": 0, "value": raw},
+    ]
+    result = property_read.require_fresh_task_properties(
+        rows, types.DreameMowerPropertyMapping
+    )
+    assert result["heartbeat"] is rows[1]
+
+
+@pytest.mark.parametrize("status_bytes", [[5, 37, 0], [1, 255, 128], [5, 36, 4]])
+def test_unobserved_station_shapes_remain_unknown(status_bytes):
+    raw = frame()
+    raw[12:15] = status_bytes
+    assert decode(raw).task_status is None
