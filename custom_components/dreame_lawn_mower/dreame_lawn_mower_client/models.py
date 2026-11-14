@@ -1104,13 +1104,23 @@ def camera_stream_block_reason(snapshot: Any) -> str | None:
     if bool(raw_attributes.get("mapping")) or bool(raw_attributes.get("fast_mapping")):
         return "Camera stream handshake probe is blocked while mapping."
 
+    # The LiDAX Ultra 1000 owner confirmed live viewing during return in
+    # MOVAhome. Limit this exception to that model and an explicit normalized
+    # return state; a stale raw flag must not authorize an unknown activity.
+    descriptor = getattr(snapshot, "descriptor", None)
+    returning_video_supported = (
+        getattr(descriptor, "model", None) == "mova.mower.g2529c"
+        and state == "returning"
+        and activity in {"", "returning"}
+    )
     known_video_activity = (
-        bool(getattr(snapshot, "mowing", False))
+        returning_video_supported
+        or bool(getattr(snapshot, "mowing", False))
         or bool(getattr(snapshot, "paused", False))
         or state in {"mowing", "paused"}
         or activity in {"mowing", "paused"}
     )
-    if (
+    if not returning_video_supported and (
         bool(getattr(snapshot, "returning", False))
         or state == "returning"
         or activity == "returning"
