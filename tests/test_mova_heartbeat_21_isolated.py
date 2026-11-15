@@ -140,8 +140,54 @@ def test_station_frames_can_supply_fresh_task_evidence(status_bytes):
     assert result["heartbeat"] is rows[1]
 
 
-@pytest.mark.parametrize("status_bytes", [[5, 37, 0], [1, 255, 128], [5, 36, 4]])
+@pytest.mark.parametrize("status_bytes", [[5, 37, 0], [1, 255, 132], [5, 36, 4]])
 def test_unobserved_station_shapes_remain_unknown(status_bytes):
     raw = frame()
     raw[12:15] = status_bytes
     assert decode(raw).task_status is None
+
+
+def test_charge_completed_idle_frame_is_not_a_resumable_session():
+    raw = frame()
+    raw[12:15] = [1, 255, 128]
+    result = decode(raw)
+    assert result.task_status == "idle"
+    assert result.mowing_session_active is False
+    assert result.task_resumable is False
+    assert result.heartbeat_docked is True
+    assert "unexpected_length" not in result.notes
+
+
+@pytest.mark.parametrize("state_code", [0, -1, -4004, None])
+def test_charge_completed_requires_successful_fresh_state(state_code):
+    raw = frame()
+    raw[12:15] = [1, 255, 128]
+    rows = [{"siid": 1, "piid": 1, "code": 0, "value": raw}]
+    if state_code is not None:
+        rows.append({"siid": 2, "piid": 1, "code": state_code, "value": 13})
+    if state_code == 0:
+        assert property_read.require_fresh_task_properties(
+            rows, types.DreameMowerPropertyMapping
+        )["heartbeat"] is rows[0]
+    else:
+        with pytest.raises(errors.DeviceUpdateFailedException):
+            property_read.require_fresh_task_properties(
+                rows, types.DreameMowerPropertyMapping
+            )
+
+
+@pytest.mark.parametrize(
+    "status_bytes",
+    [[5, 36, 128], [5, 255, 128], [1, 36, 128], [1, 255, 129]],
+)
+def test_charge_completed_exception_does_not_accept_other_states(status_bytes):
+    raw = frame()
+    raw[12:15] = status_bytes
+    assert decode(raw).mowing_session_active is None
+
+
+@pytest.mark.parametrize("key", ["1.4", None])
+def test_charge_completed_runtime_is_not_heartbeat_evidence(key):
+    raw = frame()
+    raw[12:15] = [1, 255, 128]
+    assert decode(raw, key).mowing_session_active is None

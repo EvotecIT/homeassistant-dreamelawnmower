@@ -338,6 +338,14 @@ def _is_supported_heartbeat_frame(
                     raw[14] == 0
                     and (raw[12] & 0x0F, raw[13]) in {(5, 36), (1, 0xFF)}
                 )
+                or (
+                    # LiDAX capture after charge completion: the owner
+                    # confirmed no resumable task in MOVAhome. Only this
+                    # observed idle form is accepted, not other flag values.
+                    raw[12] & 0x0F == 1
+                    and raw[13] == 0xFF
+                    and raw[14] == 0x80
+                )
             )
         )
     # A3 firmware appends two tail bytes to raw status property 1.1. Only its
