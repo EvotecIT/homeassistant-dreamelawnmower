@@ -93,7 +93,7 @@ class DreameLawnMowerRefreshMixin:
         # Methods supplied by the concrete coordinator and its other bases.
         # These declarations do not shadow their runtime implementations.
         def _record_connectivity_failure(
-            self, error: BaseException | str | None
+            self, error: BaseException | str | None, *, retry: bool = True,
         ) -> DreameLawnMowerSnapshot | None: ...
 
         def _record_connectivity_success(
@@ -242,7 +242,8 @@ class DreameLawnMowerRefreshMixin:
                     )
                     if not snapshot.available:
                         retained = self._record_connectivity_failure(
-                            "Mower is temporarily offline."
+                            "Mower is temporarily offline.",
+                            retry=getattr(snapshot, "online", None) is not False,
                         )
                         if retained is not None:
                             outcome = "degraded"

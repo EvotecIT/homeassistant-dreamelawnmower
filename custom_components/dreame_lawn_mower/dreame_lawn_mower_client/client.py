@@ -684,7 +684,18 @@ class DreameLawnMowerClient(
 
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
-        device = await self._async_update_device()
+        from .client_presence import MowerOfflineError, async_cached_offline_snapshot
+
+        offline = await async_cached_offline_snapshot(self)
+        if offline is not None:
+            return offline
+        try:
+            device = await self._async_update_device()
+        except MowerOfflineError:
+            # Startup has authenticated the account and published only cloud
+            # presence. It has not initialized live properties or controls.
+            assert self._latest_snapshot is not None
+            return self._latest_snapshot
         info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
         device_info = info_raw.get("deviceInfo", {}) or {}
         refreshed_model = (
