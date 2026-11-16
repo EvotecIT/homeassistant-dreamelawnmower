@@ -335,6 +335,11 @@ def _is_supported_heartbeat_frame(
                     and (raw[14] & 0x1C) >> 2 == 1
                 )
                 or (
+                    # Observed LiDAX return after mowing, confirmed by fresh
+                    # STATE 2.1 = 5. Do not accept other returning flag shapes.
+                    raw[12] == 5 and raw[13] == 40 and raw[14] == 140
+                )
+                or (
                     raw[14] == 0
                     and (raw[12] & 0x0F, raw[13]) in {(5, 36), (1, 0xFF)}
                 )
