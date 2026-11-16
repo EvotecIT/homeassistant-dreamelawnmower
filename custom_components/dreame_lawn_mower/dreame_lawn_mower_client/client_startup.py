@@ -7,6 +7,7 @@ import time
 from threading import Event
 from typing import TYPE_CHECKING
 
+from .client_presence import require_online_startup
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_property_read import (
     apply_device_property_response_plan,
@@ -74,6 +75,8 @@ async def async_start_device(
                 raise DreameLawnMowerConnectionError(
                     "Cloud device information is unavailable"
                 )
+            ensure_active()
+            require_online_startup(client, info)
             authentication = cloud.authentication
 
             def initialize() -> None:

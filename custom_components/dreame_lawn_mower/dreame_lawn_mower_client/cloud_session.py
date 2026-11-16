@@ -16,6 +16,7 @@ from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_files import interim_file_params, interim_file_result
 from .cloud_history import history_params, history_result
+from .cloud_presence import cloud_device_online
 from .cloud_video import (
     VIDEO_READ_PATHS,
     VideoReadKind,
@@ -327,6 +328,10 @@ class DreameCloudSession:
         info = await self.async_get_device_info(did, deadline=deadline)
         if not info:
             return None
+        if cloud_device_online(info) is False:
+            # A stored mower cannot answer initial RPC. Its authenticated
+            # presence is sufficient; optional firmware enrichment can wait.
+            return info
         strings = self._strings
         path = "/".join(strings[index] for index in (23, 25, 30))
         try:

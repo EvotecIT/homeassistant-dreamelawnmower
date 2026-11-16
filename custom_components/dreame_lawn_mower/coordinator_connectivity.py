@@ -102,6 +102,8 @@ class DreameLawnMowerConnectivityMixin:
     def _record_connectivity_failure(
         self,
         error: BaseException | str | None,
+        *,
+        retry: bool = True,
     ) -> DreameLawnMowerSnapshot | None:
         """Record a link interruption and return safe retained state when fresh."""
         timer = getattr(self, "observed_mowing_timer", None)
@@ -123,8 +125,16 @@ class DreameLawnMowerConnectivityMixin:
                 len(CONNECTIVITY_RETRY_DELAYS_SECONDS) - 1,
             )
         ]
-        self._connectivity_retry_after_seconds = delay
-        self._schedule_connectivity_retry(delay)
+        self._connectivity_retry_after_seconds = delay if retry else None
+        if retry:
+            self._schedule_connectivity_retry(delay)
+        else:
+            # A powered-off mower needs ordinary presence polling, rather
+            # than the fast retry policy for a brief connection interruption.
+            self._cancel_pending_connectivity_retry()
+            self._connectivity_last_good_snapshot = None
+            self._connectivity_last_success_monotonic = None
+            return None
 
         snapshot: DreameLawnMowerSnapshot | None = getattr(
             self, "_connectivity_last_good_snapshot", None

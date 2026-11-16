@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
+from .cloud_presence import cloud_device_online
 from .models import DreameLawnMowerSnapshot, DreameLawnMowerStatusBlob
 
 RESUME_MOWING_REQUEST = {"m": "a", "p": 0, "o": 5}
@@ -223,7 +224,7 @@ def snapshot_with_cloud_presence(
     cloud_device_info: Mapping[str, Any],
 ) -> DreameLawnMowerSnapshot:
     """Apply authoritative cloud presence without exposing cached state as live."""
-    online = _optional_bool(cloud_device_info.get("online"))
+    online = cloud_device_online(cloud_device_info)
     if online is None:
         return snapshot
     return replace(
@@ -241,16 +242,3 @@ def snapshot_session_control_state(snapshot: DreameLawnMowerSnapshot) -> str:
     if session_active is True:
         return _ACTIVE_TASK_CONTROL_STATES.get(snapshot.task_status or "", "mowing")
     return snapshot.state
-
-
-def _optional_bool(value: Any) -> bool | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "on", "yes", "1"}:
-            return True
-        if normalized in {"false", "off", "no", "0"}:
-            return False
-        return None
-    return bool(value)

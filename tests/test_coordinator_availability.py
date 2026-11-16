@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from custom_components.dreame_lawn_mower import (
     coordinator as coordinator_module,
@@ -526,6 +526,29 @@ def test_offline_snapshot_expires_retained_state_after_grace() -> None:
         None,
         active=False,
     )
+
+
+def test_confirmed_offline_cannot_resurrect_last_online_state_after_cloud_failure():
+    from custom_components.dreame_lawn_mower.api import DreameLawnMowerConnectionError
+
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._record_connectivity_success(
+        SimpleNamespace(available=True, online=True, state="mowing"),
+    )
+    offline = SimpleNamespace(available=False, online=False, state="unknown")
+    coordinator.client = SimpleNamespace(
+        async_refresh=AsyncMock(return_value=offline),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.runtime_status_blob = {"status": "stale"}
+    assert asyncio.run(coordinator._async_update_data()) is offline
+    assert coordinator.runtime_status_blob is None
+    assert coordinator.connection_retry_after_seconds is None
+    coordinator.client.async_refresh.side_effect = DreameLawnMowerConnectionError(
+        "Cloud temporarily unreachable",
+    )
+    with pytest.raises(UpdateFailed, match="Cloud temporarily unreachable"):
+        asyncio.run(coordinator._async_update_data())
 
 
 async def _offline_snapshot(snapshot: SimpleNamespace) -> SimpleNamespace:

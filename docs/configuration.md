@@ -52,6 +52,25 @@ Diagnostic entities and specialized cameras may be disabled by default.
 Entity IDs depend on your device name and Home Assistant registry. Replace
 example IDs with the entities from your own mower.
 
+## Keep the integration loaded during winter storage
+
+The integration can start while the mower is powered off. When the authenticated
+Dreamehome or MOVAhome cloud explicitly reports the mower offline, setup finishes
+and the **Online** binary sensor stays available with its state **off**. Controls,
+battery readings, and live maps remain unavailable until fresh mower data returns.
+You can use Online in automations without disabling the integration for winter.
+
+While offline, the integration skips mower property requests, optional firmware
+lookups, and map hydration. It checks cloud presence at most once per minute,
+using the configured polling interval if that is longer. When the cloud reports
+the mower online, normal startup and fresh property reads resume automatically.
+You can increase the polling interval to reduce winter checks further.
+
+Failed logins, cloud request failures, and missing or unrecognized presence still
+report a connection/setup failure. They do not count as a confirmed powered-off
+mower. This behavior applies to both Dreame and MOVA accounts, without a
+model-specific winter setting. It does not change schedules or mower power.
+
 ## Integration options
 
 Open **Settings → Devices & services → Dreame Lawn Mower → Configure**.
