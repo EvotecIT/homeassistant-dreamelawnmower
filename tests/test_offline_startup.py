@@ -36,6 +36,7 @@ def test_powered_off_refresh_is_bounded_and_recovers_native_properties(
     monkeypatch, account, model, presence,
 ):
     strings = cloud_strings(account)
+    device_model = f"{account}.mower.{model}"
     mqtt = Mock()
     monkeypatch.setattr(protocol_cloud.mqtt_client, "Client", Mock(return_value=mqtt))
     online = presence
@@ -51,7 +52,7 @@ def test_powered_off_refresh_is_bounded_and_recovers_native_properties(
         if request.path == DEVICE_INFO_PATH:
             data = {
                 "did": "42", "online": online,
-                strings[8]: "device-owner", strings[35]: f"dreame.mower.{model}",
+                strings[8]: "device-owner", strings[35]: device_model,
                 strings[9]: "mqtt.example.invalid:8883", strings[10]: "{}",
             }
         elif request.path == "/" + "/".join(strings[i] for i in (23, 25, 30)):
@@ -73,7 +74,7 @@ def test_powered_off_refresh_is_bounded_and_recovers_native_properties(
             client = DreameLawnMowerClient(
                 **{**OPTIONS, "account_type": account}, session=session,
                 descriptor=DreameLawnMowerDescriptor(
-                    did="42", name="Garden", model=f"dreame.mower.{model}",
+                    did="42", name="Garden", model=device_model,
                     display_model=model, account_type=account, country="eu",
                 ),
             )
@@ -81,6 +82,7 @@ def test_powered_off_refresh_is_bounded_and_recovers_native_properties(
             client._ensure_device()._map_manager = None
             try:
                 snapshot = await client.async_refresh()
+                assert snapshot.descriptor.model == device_model
                 assert snapshot.online is False and snapshot.available is False
                 assert snapshot.state == snapshot.activity == "unknown"
                 assert snapshot.battery_level is None
@@ -100,6 +102,7 @@ def test_powered_off_refresh_is_bounded_and_recovers_native_properties(
                 recovered = await client.async_refresh()
                 assert recovered.available is True and recovered.online is True
                 assert recovered.battery_level == 55
+                assert recovered.descriptor.model == device_model
                 assert client._device._ready is True
                 assert rpc
             finally:
