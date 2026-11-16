@@ -252,7 +252,7 @@ def test_session_control_state_falls_back_without_heartbeat_evidence() -> None:
     assert snapshot_session_control_state(snapshot) == "returning"
 
 
-def test_cloud_presence_throttles_empty_refresh_after_cached_success(
+def test_cloud_presence_throttles_empty_refresh_without_reusing_cached_success(
     monkeypatch,
 ) -> None:
     client = _client()
@@ -272,16 +272,14 @@ def test_cloud_presence_throttles_empty_refresh_after_cached_success(
         lambda: 100.0,
     )
 
-    first = asyncio.run(client._async_get_cached_cloud_device_info())
-    second = asyncio.run(client._async_get_cached_cloud_device_info())
-
-    assert first == {"online": True}
-    assert second == {"online": True}
+    for _ in range(2):
+        with pytest.raises(DreameLawnMowerConnectionError, match="unavailable"):
+            asyncio.run(client._async_get_cached_cloud_device_info())
     assert calls == 1
     assert client._cloud_device_info_refreshed_at == 100.0
 
 
-def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
+def test_cloud_presence_throttles_failures_and_recovers_after_interval(monkeypatch):
     client = _client()
     calls = 0
 
@@ -304,9 +302,21 @@ def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
     else:
         raise AssertionError("Expected the first presence refresh to fail")
 
-    assert asyncio.run(client._async_get_cached_cloud_device_info()) is None
+    with pytest.raises(DreameLawnMowerConnectionError, match="presence unavailable"):
+        asyncio.run(client._async_get_cached_cloud_device_info())
     assert calls == 1
     assert client._cloud_device_info_refreshed_at == 100.0
+
+    async def recovered_refresh(*, language: str | None = None):
+        return {"online": True}
+
+    client.async_get_cloud_device_info = recovered_refresh
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
+        "time.monotonic", lambda: 161.0,
+    )
+    assert asyncio.run(client._async_get_cached_cloud_device_info()) == {"online": True}
+    assert client._cloud_device_info_error is None
 
 
 def test_cloud_presence_reuses_native_result_until_refresh_interval(monkeypatch):

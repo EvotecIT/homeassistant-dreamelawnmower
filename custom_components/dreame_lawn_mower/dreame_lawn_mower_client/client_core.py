@@ -167,6 +167,7 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
     _runtime_geometry_lock: RLock
     _latest_cloud_device_info: Mapping[str, Any] | None
     _cloud_device_info_refreshed_at: float
+    _cloud_device_info_error: DreameLawnMowerError | None
 
     async def _async_reconcile_ambiguous_mutation(
         self,
@@ -888,14 +889,24 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
             and now - self._cloud_device_info_refreshed_at
             < _CLOUD_PRESENCE_REFRESH_INTERVAL
         ):
+            if self._cloud_device_info_error is not None:
+                # Repeated polls retain the failure, without retrying HTTP or
+                # growing a traceback chain through cached re-raises.
+                raise self._cloud_device_info_error.with_traceback(None)
             return self._latest_cloud_device_info
 
-        info = await self.async_get_cloud_device_info(language="en")
-        if not isinstance(info, Mapping) or not info:
-            raise DreameLawnMowerConnectionError(
-                "Cloud device information is unavailable"
-            )
+        try:
+            info = await self.async_get_cloud_device_info(language="en")
+            if not isinstance(info, Mapping) or not info:
+                raise DreameLawnMowerConnectionError(
+                    "Cloud device information is unavailable"
+                )
+        except DreameLawnMowerError as err:
+            self._cloud_device_info_error = err
+            self._cloud_device_info_refreshed_at = time.monotonic()
+            raise
         self._latest_cloud_device_info = dict(info)
+        self._cloud_device_info_error = None
         self._cloud_device_info_refreshed_at = time.monotonic()
         return self._latest_cloud_device_info
 

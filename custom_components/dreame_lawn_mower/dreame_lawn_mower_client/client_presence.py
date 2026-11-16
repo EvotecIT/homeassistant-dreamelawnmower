@@ -60,7 +60,8 @@ def require_online_startup(
     client: DreameLawnMowerClient, info: Mapping[str, Any],
 ) -> None:
     """Only an explicit authenticated offline result may bypass initial RPC."""
+    client._latest_cloud_device_info = dict(info)
+    client._cloud_device_info_refreshed_at = time.monotonic()
+    client._cloud_device_info_error = None
     if offline_snapshot(client, info) is not None:
-        client._latest_cloud_device_info = dict(info)
-        client._cloud_device_info_refreshed_at = time.monotonic()
         raise MowerOfflineError("The mower is offline.")

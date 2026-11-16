@@ -17,10 +17,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
 
 
 async def test_offline_entry_loads_status_without_fast_retries_or_optional_reads(
-    hass, hass_client,
+    hass,
 ):
     assert await async_setup_component(hass, "http", {})
-    await hass_client()
     entry = MockConfigEntry(
         domain=DOMAIN, version=1, minor_version=2, unique_id="stored-mower",
         data={

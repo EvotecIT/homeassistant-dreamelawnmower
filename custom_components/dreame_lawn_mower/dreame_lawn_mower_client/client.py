@@ -598,6 +598,7 @@ class DreameLawnMowerClient(
         self._runtime_session_active: bool | None = None
         self._latest_cloud_device_info: Mapping[str, Any] | None = None
         self._cloud_device_info_refreshed_at = 0.0
+        self._cloud_device_info_error: DreameLawnMowerError | None = None
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
         self._app_map_object_cache_lock = _threading.Lock()
         self._app_map_download_lock = _threading.Lock()
