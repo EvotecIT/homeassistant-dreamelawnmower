@@ -110,20 +110,26 @@ def test_powered_off_refresh_is_bounded_and_recovers_native_properties(
 
 @pytest.mark.parametrize(
     "failure",
-    ["unknown", "malformed", "missing_flag", "missing", "authentication"],
+    ["unknown", "malformed", "missing_flag", "missing", "authentication", "transport"],
 )
+@pytest.mark.parametrize("stage", ["initial", "after_offline"])
 def test_offline_startup_does_not_hide_cloud_or_unknown_device_failures(
-    monkeypatch, failure,
+    monkeypatch, failure, stage,
 ):
     strings = cloud_strings("dreame")
     monkeypatch.setattr(protocol_cloud.mqtt_client, "Client", Mock())
+    stored = stage == "after_offline"
 
     async def handler(request):
         if request.path == strings[17]:
-            if failure == "authentication":
+            if failure == "authentication" and not stored:
                 return web.json_response({"error": "invalid_grant"}, status=401)
             return web.json_response({**login_response(strings), "uid": "account"})
         if request.path == DEVICE_INFO_PATH:
+            if failure == "authentication" and not stored:
+                return web.json_response({"error": "invalid_token"}, status=401)
+            if failure == "transport" and not stored:
+                return web.json_response({"error": "unavailable"}, status=503)
             data = None if failure == "missing" else {
                 "did": "42", "online": "unknown", strings[8]: "device-owner",
                 strings[35]: "dreame.mower.g2408",
@@ -133,6 +139,11 @@ def test_offline_startup_does_not_hide_cloud_or_unknown_device_failures(
                 data["online"] = []
             if failure == "missing_flag":
                 data.pop("online")
+            if stored:
+                data = {
+                    "did": "42", "online": False,
+                    strings[35]: "dreame.mower.g2408",
+                }
         elif request.path == "/" + "/".join(strings[i] for i in (23, 25, 30)):
             data = {strings[31]: {strings[32]: {"fw_ver": "4.3.6_1200"}}}
         else:
@@ -140,6 +151,7 @@ def test_offline_startup_does_not_hide_cloud_or_unknown_device_failures(
         return web.json_response({"code": 0, "data": data})
 
     async def scenario():
+        nonlocal stored
         async with server(monkeypatch, handler), ClientSession() as session:
             client = DreameLawnMowerClient(
                 **OPTIONS, session=session,
@@ -150,11 +162,18 @@ def test_offline_startup_does_not_hide_cloud_or_unknown_device_failures(
             )
             client._ensure_device()._map_manager = None
             try:
+                previous = None
+                if stored:
+                    previous = await client.async_refresh()
+                    assert previous.online is False
+                    stored = False
+                    client._cloud_device_info_refreshed_at -= 61
                 error = (DreameLawnMowerAuthError if failure == "authentication"
                          else DreameLawnMowerConnectionError)
-                with pytest.raises(error):
-                    await client.async_refresh()
-                assert client._latest_snapshot is None
+                for _ in range(2):
+                    with pytest.raises(error):
+                        await client.async_refresh()
+                assert client._latest_snapshot is previous
                 assert client._device._ready is False
             finally:
                 await client.async_close()

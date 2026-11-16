@@ -890,10 +890,13 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
         ):
             return self._latest_cloud_device_info
 
-        self._cloud_device_info_refreshed_at = now
         info = await self.async_get_cloud_device_info(language="en")
-        if isinstance(info, Mapping):
-            self._latest_cloud_device_info = dict(info)
+        if not isinstance(info, Mapping) or not info:
+            raise DreameLawnMowerConnectionError(
+                "Cloud device information is unavailable"
+            )
+        self._latest_cloud_device_info = dict(info)
+        self._cloud_device_info_refreshed_at = time.monotonic()
         return self._latest_cloud_device_info
 
     def _sync_resume_mowing(self) -> Any:
