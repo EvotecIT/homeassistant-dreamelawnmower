@@ -47,6 +47,12 @@ with backoff and rearming only after 30 seconds of consecutive progress, which
 also clears the old backoff deadline. Returning from the back/forward cache
 starts a fresh stall baseline without replenishing the retry budget.
 
+An explicitly recorded user pause also takes precedence over a retained media
+error. Before the first frame, play/pause intent uses the browser's transient
+user-activation signal so an initial/programmatic paused state can still time
+out. That startup distinction requires the User Activation API; ordinary pause
+handling after media is ready does not depend on it.
+
 The native dialog remains open. A reconnection can briefly interrupt playback
 and may exit the browser's native fullscreen mode. Only the configured entity
 is considered; another camera's dialog is ignored. No stream is opened when no

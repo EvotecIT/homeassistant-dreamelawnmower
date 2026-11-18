@@ -31,7 +31,7 @@ export class PlaybackWatch {
     if (s.seeking) this.seekingSince ??= now;
     else this.seekingSince = null;
     const recentSeek = this.seekingSince !== null && now - this.seekingSince < STALL_MS;
-    if (!s.visible || s.hidden || recentSeek || (s.paused && !s.pendingAutoplay && !s.error)) {
+    if (s.userPaused || !s.visible || s.hidden || recentSeek || (s.paused && !s.pendingAutoplay && !s.error)) {
       this.lastProgress = now;
       this.stableSince = null;
       this.lastTime = s.time;
@@ -134,14 +134,18 @@ export function startRecovery(doc, win) {
       if (!entry || entry.video !== video) {
         const budget = entry?.watch;
         entry?.dispose();
-        entry = { video, watch: new PlaybackWatch(now, budget), userPaused: false,
+        entry = { video, watch: new PlaybackWatch(now, budget), userPaused: false, userPlayed: false,
           generation: resumeGeneration };
         const current = entry;
         const pause = () => {
           // The initial paused state while waiting for metadata is not a user pause.
-          if (current.watch.hasPlayed || video.readyState >= 2) current.userPaused = true;
+          const startupUserPause = current.userPlayed && win.navigator?.userActivation?.isActive;
+          if (current.watch.hasPlayed || video.readyState >= 2 || startupUserPause) current.userPaused = true;
         };
-        const play = () => { current.userPaused = false; };
+        const play = () => {
+          current.userPaused = false;
+          current.userPlayed = Boolean(win.navigator?.userActivation?.isActive);
+        };
         video.addEventListener?.("pause", pause);
         video.addEventListener?.("play", play);
         entry.dispose = () => {
@@ -163,6 +167,7 @@ export function startRecovery(doc, win) {
         && style.visibility !== "hidden" && style.display !== "none";
       const action = entry.watch.sample({
         visible, hidden: doc.hidden, paused: video.paused, error: Boolean(video.error),
+        userPaused: entry.userPaused,
         pendingAutoplay: Boolean(video.autoplay && !entry.userPaused && !entry.watch.hasPlayed),
         seeking: video.seeking, time: video.currentTime,
         frames: Number.isFinite(frames) && frames >= 0 ? frames : null,

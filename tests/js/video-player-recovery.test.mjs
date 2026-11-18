@@ -185,7 +185,7 @@ function runtimeHarness() {
   const recovery = startRecovery(doc, win);
   return { tick: time => { now = time; recovery.tick(); }, handlers,
     get media() { return media; }, set media(value) { media = value; },
-    get resets() { return resets; }, video, stop: recovery.stop };
+    get resets() { return resets; }, video, win, stop: recovery.stop };
 }
 test("runtime does not mistake dropped-only frames for displayed playback", () => {
   const h = runtimeHarness(); h.tick(0);
@@ -227,5 +227,39 @@ test("runtime distinguishes initial autoplay from a user's pause after playback"
   h.media = h.video(); h.tick(46000);
   h.media.currentTime = 2; h.media.total = 20; h.tick(47000);
   h.media.paused = true; h.media.events.get('pause')?.(); h.tick(200000);
+  assert.equal(h.resets, 1); h.stop();
+});
+test("explicit user pause remains authoritative even with a retained media error", () => {
+  const watch = playing();
+  assert.equal(watch.sample(sample({ paused: true, error: true, userPaused: true }), 90000), null);
+  const unpaused = playing();
+  assert.equal(unpaused.sample(sample({ paused: true, error: true, userPaused: false, liveEdge: null }), 90000)?.type, "restart");
+});
+test("a user play then pause before metadata prevents startup recovery", () => {
+  const h = runtimeHarness();
+  h.win.navigator = { userActivation: { isActive: true } };
+  h.media.readyState = 0; h.media.currentTime = 0; h.media.total = 0; h.media.paused = true;
+  h.tick(0);
+  h.media.paused = false; h.media.events.get('play')();
+  h.media.paused = true; h.media.events.get('pause')();
+  h.tick(60000);
+  assert.equal(h.resets, 0); h.stop();
+});
+test("programmatic loading pauses still allow the startup timeout", () => {
+  const h = runtimeHarness();
+  h.win.navigator = { userActivation: { isActive: false } };
+  h.media.readyState = 0; h.media.currentTime = 0; h.media.total = 0; h.media.paused = true;
+  h.tick(0);
+  h.media.events.get('play')(); h.media.events.get('pause')();
+  h.tick(45000);
+  assert.equal(h.resets, 1); h.stop();
+});
+test("a later programmatic loading pause does not inherit an old user gesture", () => {
+  const h = runtimeHarness();
+  h.win.navigator = { userActivation: { isActive: true } };
+  h.media.readyState = 0; h.media.currentTime = 0; h.media.total = 0; h.media.paused = true;
+  h.tick(0); h.media.events.get('play')();
+  h.win.navigator.userActivation.isActive = false; h.media.events.get('pause')();
+  h.tick(45000);
   assert.equal(h.resets, 1); h.stop();
 });
