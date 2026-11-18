@@ -107,3 +107,7 @@ The camera does not expose the vendor's stored photo gallery or patrol movement.
 
 Maintainers working on provisioning, the runtime, or LAN behavior should use
 [Video transport and same-LAN research](video-transport.md).
+
+For a player that silently freezes while HLS segments still advance, see the
+[opt-in browser recovery example](video-player-recovery.md), including its
+limitations and removal instructions.
