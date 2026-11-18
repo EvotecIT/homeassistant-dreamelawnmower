@@ -35,11 +35,17 @@ It is not bundled into the integration release archive or automatically enabled.
 
 The resource polls only already-open players every two seconds. It detects a
 15-second lack of decoded frames (or playback-clock progress when frame counters
-are unavailable), first tries to catch up to the live edge, then reconnects the
-same HLS element using its normal disconnect/connect lifecycle. Initial media
-gets 45 seconds. A deliberate pause, hidden player or hidden document is not
+are unavailable). It seeks toward live only after playback has started and the
+seekable end is more than two seconds ahead. Otherwise it reconnects directly;
+this is expected, not a failed seek. If seeking does not restore progress, it
+reconnects the same HLS element using its normal disconnect/connect lifecycle.
+On HA 2026.11.2 this reloads the existing URL, rather than obtaining a fresh one.
+Initial media (including pending autoplay) and replacement media get 45 seconds.
+A deliberate pause, hidden player or hidden document is not
 restarted. A temporary seek gets a grace period. Retries are limited to three,
-with backoff and rearming after sustained progress.
+with backoff and rearming only after 30 seconds of consecutive progress, which
+also clears the old backoff deadline. Returning from the back/forward cache
+starts a fresh stall baseline without replenishing the retry budget.
 
 The native dialog remains open. A reconnection can briefly interrupt playback
 and may exit the browser's native fullscreen mode. Only the configured entity
@@ -60,7 +66,7 @@ file separately if it is no longer wanted.
 
 ## Run the isolated tests
 
-With Node.js 22 or newer, from the repository root:
+With Node.js 22.7.0 or newer, from the repository root:
 
 ```sh
 node --check docs/examples/video-player-recovery.js
