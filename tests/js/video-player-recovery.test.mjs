@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { PlaybackWatch, restartPlayer, findPlayers, startRecovery, TARGET_ENTITY } from "../../docs/examples/video-player-recovery.js";
 
 const sample = (overrides = {}) => ({
-  visible: true, hidden: false, paused: false, error: false, seeking: false,
+  visible: true, hidden: false, paused: false, seeking: false,
   time: 1, frames: 10, liveEdge: 20, ...overrides,
 });
 function playing() {
@@ -45,10 +45,10 @@ test("returning from background gets a fresh grace period", () => {
   watch.sample(sample({ hidden: true }), 90000);
   assert.equal(watch.sample(sample(), 91000), null);
 });
-test("initial connection has 45 seconds to produce media", () => {
+test("a player that never started stays untouched", () => {
   const watch = new PlaybackWatch(0);
   assert.equal(watch.sample(sample({ liveEdge: null }), 44000), null);
-  assert.equal(watch.sample(sample({ liveEdge: null }), 45000)?.type, "restart");
+  assert.equal(watch.sample(sample({ liveEdge: null }), 90000), null);
 });
 test("retries back off and stop after three failures", () => {
   const watch = playing();
@@ -72,10 +72,12 @@ test("standard reconnect keeps the player node and sibling order", () => {
   assert.deepEqual(events, [["disconnect", player], ["connect", player, sibling]]);
   assert.equal(restartPlayer({ isConnected: false }), false);
 });
-test("only the exact MOVA live entity is selected through open shadow roots", () => {
-  const wanted = { localName: "ha-hls-player", entityid: TARGET_ENTITY };
-  const other = { localName: "ha-hls-player", entityid: "camera.other" };
-  const root = { querySelectorAll: () => [other, { shadowRoot: { querySelectorAll: () => [wanted] } }] };
+test("only the configured camera's native dialog player is selected", () => {
+  const dialog = { localName: "more-info-camera" };
+  const wanted = { localName: "ha-hls-player", entityid: TARGET_ENTITY, getRootNode: () => ({ host: dialog }) };
+  const inline = { localName: "ha-hls-player", entityid: TARGET_ENTITY };
+  const other = { localName: "ha-hls-player", entityid: "camera.other", parentElement: dialog };
+  const root = { querySelectorAll: () => [inline, other, { shadowRoot: { querySelectorAll: () => [wanted] } }] };
   assert.deepEqual(findPlayers(root), [wanted]);
 });
 test("native dialog route scopes recovery when player entityid is absent", () => {
@@ -102,6 +104,7 @@ test("runtime restarts only the frozen native player and survives bfcache", () =
     getVideoPlaybackQuality: () => ({ totalVideoFrames: 10 }),
     seekable: { length: 0 } };
   const player = { localName: "ha-hls-player", entityid: TARGET_ENTITY, isConnected: true,
+    parentElement: { localName: "more-info-camera" },
     parentNode: { removeChild: () => { resets++; }, insertBefore: () => {} },
     getClientRects: () => [1], shadowRoot: { querySelector: () => video, querySelectorAll: () => [] } };
   const doc = { hidden: false, location: { search: "" }, querySelectorAll: () => [player] };
@@ -124,12 +127,6 @@ test("runtime restarts only the frozen native player and survives bfcache", () =
   assert.equal(resets, 1);
 });
 
-test("paused pending autoplay still reaches its startup timeout", () => {
-  const watch = new PlaybackWatch(0);
-  const pending = sample({ time: 0, frames: 0, paused: true, pendingAutoplay: true, liveEdge: null });
-  assert.equal(watch.sample(pending, 44000), null);
-  assert.equal(watch.sample(pending, 45000)?.type, "restart");
-});
 test("a seek jump without subsequent playback cannot become repeated seeks", () => {
   const watch = new PlaybackWatch(0);
   watch.sample(sample({ frames: null }), 0);
@@ -169,13 +166,12 @@ test("an explicit other entity wins over the target dialog route", () => {
 function runtimeHarness() {
   let now = 0, resets = 0;
   const handlers = new Map();
-  const video = () => ({ paused: false, autoplay: true, readyState: 4, error: null, seeking: false, currentTime: 1,
-    total: 10, dropped: 0, seekable: { length: 0 }, events: new Map(),
-    getVideoPlaybackQuality() { return { totalVideoFrames: this.total, droppedVideoFrames: this.dropped }; },
-    addEventListener(name, fn) { this.events.set(name, fn); },
-    removeEventListener(name) { this.events.delete(name); } });
+  const video = () => ({ paused: false, error: null, seeking: false, currentTime: 1,
+    total: 10, dropped: 0, seekable: { length: 0 },
+    getVideoPlaybackQuality() { return { totalVideoFrames: this.total, droppedVideoFrames: this.dropped }; } });
   let media = video();
   const player = { localName: "ha-hls-player", entityid: TARGET_ENTITY, isConnected: true,
+    parentElement: { localName: "more-info-camera" },
     parentNode: { removeChild: () => { resets++; }, insertBefore: () => {} },
     getClientRects: () => [1], shadowRoot: { querySelector: () => media, querySelectorAll: () => [] } };
   const doc = { hidden: false, location: { search: "" }, querySelectorAll: () => [player] };
@@ -185,30 +181,29 @@ function runtimeHarness() {
   const recovery = startRecovery(doc, win);
   return { tick: time => { now = time; recovery.tick(); }, handlers,
     get media() { return media; }, set media(value) { media = value; },
-    get resets() { return resets; }, video, win, stop: recovery.stop };
+    get resets() { return resets; }, video, stop: recovery.stop };
 }
 test("runtime does not mistake dropped-only frames for displayed playback", () => {
   const h = runtimeHarness(); h.tick(0);
-  h.media.currentTime = 2; h.media.total = 20; h.media.dropped = 10; h.tick(1000);
-  h.media.currentTime = 30; h.media.total = 40; h.media.dropped = 30; h.tick(46000);
+  h.media.currentTime = 2; h.media.total = 20; h.media.dropped = 0; h.tick(1000);
+  h.media.currentTime = 30; h.media.total = 40; h.media.dropped = 20; h.tick(16000);
   assert.equal(h.resets, 1); h.stop();
 });
-test("zero displayed frames remains a usable counter", () => {
-  const h = runtimeHarness(); h.media.total = h.media.dropped = 10; h.tick(0);
+test("zero displayed frames remain a usable counter", () => {
+  const h = runtimeHarness();
+  h.media.total = h.media.dropped = 10; h.tick(0);
   h.media.currentTime = 20; h.media.total = h.media.dropped = 30; h.tick(20000);
   h.media.currentTime = 50; h.media.total = h.media.dropped = 60; h.tick(45000);
-  assert.equal(h.resets, 1); h.stop();
+  assert.equal(h.resets, 0); h.stop();
 });
-test("a replacement video gets startup grace without replenishing retries", () => {
-  const h = runtimeHarness(); h.tick(0);
-  h.media.currentTime = 2; h.media.total = 20; h.tick(1000);
-  h.media = null; h.tick(30000);
-  h.media = h.video(); h.tick(60000);
-  assert.equal(h.resets, 0);
-  h.tick(105000); assert.equal(h.resets, 1);
-  for (const time of [106000, 152000, 153000, 214000, 215000, 400000]) {
-    if ([106000, 153000, 215000].includes(time)) h.media = h.video();
-    h.tick(time);
+test("a replacement video gets a fresh playback baseline and keeps the retry budget", () => {
+  const h = runtimeHarness();
+  for (const [attempt, start] of [0, 60000, 140000, 220000].entries()) {
+    h.media = h.video(); h.tick(start);
+    h.tick(start + 20000);
+    assert.equal(h.resets, attempt);
+    h.media.currentTime = 2; h.media.total = 20; h.tick(start + 21000);
+    h.tick(start + 36000);
   }
   assert.equal(h.resets, 3); h.stop();
 });
@@ -220,46 +215,12 @@ test("bfcache return gets a new baseline before the first resumed frame", () => 
   h.tick(90000);
   assert.equal(h.resets, 0); h.stop();
 });
-test("runtime distinguishes initial autoplay from a user's pause after playback", () => {
-  const h = runtimeHarness(); h.media.paused = true; h.media.readyState = 0;
-  h.media.total = 0; h.media.currentTime = 0; h.tick(0);
-  h.tick(45000); assert.equal(h.resets, 1);
-  h.media = h.video(); h.tick(46000);
-  h.media.currentTime = 2; h.media.total = 20; h.tick(47000);
-  h.media.paused = true; h.media.events.get('pause')?.(); h.tick(200000);
-  assert.equal(h.resets, 1); h.stop();
-});
-test("explicit user pause remains authoritative even with a retained media error", () => {
-  const watch = playing();
-  assert.equal(watch.sample(sample({ paused: true, error: true, userPaused: true }), 90000), null);
-  const unpaused = playing();
-  assert.equal(unpaused.sample(sample({ paused: true, error: true, userPaused: false, liveEdge: null }), 90000)?.type, "restart");
-});
-test("a user play then pause before metadata prevents startup recovery", () => {
-  const h = runtimeHarness();
-  h.win.navigator = { userActivation: { isActive: true } };
-  h.media.readyState = 0; h.media.currentTime = 0; h.media.total = 0; h.media.paused = true;
-  h.tick(0);
-  h.media.paused = false; h.media.events.get('play')();
-  h.media.paused = true; h.media.events.get('pause')();
-  h.tick(60000);
-  assert.equal(h.resets, 0); h.stop();
-});
-test("programmatic loading pauses still allow the startup timeout", () => {
-  const h = runtimeHarness();
-  h.win.navigator = { userActivation: { isActive: false } };
-  h.media.readyState = 0; h.media.currentTime = 0; h.media.total = 0; h.media.paused = true;
-  h.tick(0);
-  h.media.events.get('play')(); h.media.events.get('pause')();
-  h.tick(45000);
-  assert.equal(h.resets, 1); h.stop();
-});
-test("a later programmatic loading pause does not inherit an old user gesture", () => {
-  const h = runtimeHarness();
-  h.win.navigator = { userActivation: { isActive: true } };
-  h.media.readyState = 0; h.media.currentTime = 0; h.media.total = 0; h.media.paused = true;
-  h.tick(0); h.media.events.get('play')();
-  h.win.navigator.userActivation.isActive = false; h.media.events.get('pause')();
-  h.tick(45000);
+test("a paused player stays paused even if the media element has an error", () => {
+  const h = runtimeHarness(); h.tick(0);
+  h.media.currentTime = 2; h.media.total = 20; h.tick(1000);
+  h.media.paused = true; h.media.error = { code: 3 }; h.tick(90000);
+  assert.equal(h.resets, 0);
+  h.media.paused = false; h.tick(92000);
+  h.tick(105000);
   assert.equal(h.resets, 1); h.stop();
 });

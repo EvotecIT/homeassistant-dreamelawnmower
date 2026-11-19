@@ -1,12 +1,10 @@
 // Opt-in Lovelace example: set TARGET_ENTITY to your integration Live Video entity.
 export const TARGET_ENTITY = "camera.replace_with_your_live_video_entity";
 const STALL_MS = 15000;
-const STARTUP_MS = 45000;
 
 export class PlaybackWatch {
   constructor(now, budget = {}) {
     this.lastProgress = now;
-    this.started = now;
     this.lastTime = null;
     this.lastFrames = null;
     this.hasPlayed = false;
@@ -31,7 +29,7 @@ export class PlaybackWatch {
     if (s.seeking) this.seekingSince ??= now;
     else this.seekingSince = null;
     const recentSeek = this.seekingSince !== null && now - this.seekingSince < STALL_MS;
-    if (s.userPaused || !s.visible || s.hidden || recentSeek || (s.paused && !s.pendingAutoplay && !s.error)) {
+    if (!s.visible || s.hidden || s.paused || recentSeek) {
       this.lastProgress = now;
       this.stableSince = null;
       this.lastTime = s.time;
@@ -57,12 +55,11 @@ export class PlaybackWatch {
       return null;
     }
     this.stableSince = null;
-    const timeout = this.hasPlayed ? STALL_MS : STARTUP_MS;
-    if (now - this.lastProgress < timeout || now < this.retryAfter || this.retries >= 3) {
+    if (!this.hasPlayed || now - this.lastProgress < STALL_MS || now < this.retryAfter || this.retries >= 3) {
       return null;
     }
     this.lastProgress = now;
-    if (!this.seekTried && this.hasPlayed && s.liveEdge !== null && s.liveEdge > s.time + 2) {
+    if (!this.seekTried && s.liveEdge !== null && s.liveEdge > s.time + 2) {
       this.seekTried = true;
       this.seekBaselinePending = true;
       return { type: "seek", time: Math.max(0, s.liveEdge - 1) };
@@ -104,7 +101,7 @@ export function findPlayers(root, selectedEntity = null) {
         // The native dialog exposes its selected entity in HA's route. This also
         // works on frontend versions that don't expose an entityid player property.
         const entity = node.entityid;
-        if (entity ? entity === TARGET_ENTITY : selectedEntity === TARGET_ENTITY && inCameraDialog) {
+        if (inCameraDialog && (entity || selectedEntity) === TARGET_ENTITY) {
           found.push(node);
         }
       }
@@ -124,34 +121,15 @@ export function startRecovery(doc, win) {
     const selectedEntity = new URLSearchParams(doc.location.search).get("more-info-entity-id");
     const players = findPlayers(doc, selectedEntity);
     const active = new Set(players);
-    for (const [player, entry] of watches) {
-      if (!active.has(player)) { entry.dispose(); watches.delete(player); }
+    for (const player of watches.keys()) {
+      if (!active.has(player)) watches.delete(player);
     }
     for (const player of players) {
       const video = player.shadowRoot?.querySelector("video");
       if (!video) continue;
       let entry = watches.get(player);
       if (!entry || entry.video !== video) {
-        const budget = entry?.watch;
-        entry?.dispose();
-        entry = { video, watch: new PlaybackWatch(now, budget), userPaused: false, userPlayed: false,
-          generation: resumeGeneration };
-        const current = entry;
-        const pause = () => {
-          // The initial paused state while waiting for metadata is not a user pause.
-          const startupUserPause = current.userPlayed && win.navigator?.userActivation?.isActive;
-          if (current.watch.hasPlayed || video.readyState >= 2 || startupUserPause) current.userPaused = true;
-        };
-        const play = () => {
-          current.userPaused = false;
-          current.userPlayed = Boolean(win.navigator?.userActivation?.isActive);
-        };
-        video.addEventListener?.("pause", pause);
-        video.addEventListener?.("play", play);
-        entry.dispose = () => {
-          video.removeEventListener?.("pause", pause);
-          video.removeEventListener?.("play", play);
-        };
+        entry = { video, watch: new PlaybackWatch(now, entry?.watch), generation: resumeGeneration };
         watches.set(player, entry);
       }
       if (entry.generation !== resumeGeneration) {
@@ -166,9 +144,7 @@ export function startRecovery(doc, win) {
       const visible = player.isConnected && player.getClientRects().length > 0
         && style.visibility !== "hidden" && style.display !== "none";
       const action = entry.watch.sample({
-        visible, hidden: doc.hidden, paused: video.paused, error: Boolean(video.error),
-        userPaused: entry.userPaused,
-        pendingAutoplay: Boolean(video.autoplay && !entry.userPaused && !entry.watch.hasPlayed),
+        visible, hidden: doc.hidden, paused: video.paused,
         seeking: video.seeking, time: video.currentTime,
         frames: Number.isFinite(frames) && frames >= 0 ? frames : null,
         liveEdge: video.seekable.length ? video.seekable.end(video.seekable.length - 1) : null,
@@ -177,10 +153,9 @@ export function startRecovery(doc, win) {
       if (action.type === "seek") {
         try { video.currentTime = action.time; } catch { /* Retry via remount on next stall. */ }
       } else {
-        // Do not interpret cleanup-generated pause events as an intentional pause.
-        entry.dispose();
         restartPlayer(player);
-        watches.set(player, { ...entry, video: null });
+        // Wait for progress on the reconnected media while keeping this retry budget.
+        entry.video = null;
       }
     }
   };
@@ -190,7 +165,6 @@ export function startRecovery(doc, win) {
     win.clearInterval(interval);
     win.removeEventListener("pagehide", onPageHide);
     win.removeEventListener("pageshow", onPageShow);
-    for (const entry of watches.values()) entry.dispose();
     watches.clear();
   };
   // A bfcache page resumes its existing timers; stopping them on a persisted
