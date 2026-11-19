@@ -165,14 +165,17 @@ export function startRecovery(doc, win) {
     win.clearInterval(interval);
     win.removeEventListener("pagehide", onPageHide);
     win.removeEventListener("pageshow", onPageShow);
+    doc.removeEventListener("visibilitychange", resetStallTimer);
     watches.clear();
   };
   // A bfcache page resumes its existing timers; stopping them on a persisted
   // pagehide would permanently disable recovery when the user navigates back.
   const onPageHide = (event) => { if (!event.persisted) stop(); };
-  const onPageShow = (event) => { if (event.persisted) resumeGeneration++; };
+  const resetStallTimer = () => { resumeGeneration++; };
+  const onPageShow = (event) => { if (event.persisted) resetStallTimer(); };
   win.addEventListener("pagehide", onPageHide);
   win.addEventListener("pageshow", onPageShow);
+  doc.addEventListener("visibilitychange", resetStallTimer);
   return { stop, tick };
 }
 

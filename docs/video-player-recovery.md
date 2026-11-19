@@ -42,8 +42,8 @@ browser tab is in the background. If playback never starts, close and reopen
 the dialog. A reconnect can briefly interrupt playback or exit native
 fullscreen. The same player gets at most three reconnects, with backoff.
 Thirty seconds of consecutive playback progress reset the retry count.
-Restoring the page from the browser's back/forward cache resets the stall
-timer and preserves the retry count. Inline camera players, including the
+Returning to the tab or restoring the page from the browser's back/forward
+cache resets the stall timer and preserves the retry count. Inline camera players, including the
 Lawn Mower Card's camera panel, run independently of this example.
 
 This example relies on Home Assistant's frontend element names and native

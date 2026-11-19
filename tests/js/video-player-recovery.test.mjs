@@ -107,7 +107,9 @@ test("runtime restarts only the frozen native player and survives bfcache", () =
     parentElement: { localName: "more-info-camera" },
     parentNode: { removeChild: () => { resets++; }, insertBefore: () => {} },
     getClientRects: () => [1], shadowRoot: { querySelector: () => video, querySelectorAll: () => [] } };
-  const doc = { hidden: false, location: { search: "" }, querySelectorAll: () => [player] };
+  const doc = { hidden: false, location: { search: "" }, querySelectorAll: () => [player],
+    addEventListener: (name, handler) => handlers.set(name, handler),
+    removeEventListener: name => handlers.delete(name) };
   const win = { performance: { now: () => now }, setInterval: () => 1,
     clearInterval: () => { clears++; }, getComputedStyle: () => ({ visibility: "visible", display: "block" }),
     addEventListener: (name, handler) => handlers.set(name, handler),
@@ -174,12 +176,14 @@ function runtimeHarness() {
     parentElement: { localName: "more-info-camera" },
     parentNode: { removeChild: () => { resets++; }, insertBefore: () => {} },
     getClientRects: () => [1], shadowRoot: { querySelector: () => media, querySelectorAll: () => [] } };
-  const doc = { hidden: false, location: { search: "" }, querySelectorAll: () => [player] };
+  const doc = { hidden: false, location: { search: "" }, querySelectorAll: () => [player],
+    addEventListener: (name, handler) => handlers.set(name, handler),
+    removeEventListener: name => handlers.delete(name) };
   const win = { performance: { now: () => now }, setInterval: () => 1, clearInterval: () => {},
     getComputedStyle: () => ({ visibility: "visible", display: "block" }),
     addEventListener: (name, fn) => handlers.set(name, fn), removeEventListener: name => handlers.delete(name) };
   const recovery = startRecovery(doc, win);
-  return { tick: time => { now = time; recovery.tick(); }, handlers,
+  return { tick: time => { now = time; recovery.tick(); }, doc, handlers,
     get media() { return media; }, set media(value) { media = value; },
     get resets() { return resets; }, video, stop: recovery.stop };
 }
@@ -214,6 +218,18 @@ test("bfcache return gets a new baseline before the first resumed frame", () => 
   h.handlers.get('pageshow')?.({ persisted: true });
   h.tick(90000);
   assert.equal(h.resets, 0); h.stop();
+});
+test("return from a hidden tab gets a fresh stall timer even without background ticks", () => {
+  const h = runtimeHarness(); h.tick(0);
+  h.media.currentTime = 2; h.media.total = 20; h.tick(1000);
+  h.doc.hidden = true; h.handlers.get("visibilitychange")?.();
+  h.doc.hidden = false; h.handlers.get("visibilitychange")?.();
+  h.tick(90000);
+  assert.equal(h.resets, 0);
+  h.tick(105000);
+  assert.equal(h.resets, 1);
+  h.stop();
+  assert.equal(h.handlers.has("visibilitychange"), false);
 });
 test("a paused player stays paused even if the media element has an error", () => {
   const h = runtimeHarness(); h.tick(0);
